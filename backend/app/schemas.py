@@ -1,24 +1,16 @@
 """
-Pydantic-Schemas für KI-QMS API.
+Pydantic v2 kompatible Schemas für KI-QMS API.
 
 Dieses Modul definiert alle Datenvalidierungs-Schemas für die FastAPI-Anwendung
 mit umfassender Fehlerbehandlung und Dokumentation.
 
-Pydantic-Features verwendet:
-- Field Validation mit @validator
-- Automatic JSON Parsing für komplexe Felder
-- Nested Model Relationships
-- Custom Error Messages für bessere UX
-- Type Coercion für flexible API-Eingaben
-
-Fehlerbehandlung:
-- JSON-String-zu-Liste Konvertierung für Permission-Felder
-- Graceful Fallbacks bei Parse-Fehlern
-- Business Logic Validation (z.B. Approval Levels)
-- Ausführliche Error Messages für Frontend-Integration
+Pydantic v2 Features:
+- @field_validator statt @validator
+- ConfigDict statt Config Klassen
+- json_schema_extra statt schema_extra
 """
 
-from pydantic import BaseModel, EmailStr, validator, root_validator, Field
+from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
 from datetime import datetime, date
 from typing import Optional, List
 from .models import DocumentStatus, EquipmentStatus, DocumentType
@@ -28,53 +20,18 @@ import json
 # === INTEREST GROUP SCHEMAS ===
 
 class InterestGroupBase(BaseModel):
-    """
-    Basis-Schema für Interessensgruppen des 13-Stakeholder-Systems.
+    name: str = Field(..., min_length=2, max_length=100)
+    code: str = Field(..., min_length=2, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    group_permissions: Optional[List[str]] = Field(default_factory=list)
+    ai_functionality: Optional[str] = Field(None, max_length=300)
+    typical_tasks: Optional[str] = Field(None, max_length=300)
+    is_external: bool = Field(False)
+    is_active: bool = Field(True)
     
-    Repräsentiert organisatorische Einheiten mit spezifischen Berechtigungen
-    und KI-Funktionalitäten. Unterstützt sowohl interne Teams als auch
-    externe Stakeholder (Auditoren, Lieferanten).
-    
-    Geschäftslogik:
-    - Eindeutige Codes für API-Referenzierung
-    - JSON-Liste für granulare Berechtigungen
-    - KI-Funktionalitäten spezifisch pro Gruppe
-    - Unterscheidung intern/extern für Sicherheit
-    
-    Pydantic-Features:
-    - group_permissions: Automatische JSON-String-zu-Liste Konvertierung
-    - code: Format-Validierung (snake_case)
-    - Fallback-Values für robuste API-Nutzung
-    """
-    name: str = Field(..., min_length=2, max_length=100, 
-                      description="Vollständiger Gruppenname (z.B. 'Qualitätsmanagement')")
-    code: str = Field(..., min_length=2, max_length=50,
-                      description="Eindeutiger API-Code (z.B. 'quality_management')")
-    description: Optional[str] = Field(None, max_length=500,
-                                      description="Detaillierte Aufgabenbeschreibung")
-    group_permissions: Optional[List[str]] = Field(default_factory=list,
-                                                   description="Liste gruppen-spezifischer Berechtigungen")
-    ai_functionality: Optional[str] = Field(None, max_length=300,
-                                           description="Verfügbare KI-Features für diese Gruppe")
-    typical_tasks: Optional[str] = Field(None, max_length=300,
-                                        description="Typische Anwendungsfälle und Aufgaben")
-    is_external: bool = Field(False, description="True für externe Stakeholder (Auditoren, Lieferanten)")
-    is_active: bool = Field(True, description="Aktiv-Status (False = Soft-Delete)")
-    
-    @validator('group_permissions', pre=True, allow_reuse=True)
+    @field_validator('group_permissions', mode='before')
+    @classmethod
     def parse_group_permissions(cls, v):
-        """
-        Konvertiert JSON-String zu Liste für group_permissions.
-        
-        Behandelt verschiedene Eingabeformate graceful:
-        - JSON-String: '["perm1", "perm2"]' → ["perm1", "perm2"]  
-        - Liste: ["perm1", "perm2"] → ["perm1", "perm2"]
-        - None/Empty: → []
-        - Invalid JSON: → [] (mit Fallback)
-        
-        Diese Flexibilität ist essentiell, da SQLite JSON als TEXT speichert,
-        aber die API Listen erwartet.
-        """
         if v is None:
             return []
         if isinstance(v, str):
@@ -83,57 +40,29 @@ class InterestGroupBase(BaseModel):
             try:
                 parsed = json.loads(v)
                 if isinstance(parsed, list):
-                    return [str(item) for item in parsed]  # Ensure all strings
+                    return [str(item) for item in parsed]
                 else:
-                    return [str(parsed)]  # Single value to list
+                    return [str(parsed)]
             except (json.JSONDecodeError, TypeError):
-                # Fallback: Behandle als Comma-separated String
                 return [item.strip() for item in v.split(',') if item.strip()]
         elif isinstance(v, list):
-            return [str(item) for item in v]  # Ensure all strings
+            return [str(item) for item in v]
         else:
             return []
     
-    @validator('code')
+    @field_validator('code')
+    @classmethod
     def validate_code(cls, v):
-        """
-        Validiert Code-Format für API-Konsistenz.
-        
-        Requirements:
-        - snake_case Format (nur Kleinbuchstaben, Unterstriche)
-        - Keine Sonderzeichen außer '_'
-        - Eindeutigkeit wird auf DB-Ebene sichergestellt
-        """
         if not v.replace('_', '').isalnum() or v != v.lower():
-            raise ValueError('Code muss snake_case Format haben (z.B. "quality_management")')
+            raise ValueError('Code muss snake_case Format haben')
         if v.startswith('_') or v.endswith('_'):
             raise ValueError('Code darf nicht mit Unterstrichen beginnen/enden')
         return v
 
 class InterestGroupCreate(InterestGroupBase):
-    """
-    Schema für das Erstellen neuer Interessensgruppen.
-    
-    Für POST /api/interest-groups.
-    Erbt vollständige Validierung von InterestGroupBase.
-    
-    Besonderheiten:
-    - Alle Felder von InterestGroupBase verfügbar
-    - Automatische Code-Generierung aus Name möglich (Frontend)
-    - group_permissions können als JSON-String oder Liste übergeben werden
-    """
     pass
 
 class InterestGroupUpdate(BaseModel):
-    """
-    Schema für das Aktualisieren von Interessensgruppen.
-    
-    Alle Felder optional für flexible Partial Updates.
-    Für PUT /api/interest-groups/{id}.
-    
-    Erlaubt granulare Updates ohne vollständige Objektübertragung.
-    Besonders wichtig für große permission-Listen.
-    """
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     code: Optional[str] = Field(None, min_length=2, max_length=50)
     description: Optional[str] = Field(None, max_length=500)
@@ -143,11 +72,11 @@ class InterestGroupUpdate(BaseModel):
     is_external: Optional[bool] = None
     is_active: Optional[bool] = None
     
-    @validator('group_permissions', pre=True, allow_reuse=True)
+    @field_validator('group_permissions', mode='before')
+    @classmethod
     def parse_group_permissions(cls, v):
-        """Gleiche JSON-Parsing-Logik wie InterestGroupBase."""
         if v is None:
-            return None  # Unterschied: None für "nicht ändern"
+            return None
         if isinstance(v, str):
             if not v.strip():
                 return []
@@ -162,28 +91,14 @@ class InterestGroupUpdate(BaseModel):
             return []
 
 class InterestGroup(InterestGroupBase):
-    """
-    Vollständiges Schema für Interessensgruppen-Responses.
+    id: int
+    created_at: datetime
     
-    Erweitert InterestGroupBase um Metadaten für API-Antworten.
-    Verwendet von GET /api/interest-groups und nested in anderen Responses.
+    model_config = ConfigDict(from_attributes=True)
     
-    Pydantic Config:
-    - from_attributes=True: Ermöglicht SQLAlchemy ORM → Pydantic Konvertierung
-    - Automatische Feldnamen-Mapping zwischen DB und API
-    """
-    id: int = Field(..., description="Eindeutige Gruppen-ID")
-    created_at: datetime = Field(..., description="Zeitpunkt der Erstellung")
-    
-    @validator('group_permissions', pre=True, allow_reuse=True)
+    @field_validator('group_permissions', mode='before')
+    @classmethod
     def parse_group_permissions(cls, v):
-        """
-        Kritischer Validator für API-Response-Konsistenz.
-        
-        Dieser Validator löst das Hauptproblem aus den Server-Logs:
-        'Input should be a valid list' errors entstehen, wenn SQLite
-        JSON-Strings zurückgibt, aber das Schema Listen erwartet.
-        """
         if v is None:
             return []
         if isinstance(v, str):
@@ -198,73 +113,21 @@ class InterestGroup(InterestGroupBase):
             return v
         else:
             return []
-    
-    class Config:
-        from_attributes = True
-        schema_extra = {
-            "example": {
-                "id": 1,
-                "name": "Qualitätsmanagement",
-                "code": "quality_management",
-                "description": "QM-Freigaben, CAPA, interne Audits",
-                "group_permissions": ["all_rights", "final_approval", "gap_analysis"],
-                "ai_functionality": "Gap-Analyse & Normprüfung",
-                "typical_tasks": "QM-Freigaben, CAPA-Management, interne Audits",
-                "is_external": False,
-                "is_active": True,
-                "created_at": "2025-06-08T16:49:51.763170"
-            }
-        }
 
 # === USER SCHEMAS ===
 
 class UserBase(BaseModel):
-    """
-    Basis-Schema für Benutzer mit erweitertem Permission-System.
+    email: EmailStr = Field(...)
+    full_name: str = Field(..., min_length=2, max_length=200)
+    employee_id: Optional[str] = Field(None, max_length=50)
+    organizational_unit: Optional[str] = Field(None, max_length=100)
+    individual_permissions: Optional[List[str]] = Field(default_factory=list)
+    is_department_head: bool = Field(False)
+    approval_level: int = Field(1, ge=1, le=4)
     
-    Implementiert das Dual-Permission-Modell:
-    1. individual_permissions: Persönliche Berechtigungen (Abteilungsleiter, etc.)
-    2. Gruppen-Berechtigungen: Über UserGroupMembership → InterestGroup.group_permissions
-    
-    Organisationsstruktur:
-    - organizational_unit: Firmenhierarchie (unabhängig von funktionalen Gruppen)
-    - approval_level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager
-    - is_department_head: Spezielle Führungsberechtigungen
-    
-    Pydantic-Features:
-    - EmailStr: Automatische Email-Validierung
-    - JSON-Parser für individual_permissions (SQLite-Kompatibilität)
-    - Business Logic Validation für approval_level
-    """
-    email: EmailStr = Field(..., description="Email-Adresse für Login und Benachrichtigungen")
-    full_name: str = Field(..., min_length=2, max_length=200, 
-                          description="Vollständiger Name (Vor- und Nachname)")
-    employee_id: Optional[str] = Field(None, max_length=50,
-                                      description="Mitarbeiternummer/Personalnummer")
-    organizational_unit: Optional[str] = Field(None, max_length=100,
-                                              description="Organisatorische Einheit (unabhängig von Interest Groups)")
-    
-    # === PERMISSION SYSTEM ===
-    individual_permissions: Optional[List[str]] = Field(default_factory=list,
-                                                        description="Individuelle User-Berechtigungen (Abteilungsleiter-Rechte, etc.)")
-    is_department_head: bool = Field(False, description="Abteilungsleiter-Status für erweiterte Berechtigungen")
-    approval_level: int = Field(1, ge=1, le=4, description="Freigabe-Level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager")
-    
-    @validator('individual_permissions', pre=True, allow_reuse=True)
+    @field_validator('individual_permissions', mode='before')
+    @classmethod
     def parse_individual_permissions(cls, v):
-        """
-        Robuster JSON-Parser für individual_permissions.
-        
-        Behandelt SQLite-JSON-Storage graceful:
-        - SQLite speichert als TEXT: '["perm1", "perm2"]'
-        - API erwartet Liste: ["perm1", "perm2"]
-        - Fallback bei Parse-Fehlern zu leerer Liste
-        
-        Error Recovery:
-        - Invalid JSON → []
-        - None → []
-        - Non-list values → [str(value)]
-        """
         if v is None:
             return []
         if isinstance(v, str):
@@ -275,92 +138,34 @@ class UserBase(BaseModel):
                 parsed = json.loads(v)
                 return parsed if isinstance(parsed, list) else [str(parsed)]
             except (json.JSONDecodeError, TypeError):
-                # Fallback: Comma-separated behandeln
                 return [item.strip() for item in v.split(',') if item.strip()]
         return v if isinstance(v, list) else []
     
-    @validator('approval_level')
+    @field_validator('approval_level')
+    @classmethod
     def validate_approval_level(cls, v):
-        """
-        Validiert Freigabe-Level-Hierarchie.
-        
-        Business Rules:
-        - Level 1: Standard-Mitarbeiter
-        - Level 2: Teamleiter (kleine Freigaben)
-        - Level 3: Abteilungsleiter (Budget, Personal)
-        - Level 4: QM-Manager (System-weite Freigaben)
-        """
         if not 1 <= v <= 4:
-            raise ValueError('approval_level muss zwischen 1 und 4 liegen (1=Standard, 4=QM-Manager)')
+            raise ValueError('approval_level muss zwischen 1 und 4 liegen')
         return v
     
-    @validator('email')
+    @field_validator('email')
+    @classmethod
     def validate_email_business_rules(cls, v):
-        """
-        Erweiterte Email-Validierung für Business-Context.
-        
-        MVP: Flexible Regeln für Entwicklung
-        Production: Strengere Domain-Validierung möglich
-        """
         if '@' not in v:
             raise ValueError('Ungültiges Email-Format')
-        
-        # Optional: Domain-Whitelist für Production
-        # allowed_domains = ['company.com', 'contractor.com']
-        # domain = v.split('@')[1]
-        # if domain not in allowed_domains:
-        #     raise ValueError(f'Email-Domain {domain} nicht erlaubt')
-        
-        return v.lower()  # Normalisierung
+        return v.lower()
 
 class UserCreate(UserBase):
-    """
-    Schema für Benutzer-Erstellung mit Passwort-Validierung.
+    password: str = Field(..., min_length=8, max_length=128)
     
-    Für POST /api/users.
-    
-    Sicherheitsfeatures:
-    - Passwort-Strength-Validation
-    - Email-Eindeutigkeit (DB-Constraint)
-    - Automatische Passwort-Hashing (im Service)
-    
-    Wichtig: Passwort wird niemals in Responses zurückgegeben!
-    """
-    password: str = Field(..., min_length=8, max_length=128,
-                         description="Klartext-Passwort (wird gehashed gespeichert)")
-    
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password_strength(cls, v):
-        """
-        Passwort-Strength-Validation für Sicherheit.
-        
-        MVP-Requirements:
-        - Mindestens 8 Zeichen
-        - Production: Zusätzlich Komplexitäts-Regeln möglich
-        """
         if len(v) < 8:
             raise ValueError('Passwort muss mindestens 8 Zeichen lang sein')
-        
-        # Optional für Production:
-        # if not any(c.isupper() for c in v):
-        #     raise ValueError('Passwort muss mindestens einen Großbuchstaben enthalten')
-        # if not any(c.isdigit() for c in v):
-        #     raise ValueError('Passwort muss mindestens eine Zahl enthalten')
-        
         return v
 
 class UserUpdate(BaseModel):
-    """
-    Schema für flexibles Benutzer-Update.
-    
-    Alle Felder optional für Partial Updates.
-    Für PUT /api/users/{id}.
-    
-    Besonderheiten:
-    - Passwort-Updates über separaten Endpoint /api/users/{id}/password
-    - Granulare Permission-Updates möglich
-    - Soft-Delete über is_active
-    """
     email: Optional[EmailStr] = None
     full_name: Optional[str] = Field(None, min_length=2, max_length=200)
     employee_id: Optional[str] = Field(None, max_length=50)
@@ -370,11 +175,11 @@ class UserUpdate(BaseModel):
     approval_level: Optional[int] = Field(None, ge=1, le=4)
     is_active: Optional[bool] = None
     
-    @validator('individual_permissions', pre=True, allow_reuse=True)
+    @field_validator('individual_permissions', mode='before')
+    @classmethod
     def parse_individual_permissions(cls, v):
-        """Gleiche JSON-Parsing-Logik wie UserBase, aber None-aware für Updates."""
         if v is None:
-            return None  # Bedeutet "nicht ändern"
+            return None
         if isinstance(v, str):
             if not v.strip():
                 return []
@@ -386,123 +191,141 @@ class UserUpdate(BaseModel):
                 return [item.strip() for item in v.split(',') if item.strip()]
         return v if isinstance(v, list) else []
     
-    @validator('approval_level')
+    @field_validator('approval_level')
+    @classmethod
     def validate_approval_level(cls, v):
-        """Validierung nur wenn Wert gesetzt."""
         if v is not None and not 1 <= v <= 4:
             raise ValueError('approval_level muss zwischen 1 und 4 liegen')
         return v
 
 class User(UserBase):
-    """
-    Vollständiges User-Schema für API-Responses.
+    id: int
+    is_active: bool
+    created_at: datetime
     
-    Erweitert UserBase um Metadaten und Status-Informationen.
-    Verwendet in GET /api/users und als nested object.
-    
-    Wichtig: hashed_password wird NIE in API-Responses inkludiert!
-    """
-    id: int = Field(..., description="Eindeutige User-ID")
-    is_active: bool = Field(..., description="Account-Status (False = deaktiviert)")
-    created_at: datetime = Field(..., description="Account-Erstellungszeitpunkt")
-    
-    class Config:
-        from_attributes = True
-        schema_extra = {
-            "example": {
-                "id": 1,
-                "email": "max.kaufmann@company.com",
-                "full_name": "Max Kaufmann",
-                "employee_id": "EK001",
-                "organizational_unit": "Einkauf",
-                "individual_permissions": ["supplier_management", "purchase_approval"],
-                "is_department_head": True,
-                "approval_level": 3,
-                "is_active": True,
-                "created_at": "2025-06-08T16:49:51.763170"
-            }
-        }
+    model_config = ConfigDict(from_attributes=True)
 
-# === USER GROUP MEMBERSHIP SCHEMAS ===
+# === MEMBERSHIP SCHEMAS ===
 
 class UserGroupMembershipBase(BaseModel):
-    """
-    Basis-Schema für User-Group-Zuordnungen (Many-to-Many).
-    
-    Ermöglicht flexible Organisationsstrukturen:
-    - Ein User kann mehreren Gruppen angehören
-    - Verschiedene Rollen in verschiedenen Gruppen
-    - Temporäre Gruppenmitgliedschaften (is_active)
-    - Audit-Trail über joined_at
-    
-    Anwendungsfälle:
-    - QM-Manager in mehreren Produktgruppen
-    - Entwickler in verschiedenen Projektteams  
-    - Externe Auditoren mit temporärem Zugang
-    """
-    user_id: int = Field(..., description="Referenz auf User.id")
-    interest_group_id: int = Field(..., description="Referenz auf InterestGroup.id")
-    is_active: bool = Field(True, description="Aktiv-Status der Mitgliedschaft")
+    user_id: int
+    interest_group_id: int
+    is_active: bool = Field(True)
 
 class UserGroupMembershipCreate(UserGroupMembershipBase):
-    """
-    Schema für Erstellung neuer Group-Memberships.
-    
-    Für POST /api/user-group-memberships.
-    """
-    role_in_group: Optional[str] = Field(None, max_length=100,
-                                        description="Spezifische Rolle in der Gruppe (z.B. 'QM_COORDINATOR')")
+    role_in_group: Optional[str] = Field(None, max_length=100)
 
 class UserGroupMembership(UserGroupMembershipBase):
-    """
-    Vollständiges Schema für User-Group-Memberships.
-    
-    Inkludiert Metadaten und optionale nested objects für Performance.
-    """
-    id: int = Field(..., description="Eindeutige Membership-ID")
-    joined_at: datetime = Field(..., description="Zeitpunkt des Beitritts zur Gruppe")
-    role_in_group: Optional[str] = Field(None, description="Rolle innerhalb der Gruppe")
-    
-    # Nested objects für API-Convenience (Optional für Performance)
+    id: int
+    joined_at: datetime
+    role_in_group: Optional[str] = None
     user: Optional['User'] = None
     interest_group: Optional['InterestGroup'] = None
     
-    class Config:
-        from_attributes = True
-        schema_extra = {
-            "example": {
-                "id": 1,
-                "user_id": 1,
-                "interest_group_id": 2,
-                "is_active": True,
-                "joined_at": "2025-06-08T16:49:51.763170",
-                "role_in_group": "QM_COORDINATOR"
-            }
-        }
+    model_config = ConfigDict(from_attributes=True)
 
 # === DOCUMENT SCHEMAS ===
 
 class DocumentBase(BaseModel):
-    title: str
-    document_number: str
+    title: str = Field(..., min_length=2, max_length=255)
+    document_number: str = Field(..., max_length=50)
     document_type: DocumentType = DocumentType.OTHER
-    version: str = "1.0"
+    version: str = Field("1.0", max_length=20)
     status: DocumentStatus = DocumentStatus.DRAFT
-    content: Optional[str] = None
-    file_path: Optional[str] = None
-    tags: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=10000)
+    
+    # === PHYSISCHE DATEI-FELDER ===
+    file_path: Optional[str] = Field(None, max_length=500)
+    file_name: Optional[str] = Field(None, max_length=255)
+    file_size: Optional[int] = Field(None, ge=0)
+    file_hash: Optional[str] = Field(None, max_length=64)
+    mime_type: Optional[str] = Field(None, max_length=100)
+    
+    # === RAG-VORBEREITUNG ===
+    extracted_text: Optional[str] = Field(None, max_length=500000)
+    keywords: Optional[str] = Field(None, max_length=1000)
+    
+    # === VERSIONIERUNG ===
+    parent_document_id: Optional[int] = None
+    version_notes: Optional[str] = Field(None, max_length=1000)
+    
+    # === QM-METADATEN ===
+    tags: Optional[str] = Field(None, max_length=500)
+    remarks: Optional[str] = Field(None, max_length=2000)
+    chapter_numbers: Optional[str] = Field(None, max_length=200)
+    
+    # === NORM-SPEZIFISCHE FELDER ===
+    compliance_status: Optional[str] = Field(None, max_length=50)
+    priority: Optional[str] = Field(None, max_length=20)
+    scope: Optional[str] = Field(None, max_length=1000)
+    
+    @field_validator('version')
+    @classmethod
+    def validate_version(cls, v):
+        """Validiert Semantic Versioning Format (1.0, 1.1, 2.0, etc.)"""
+        import re
+        if not re.match(r'^\d+\.\d+(\.\d+)?$', v):
+            raise ValueError('Version muss im Format X.Y oder X.Y.Z sein (z.B. 1.0, 1.1, 2.0)')
+        return v
 
-class DocumentCreate(DocumentBase):
+class DocumentCreate(BaseModel):
+    title: str = Field(..., min_length=2, max_length=255)
+    document_type: DocumentType = DocumentType.OTHER
+    version: str = Field("1.0", max_length=20)
+    content: Optional[str] = Field(None, max_length=10000)
     creator_id: int
+    
+    # === OPTIONALE DATEI-FELDER ===
+    file_name: Optional[str] = Field(None, max_length=255)
+    file_size: Optional[int] = Field(None, ge=0)
+    mime_type: Optional[str] = Field(None, max_length=100)
+    
+    # === QM-METADATEN ===
+    remarks: Optional[str] = Field(None, max_length=2000)
+    chapter_numbers: Optional[str] = Field(None, max_length=200)
+    
+    # === NORM-SPEZIFISCHE FELDER ===
+    compliance_status: Optional[str] = Field(None, max_length=50)
+    priority: Optional[str] = Field(None, max_length=20)
+    scope: Optional[str] = Field(None, max_length=1000)
+    
+    @field_validator('version')
+    @classmethod
+    def validate_version(cls, v):
+        import re
+        if not re.match(r'^\d+\.\d+(\.\d+)?$', v):
+            raise ValueError('Version muss im Format X.Y oder X.Y.Z sein')
+        return v
 
 class DocumentUpdate(BaseModel):
-    title: Optional[str] = None
+    title: Optional[str] = Field(None, min_length=2, max_length=255)
     document_type: Optional[DocumentType] = None
-    version: Optional[str] = None
+    version: Optional[str] = Field(None, max_length=20)
     status: Optional[DocumentStatus] = None
-    content: Optional[str] = None
-    file_path: Optional[str] = None
-    tags: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=10000)
+    
+    # === QM-METADATEN ===
+    remarks: Optional[str] = Field(None, max_length=2000)
+    chapter_numbers: Optional[str] = Field(None, max_length=200)
+    version_notes: Optional[str] = Field(None, max_length=1000)
+    
+    # === WORKFLOW-FELDER ===
+    reviewed_by_id: Optional[int] = None
+    approved_by_id: Optional[int] = None
+    
+    # === NORM-SPEZIFISCHE FELDER ===
+    compliance_status: Optional[str] = Field(None, max_length=50)
+    priority: Optional[str] = Field(None, max_length=20)
+    scope: Optional[str] = Field(None, max_length=1000)
+    
+    @field_validator('version')
+    @classmethod
+    def validate_version(cls, v):
+        if v is not None:
+            import re
+            if not re.match(r'^\d+\.\d+(\.\d+)?$', v):
+                raise ValueError('Version muss im Format X.Y oder X.Y.Z sein')
+        return v
 
 class Document(DocumentBase):
     id: int
@@ -510,11 +333,46 @@ class Document(DocumentBase):
     created_at: datetime
     updated_at: datetime
     
-    # Nested objects
-    creator: Optional[User] = None
+    # === WORKFLOW-INFORMATIONEN ===
+    reviewed_by_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    approved_by_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    # === RELATIONSHIPS ===
+    creator: Optional[User] = None
+    reviewed_by: Optional[User] = None
+    approved_by: Optional[User] = None
+    parent_document: Optional['Document'] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# === FILE UPLOAD SCHEMAS ===
+
+class FileUploadResponse(BaseModel):
+    """Response für erfolgreichen Datei-Upload"""
+    file_path: str
+    file_name: str
+    file_size: int
+    file_hash: str
+    mime_type: str
+    uploaded_at: datetime
+    
+class DocumentWithFileCreate(BaseModel):
+    """Schema für Dokument-Erstellung mit Datei-Upload"""
+    # Dokument-Basis-Daten
+    title: str = Field(..., min_length=2, max_length=255)
+    document_type: DocumentType = DocumentType.OTHER
+    version: str = Field("1.0", max_length=20)
+    content: Optional[str] = Field(None, max_length=10000)
+    creator_id: int
+    
+    # QM-Metadaten
+    remarks: Optional[str] = Field(None, max_length=2000)
+    chapter_numbers: Optional[str] = Field(None, max_length=200)
+    
+    # Datei-Informationen (vom Frontend bereitgestellt)
+    file_upload_response: Optional[FileUploadResponse] = None
 
 # === NORM SCHEMAS ===
 
@@ -541,8 +399,7 @@ class Norm(NormBase):
     id: int
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # === EQUIPMENT SCHEMAS ===
 
@@ -576,8 +433,7 @@ class Equipment(EquipmentBase):
     next_calibration: Optional[datetime] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # === CALIBRATION SCHEMAS ===
 
@@ -604,15 +460,12 @@ class CalibrationUpdate(BaseModel):
 class Calibration(CalibrationBase):
     id: int
     created_at: datetime
-    
-    # Nested objects
     equipment: Optional[Equipment] = None
     responsible_user: Optional[User] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
-# === AUTHENTICATION SCHEMAS ===
+# === AUTH SCHEMAS ===
 
 class Token(BaseModel):
     access_token: str
@@ -627,7 +480,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
-# === RESPONSE SCHEMAS ===
+# === GENERIC SCHEMAS ===
 
 class GenericResponse(BaseModel):
     message: str

@@ -41,7 +41,7 @@ class DocumentType(enum.Enum):
     """
     Dokumenttypen für QMS-spezifische Dokumentenverwaltung.
     
-    Definiert 14 standardisierte Dokumenttypen nach ISO 13485 und MDR
+    Definiert 14+ standardisierte Dokumenttypen nach ISO 13485 und MDR
     für strukturierte Dokumentenverwaltung im Medizinprodukte-QMS.
     
     Kategorien:
@@ -50,6 +50,7 @@ class DocumentType(enum.Enum):
     - Analyse & Validierung: RISK_ASSESSMENT, VALIDATION_PROTOCOL
     - Prozesse: CALIBRATION_PROCEDURE, AUDIT_REPORT, CAPA_DOCUMENT
     - Training & Spezifikationen: TRAINING_MATERIAL, SPECIFICATION
+    - Normen & Standards: STANDARD_NORM, REGULATION, GUIDANCE_DOCUMENT
     - Flexibilität: OTHER für kundenspezifische Typen
     """
     QM_MANUAL = "QM_MANUAL"                      # Qualitätsmanagement-Handbuch (Hauptdokument)
@@ -65,6 +66,9 @@ class DocumentType(enum.Enum):
     CAPA_DOCUMENT = "CAPA_DOCUMENT"              # CAPA-Dokumentation (Corrective Action)
     TRAINING_MATERIAL = "TRAINING_MATERIAL"      # Schulungsunterlagen und -protokolle
     SPECIFICATION = "SPECIFICATION"              # Spezifikationen und Anforderungen
+    STANDARD_NORM = "STANDARD_NORM"              # Standards und Normen (ISO, IEC, DIN, EN)
+    REGULATION = "REGULATION"                    # Regulatorische Dokumente (MDR, FDA CFR)
+    GUIDANCE_DOCUMENT = "GUIDANCE_DOCUMENT"      # Leitfäden und Guidance-Dokumente
     OTHER = "OTHER"                              # Sonstige/kundenspezifische Dokumente
 
 class EquipmentStatus(enum.Enum):
@@ -169,7 +173,7 @@ class User(Base):
     
     # Relationships
     group_memberships = relationship("UserGroupMembership", back_populates="user", foreign_keys="UserGroupMembership.user_id")
-    documents_created = relationship("Document", back_populates="creator")
+    documents_created = relationship("Document", back_populates="creator", foreign_keys="Document.creator_id")
     calibrations_responsible = relationship("Calibration", back_populates="responsible_user")
 
 class UserGroupMembership(Base):
@@ -209,7 +213,7 @@ class UserGroupMembership(Base):
     user = relationship("User", back_populates="group_memberships")
     interest_group = relationship("InterestGroup", back_populates="user_memberships")
 
-# === DOKUMENTENMANAGEMENT ===
+# === DOKUMENTEN-MODELL: QMS-SPEZIFISCHE DOKUMENTENVERWALTUNG ===
 
 class Document(Base):
     """
@@ -224,7 +228,8 @@ class Document(Base):
     - 4-stufiger Freigabe-Workflow (DRAFT → REVIEW → APPROVED → OBSOLETE)
     - Vollständiger Audit-Trail (Ersteller, Genehmiger, Zeitstempel)
     - Versionsverwaltung mit Semantic Versioning
-    - Dateipfad-Referenzierung für physische Dokumente
+    - Physische Dateispeicherung mit Hash-Validierung
+    - RAG-ready Textindexierung
     
     Compliance:
     - ISO 13485 konforme Dokumentenkontrolle
@@ -246,8 +251,37 @@ class Document(Base):
     status = Column(Enum(DocumentStatus), default=DocumentStatus.DRAFT, index=True,
                    comment="Dokumentstatus aus DocumentStatus Enum")
     content = Column(Text, comment="Detaillierte Beschreibung des Dokumentinhalts")
+    
+    # === PHYSISCHE DATEI-MANAGEMENT ===
     file_path = Column(String(500), comment="Relativer Pfad zur physischen Datei")
+    file_name = Column(String(500), comment="Originaler Dateiname (erweitert für lange Namen)")
+    file_size = Column(Integer, comment="Dateigröße in Bytes")
+    file_hash = Column(String(64), comment="SHA-256 Hash für Integrität")
+    mime_type = Column(String(100), comment="MIME-Type der Datei")
+    
+    # === RAG-VORBEREITUNG ===
+    extracted_text = Column(Text, comment="Extrahierter Text für RAG/AI-Indexierung")
+    keywords = Column(String(1000), comment="Extrahierte Schlüsselwörter")
+    
+    # === VERSIONIERUNG ===
+    parent_document_id = Column(Integer, ForeignKey("documents.id"), comment="Referenz auf Vorgängerversion")
+    version_notes = Column(Text, comment="Änderungshinweise/Release Notes")
+    
+    # === QM-SPEZIFISCHE METADATEN ===
     tags = Column(String(500), comment="JSON string für Flexibilität")
+    remarks = Column(Text, comment="QM-Manager Hinweise/Bemerkungen")
+    chapter_numbers = Column(String(200), comment="Normkapitel (z.B. '4.2.3, 7.5.1')")
+    
+    # Norm-spezifische Felder
+    compliance_status = Column(String(50), comment="Compliance-Status für Normen: ZU_BEWERTEN, EINGEHALTEN, TEILWEISE, NICHT_ZUTREFFEND")
+    priority = Column(String(20), comment="Priorität für Normen: HOCH, MITTEL, NIEDRIG")
+    scope = Column(Text, comment="Anwendungsbereich/Relevanz für Normen")
+    
+    # === WORKFLOW & FREIGABEN ===
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), comment="Prüfer (Abteilungsleiter)")
+    reviewed_at = Column(DateTime, comment="Zeitpunkt der Prüfung")
+    approved_by_id = Column(Integer, ForeignKey("users.id"), comment="Genehmiger (QM-Manager)")
+    approved_at = Column(DateTime, comment="Zeitpunkt der Freigabe")
     
     # Metadata
     creator_id = Column(Integer, ForeignKey("users.id"), comment="Ersteller des Dokuments (User.id)")
@@ -256,6 +290,10 @@ class Document(Base):
     
     # Relationships
     creator = relationship("User", back_populates="documents_created", foreign_keys=[creator_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    parent_document = relationship("Document", remote_side=[id], back_populates="child_documents")
+    child_documents = relationship("Document", back_populates="parent_document")
     norm_mappings = relationship("DocumentNormMapping", back_populates="document")
 
 # === NORMEN & COMPLIANCE ===

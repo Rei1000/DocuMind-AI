@@ -38,9 +38,15 @@ python-dateutil==2.8.2
 # JSON Schema Validation
 jsonschema==4.20.0
 
-# File Handling (falls PDFs, etc.)
-PyPDF2==3.0.1
+# File Handling & Upload
 python-magic==0.4.27
+aiofiles==23.2.0
+python-multipart==0.0.6  # Für FastAPI File Uploads
+
+# Text Extraction für RAG
+PyPDF2==3.0.1
+python-docx==1.1.0
+openpyxl==3.1.2
 
 # Optional: AI/ML für Future Phases
 # sentence-transformers==2.2.2  # Für Embeddings

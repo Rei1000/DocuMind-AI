@@ -1,3 +1,7 @@
+# =============================================================================
+# KI-QMS .gitignore - GitHub Repository Configuration
+# =============================================================================
+
 # Python
 __pycache__/
 *.py[cod]
@@ -28,12 +32,15 @@ venv/
 ENV/
 env/
 .venv/
+.conda/
 
-# IDEs
+# IDEs & Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-*
+.atom/
 
 # OS Files
 .DS_Store
@@ -43,22 +50,41 @@ env/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Database Files
+# =============================================================================
+# KI-QMS SPECIFIC EXCLUDES
+# =============================================================================
+
+# Development/Internal Documentation (nicht für GitHub)
+CONTRIBUTING.md
+phase1.md
+phase2.md
+
+# Database Files (sensible Daten)
+*.db
 *.db-shm
 *.db-wal
 *.db.backup
+*.sqlite
 *.sqlite-shm
 *.sqlite-wal
+qms_mvp*.db*
 
-# Logs
+# Upload-Ordner (enthält potentiell sensible Dokumente)
+backend/uploads/
+uploads/
+
+# Logs & Runtime-Dateien
 *.log
 logs/
+pids/
+*.pid
 
-# Environment Variables
+# Environment Variables (sensible Konfiguration)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Temporary Files
 tmp/
@@ -66,27 +92,92 @@ temp/
 *.tmp
 *.temp
 
+# =============================================================================
+# FRAMEWORK SPECIFIC
+# =============================================================================
+
 # FastAPI specific
 .pytest_cache/
-
-
-# Documentation builds
-docs/_build/
-docs/.doctrees/
-
-# Coverage reports
+.mypy_cache/
+.coverage
 htmlcov/
+
+# Streamlit
+.streamlit/
+
+# =============================================================================
+# DEVELOPMENT & TESTING
+# =============================================================================
+
+# Testing
 .coverage
 .coverage.*
 coverage.xml
 *.cover
 .hypothesis/
+.pytest_cache/
+test-results/
 
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Documentation
-Documentation/
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+site/
 
-# Lokale Entwicklungsdateien (nicht ins Repo)
-local_only/ 
+# =============================================================================
+# SECURITY & COMPLIANCE
+# =============================================================================
+
+# Certificates & Keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backup files
+*.backup
+*.bak
+*.orig
+
+# Large files (sollten über LFS verwaltet werden)
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+
+# =============================================================================
+# CI/CD & DEPLOYMENT
+# =============================================================================
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Terraform (falls später verwendet)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# =============================================================================
+# MacOS SPECIFIC
+# =============================================================================
+.AppleDouble
+.LSOverride
+Icon?
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# =============================================================================
+# WINDOWS SPECIFIC  
+# =============================================================================
+*.lnk
+*.exe
+*.msi
+

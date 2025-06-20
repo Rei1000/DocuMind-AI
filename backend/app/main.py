@@ -16,12 +16,17 @@ Erstellt: 2024
 Lizenz: MIT
 """
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from dotenv import load_dotenv
 import os
+import hashlib
+import aiofiles
+from pathlib import Path
+import mimetypes
+from datetime import datetime
 
 # Lade Environment Variables aus .env Datei
 load_dotenv()
@@ -46,8 +51,310 @@ from .schemas import (
     Norm, NormCreate, NormUpdate,
     Equipment, EquipmentCreate, EquipmentUpdate,
     Calibration, CalibrationCreate, CalibrationUpdate,
+    FileUploadResponse, DocumentWithFileCreate,
     GenericResponse
 )
+from .text_extraction import extract_text_from_file, extract_keywords
+
+# ===== DATEI-UPLOAD KONFIGURATION =====
+UPLOAD_DIR = Path("uploads")  # Relativer Pfad vom backend/ Verzeichnis aus
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Maximale Dateigröße: 50MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
+
+# Erlaubte MIME-Types
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/markdown",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+}
+
+# ===== HILFSFUNKTIONEN FÜR DATEI-VERARBEITUNG =====
+
+async def save_uploaded_file(file: UploadFile, document_type: str) -> FileUploadResponse:
+    """
+    Speichert eine hochgeladene Datei und gibt Metadaten zurück.
+    
+    Args:
+        file: FastAPI UploadFile object
+        document_type: Dokumenttyp für Ordnerorganisation
+        
+    Returns:
+        FileUploadResponse mit Datei-Metadaten
+        
+    Raises:
+        HTTPException: Bei ungültigen Dateien oder Upload-Fehlern
+    """
+    # Validierungen
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Dateiname fehlt")
+    
+    # MIME-Type prüfen
+    mime_type = file.content_type
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Dateityp nicht erlaubt: {mime_type}. Erlaubt: PDF, DOC, DOCX, TXT, MD, XLS, XLSX"
+        )
+    
+    # Datei-Content lesen
+    content = await file.read()
+    file_size = len(content)
+    
+    # Größe prüfen
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Datei zu groß: {file_size} Bytes. Maximum: {MAX_FILE_SIZE} Bytes"
+        )
+    
+    # Hash berechnen für Integrität
+    file_hash = hashlib.sha256(content).hexdigest()
+    
+    # Eindeutigen Dateinamen generieren
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"{timestamp}_{file_hash[:8]}_{file.filename}"
+    
+    # Ordnerstruktur nach Dokumenttyp
+    type_dir = UPLOAD_DIR / document_type
+    type_dir.mkdir(exist_ok=True)
+    
+    file_path = type_dir / safe_filename
+    
+    # Datei speichern
+    async with aiofiles.open(file_path, 'wb') as f:
+        await f.write(content)
+    
+    # Relative Pfad für Datenbank (fix für das --reload Problem)
+    relative_path = str(file_path)
+    
+    return FileUploadResponse(
+        file_path=relative_path,
+        file_name=file.filename,
+        file_size=file_size,
+        file_hash=file_hash,
+        mime_type=mime_type,
+        uploaded_at=datetime.utcnow()
+    )
+
+def extract_smart_title_and_description(text: str, filename: str) -> tuple[str, str]:
+    """
+    Extrahiert intelligenten Titel und Beschreibung aus Dokumenttext.
+    
+    Sucht nach typischen Norm-Titeln und Mustern:
+    - ISO/IEC/DIN/EN Normen-Nummern
+    - Titel in den ersten Zeilen
+    - Medizinprodukte-spezifische Begriffe
+    
+    Args:
+        text: Extrahierter Text (erste 3000 Zeichen)
+        filename: Original-Dateiname als Fallback
+        
+    Returns:
+        (title, description): Extrahierter Titel und Beschreibung
+    """
+    import re
+    
+    if not text or len(text.strip()) < 10:
+        # Fallback zu Dateiname
+        clean_name = filename.replace('.pdf', '').replace('.docx', '').replace('.doc', '')
+        return clean_name[:200], "Automatisch generiert aus Dateiname"
+    
+    # Erst 3000 Zeichen für Performance
+    text_sample = text[:3000]
+    lines = [line.strip() for line in text_sample.split('\n') if line.strip()]
+    
+    # Pattern für Normen-Titel (ISO, DIN, IEC, EN, etc.)
+    norm_patterns = [
+        r'((?:ISO|IEC|DIN|EN)\s+(?:ISO\s+)?[\d\-]+(?:\:\d+)?(?:\+\w+\s+\d+)?(?:\+\w+\s+\d+)?)',
+        r'(ISO\s+\d+(?:\-\d+)*(?:\:\d+)?)',
+        r'(IEC\s+\d+(?:\-\d+)*(?:\:\d+)?)',
+        r'(DIN\s+EN\s+(?:ISO\s+)?\d+(?:\-\d+)*(?:\:\d+)?)',
+        r'(EN\s+(?:ISO\s+)?\d+(?:\-\d+)*(?:\:\d+)?)'
+    ]
+    
+    extracted_title = ""
+    extracted_description = ""
+    
+    # Suche nach Norm-Nummer
+    norm_number = ""
+    for pattern in norm_patterns:
+        for line in lines[:20]:  # Erste 20 Zeilen
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                norm_number = match.group(1).strip()
+                break
+        if norm_number:
+            break
+    
+    # Suche nach Titel-Zeilen (oft nach der Norm-Nummer)
+    title_candidates = []
+    for i, line in enumerate(lines[:25]):  # Erste 25 Zeilen
+        line_clean = line.strip()
+        
+        # Skip sehr kurze oder sehr lange Zeilen
+        if len(line_clean) < 10 or len(line_clean) > 200:
+            continue
+            
+        # Skip Zeilen mit nur Zahlen/Codes
+        if re.match(r'^[\d\s\-\+\.]+$', line_clean):
+            continue
+            
+        # Bevorzuge Zeilen mit QMS/Medizinprodukte-Keywords
+        qms_keywords = ['medizinprodukte', 'medical device', 'qualitätsmanagement', 'quality management', 
+                       'risk management', 'software', 'validation', 'sterilisation', 'biokompatibilität']
+        
+        # Priorisiere Zeilen mit Norm-Nummer
+        if norm_number and norm_number.lower() in line_clean.lower():
+            title_candidates.append((line_clean, 100))  # Höchste Priorität
+        elif any(keyword in line_clean.lower() for keyword in qms_keywords):
+            title_candidates.append((line_clean, 80))   # Hohe Priorität
+        elif len(line_clean) > 20 and len(line_clean) < 150:
+            title_candidates.append((line_clean, 50))   # Mittlere Priorität
+    
+    # Besten Titel wählen
+    if title_candidates:
+        title_candidates.sort(key=lambda x: x[1], reverse=True)
+        extracted_title = title_candidates[0][0]
+        
+        # Kombiniere mit Norm-Nummer falls verfügbar
+        if norm_number and norm_number.lower() not in extracted_title.lower():
+            extracted_title = f"{norm_number} - {extracted_title}"
+    else:
+        # Fallback: Verwende Norm-Nummer oder Dateiname
+        extracted_title = norm_number if norm_number else filename.replace('.pdf', '').replace('.docx', '')
+    
+    # Beschreibung generieren
+    description_lines = []
+    for line in lines[1:15]:  # Zeilen 2-15 für Beschreibung
+        if len(line) > 20 and len(line) < 300:
+            if line.lower() not in extracted_title.lower():  # Avoid duplicate
+                description_lines.append(line)
+                if len(description_lines) >= 3:  # Max 3 Zeilen
+                    break
+    
+    extracted_description = " ".join(description_lines)[:500] if description_lines else "Automatisch extrahiert aus Dokumentinhalt"
+    
+    # Titel kürzen falls zu lang
+    if len(extracted_title) > 200:
+        extracted_title = extracted_title[:197] + "..."
+        
+    return extracted_title, extracted_description
+
+def extract_text_from_file(file_path: Path, mime_type: str) -> str:
+    """
+    Extrahiert Text aus Dateien für RAG-Indexierung.
+    
+    Args:
+        file_path: Pfad zur Datei
+        mime_type: MIME-Type der Datei
+        
+    Returns:
+        Extrahierter Text oder leerer String
+    """
+    try:
+        if mime_type == "text/plain" or mime_type == "text/markdown":
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        
+        elif mime_type == "application/pdf":
+            try:
+                import PyPDF2
+                with open(file_path, 'rb') as file:
+                    reader = PyPDF2.PdfReader(file)
+                    text = ""
+                    for page in reader.pages:
+                        text += page.extract_text() + "\n"
+                    return text.strip()
+            except Exception as pdf_error:
+                return f"[PDF-Extraktion fehlgeschlagen: {str(pdf_error)}]"
+        
+        elif mime_type in ["application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                
+                text_parts = []
+                # Absätze extrahieren
+                for paragraph in doc.paragraphs:
+                    if paragraph.text.strip():
+                        text_parts.append(paragraph.text)
+                
+                # Tabellen extrahieren
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text for cell in row.cells)
+                        text_parts.append(row_text)
+                        
+                return "\n".join(text_parts)
+            except Exception as word_error:
+                return f"[Word-Extraktion fehlgeschlagen: {str(word_error)}]"
+        
+        elif mime_type in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]:
+            try:
+                import openpyxl
+                workbook = openpyxl.load_workbook(file_path)
+                text_parts = []
+                
+                for sheet_name in workbook.sheetnames:
+                    sheet = workbook[sheet_name]
+                    text_parts.append(f"=== {sheet_name} ===")
+                    
+                    for row in sheet.iter_rows(values_only=True):
+                        row_text = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                        if row_text.strip():
+                            text_parts.append(row_text)
+                
+                return "\n".join(text_parts)
+            except Exception as excel_error:
+                return f"[Excel-Extraktion fehlgeschlagen: {str(excel_error)}]"
+        
+        else:
+            return f"[Text-Extraktion für {mime_type} noch nicht implementiert]"
+        
+    except Exception as e:
+        return f"[Fehler bei Text-Extraktion: {str(e)}]"
+
+def generate_document_number(document_type: str) -> str:
+    """
+    Generiert eine eindeutige Dokumentennummer.
+    
+    Format: [TYPE]-[YYYY]-[COUNTER]
+    Beispiel: SOP-2024-001, QM_MANUAL-2024-001
+    """
+    from datetime import datetime
+    current_year = datetime.now().year
+    
+    # Typ-Abkürzungen für Dokumentnummern
+    type_prefixes = {
+        "QM_MANUAL": "QMH",
+        "SOP": "SOP",
+        "WORK_INSTRUCTION": "WI",
+        "FORM": "FRM",
+        "SPECIFICATION": "SPEC",
+        "RISK_ASSESSMENT": "RA",
+        "VALIDATION_PROTOCOL": "VAL",
+        "CALIBRATION_PROCEDURE": "CAL",
+        "AUDIT_REPORT": "AUD",
+        "CAPA_DOCUMENT": "CAPA",
+        "TRAINING_MATERIAL": "TRN",
+        "STANDARD_NORM": "STD",
+        "REGULATION": "REG",
+        "OTHER": "DOC"
+    }
+    
+    prefix = type_prefixes.get(document_type, "DOC")
+    
+    # Einfacher Counter (für MVP - später aus DB)
+    import random
+    counter = random.randint(1, 999)
+    
+    return f"{prefix}-{current_year}-{counter:03d}"
 
 # ===== ANWENDUNGSINITIALISIERUNG =====
 
@@ -85,10 +392,14 @@ app = FastAPI(
 )
 
 # ===== CORS-KONFIGURATION =====
-# Erlaubt Frontend-Zugriff von React Development Server
+# Erlaubt Frontend-Zugriff von Streamlit und React Development Server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React Frontend
+    allow_origins=[
+        "http://localhost:3000", "http://127.0.0.1:3000",  # React Frontend
+        "http://localhost:8501", "http://127.0.0.1:8501",  # Streamlit Frontend
+        "http://192.168.178.160:8501"  # Streamlit Network URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],  # GET, POST, PUT, DELETE, OPTIONS
     allow_headers=["*"],  # Content-Type, Authorization, etc.
@@ -1439,116 +1750,57 @@ async def get_documents(
     
     Lädt eine paginierte Liste aller QMS-Dokumente mit optionalen Filtern
     für Typ, Status und Volltextsuche.
-    
-    Args:
-        skip (int): Anzahl zu überspringender Datensätze. Default: 0
-        limit (int): Maximale Anzahl zurückzugebender Datensätze. Default: 20, Max: 100
-        document_type (Optional[str]): Filter nach Dokumenttyp (z.B. "QM_MANUAL", "SOP")
-        status (Optional[str]): Filter nach Status ("DRAFT", "REVIEW", "APPROVED", "OBSOLETE")
-        search (Optional[str]): Volltextsuche in Titel und Beschreibung
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        List[Document]: Liste der gefilterten Dokumente
-        
-    Example Response:
-        ```json
-        [
-            {
-                "id": 1,
-                "title": "Qualitätsmanagement-Handbuch",
-                "document_type": "QM_MANUAL",
-                "description": "Hauptdokument des QM-Systems nach ISO 13485",
-                "version": "2.1",
-                "status": "APPROVED",
-                "file_path": "/documents/qm-manual-v2.1.pdf",
-                "created_by": 1,
-                "approved_by": 2,
-                "created_at": "2024-01-15T10:30:00Z",
-                "approved_at": "2024-01-20T14:15:00Z"
-            },
-            {
-                "id": 3,
-                "title": "SOP-001: Lieferantenbewertung",
-                "document_type": "SOP",
-                "description": "Standardverfahren zur Bewertung und Qualifikation von Lieferanten",
-                "version": "1.3",
-                "status": "APPROVED",
-                "file_path": "/documents/sop-001-supplier-evaluation-v1.3.pdf",
-                "created_by": 3,
-                "approved_by": 2,
-                "created_at": "2024-01-10T09:20:00Z",
-                "approved_at": "2024-01-18T16:30:00Z"
-            }
-        ]
-        ```
-        
-    Available Document Types:
-        - QM_MANUAL: Qualitätsmanagement-Handbuch
-        - SOP: Standard Operating Procedure
-        - WORK_INSTRUCTION: Arbeitsanweisung
-        - FORM: Formular/Vorlage
-        - USER_MANUAL: Benutzerhandbuch
-        - SERVICE_MANUAL: Servicehandbuch
-        - RISK_ASSESSMENT: Risikoanalyse
-        - VALIDATION_PROTOCOL: Validierungsprotokoll
-        - CALIBRATION_PROCEDURE: Kalibrierverfahren
-        - AUDIT_REPORT: Auditbericht
-        - CAPA_DOCUMENT: CAPA-Dokumentation
-        - TRAINING_MATERIAL: Schulungsunterlagen
-        - SPECIFICATION: Spezifikation
-        - OTHER: Sonstige Dokumente
-        
-    Available Statuses:
-        - DRAFT: Entwurf
-        - REVIEW: In Prüfung
-        - APPROVED: Freigegeben
-        - OBSOLETE: Veraltet
-        
-    Raises:
-        HTTPException: 400 bei ungültigen Filterparametern
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Volltextsuche durchsucht Titel und Beschreibung
-        - Filter sind kombinierbar
-        - Sortierung nach created_at (neueste zuerst)
-        - Nur aktive Dokumente werden angezeigt
     """
-    query = db.query(DocumentModel)
-    
-    # Filter nach Dokumenttyp
-    if document_type:
-        try:
-            doc_type_enum = DocumentType(document_type)
-            query = query.filter(DocumentModel.document_type == doc_type_enum)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ungültiger Dokumenttyp: {document_type}"
+    try:
+        query = db.query(DocumentModel)
+        
+        # Filter nach Dokumenttyp
+        if document_type:
+            try:
+                doc_type_enum = DocumentType(document_type)
+                query = query.filter(DocumentModel.document_type == doc_type_enum)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ungültiger Dokumenttyp: {document_type}"
+                )
+        
+        # Filter nach Status
+        if status:
+            try:
+                status_enum = DocumentStatus(status)
+                query = query.filter(DocumentModel.status == status_enum)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ungültiger Status: {status}"
+                )
+        
+        # Volltextsuche
+        if search:
+            search_filter = f"%{search}%"
+            query = query.filter(
+                (DocumentModel.title.ilike(search_filter)) |
+                (DocumentModel.description.ilike(search_filter))
             )
-    
-    # Filter nach Status
-    if status:
-        try:
-            status_enum = DocumentStatus(status)
-            query = query.filter(DocumentModel.status == status_enum)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ungültiger Status: {status}"
-            )
-    
-    # Volltextsuche
-    if search:
-        search_filter = f"%{search}%"
-        query = query.filter(
-            (DocumentModel.title.ilike(search_filter)) |
-            (DocumentModel.description.ilike(search_filter))
+        
+        documents = query.order_by(DocumentModel.created_at.desc()).offset(skip).limit(limit).all()
+        
+        # Debug-Ausgabe
+        print(f"✅ Gefunden: {len(documents)} Dokumente")
+        for doc in documents[:3]:
+            print(f"  - {doc.id}: {doc.title} ({doc.document_type})")
+            
+        return documents
+        
+    except Exception as e:
+        print(f"❌ FEHLER in get_documents: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Datenbankfehler: {str(e)}"
         )
-    
-    documents = query.order_by(DocumentModel.created_at.desc()).offset(skip).limit(limit).all()
-    return documents
 
 @app.get("/api/documents/types", response_model=List[str], tags=["Documents"])
 async def get_document_types():
@@ -1641,6 +1893,180 @@ async def get_document(document_id: int, db: Session = Depends(get_db)):
         )
     return document
 
+# === DATEI-UPLOAD ENDPUNKTE ===
+
+@app.post("/api/files/upload", response_model=FileUploadResponse, tags=["File Upload"])
+async def upload_file(
+    file: UploadFile = File(...),
+    document_type: str = Form(...)
+):
+    """
+    Lädt eine Datei hoch und speichert sie strukturiert.
+    
+    Args:
+        file: Hochzuladende Datei (PDF, DOC, DOCX, TXT, MD, XLS, XLSX)
+        document_type: Dokumenttyp für Ordnerorganisation
+        
+    Returns:
+        FileUploadResponse: Metadaten der gespeicherten Datei
+    """
+    try:
+        upload_response = await save_uploaded_file(file, document_type)
+        return upload_response
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload-Fehler: {str(e)}"
+        )
+
+@app.post("/api/documents/with-file", response_model=Document, tags=["Documents"])
+async def create_document_with_file(
+    title: Optional[str] = Form(None),
+    document_type: Optional[str] = Form("OTHER"),
+    creator_id: int = Form(...),
+    version: str = Form("1.0"),
+    content: Optional[str] = Form(None),
+    remarks: Optional[str] = Form(None),
+    chapter_numbers: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Erstellt ein Dokument mit optionalem Datei-Upload.
+    
+    Kombiniert Dokument-Erstellung mit Datei-Upload in einem Request.
+    """
+    try:
+        # Document Type validieren
+        try:
+            validated_doc_type = DocumentType(document_type)
+        except ValueError:
+            valid_types = [dt.value for dt in DocumentType]
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ungültiger document_type '{document_type}'. Gültige Werte: {valid_types}"
+            )
+        
+        # Creator validieren
+        creator = db.query(UserModel).filter(UserModel.id == creator_id).first()
+        if not creator:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Creator mit ID {creator_id} existiert nicht"
+            )
+        
+        # Intelligente Titel- und Beschreibungs-Generierung
+        auto_generated_content = None
+        if file and file.filename:
+            # Text extrahieren für intelligente Titel-Generierung
+            upload_response = await save_uploaded_file(file, document_type)
+            file_data = {
+                'file_path': upload_response.file_path,
+                'file_name': upload_response.file_name,
+                'file_size': upload_response.file_size,
+                'file_hash': upload_response.file_hash,
+                'mime_type': upload_response.mime_type
+            }
+            
+            # Text extrahieren
+            extracted_text = extract_text_from_file(
+                Path(upload_response.file_path), 
+                upload_response.mime_type
+            )
+            
+            # Intelligente Titel-Extraktion
+            if not title or title.strip() == "":
+                smart_title, smart_description = extract_smart_title_and_description(
+                    extracted_text, upload_response.file_name
+                )
+                title = smart_title
+                auto_generated_content = smart_description
+                
+            # Auto-Beschreibung wenn leer
+            if not content or content.strip() == "":
+                if auto_generated_content:
+                    content = auto_generated_content
+                else:
+                    _, smart_description = extract_smart_title_and_description(
+                        extracted_text, upload_response.file_name
+                    )
+                    content = smart_description
+        else:
+            # Fallback ohne Datei
+            if not title:
+                title = f"Auto-Generated-Document-{version}"
+            file_data = {}
+            extracted_text = ""
+        
+        # Duplikat-Checks durchführen
+        existing_checks = []
+        
+        # 1. Check: Gleicher Titel bereits vorhanden?
+        existing_title = db.query(DocumentModel).filter(DocumentModel.title == title).first()
+        if existing_title:
+            existing_checks.append(f"Ein Dokument mit dem Titel '{title}' existiert bereits (ID: {existing_title.id})")
+        
+        # 2. Check: Gleicher Dateiname bereits vorhanden?
+        if file and file.filename:
+            existing_filename = db.query(DocumentModel).filter(
+                DocumentModel.file_name == file.filename
+            ).first()
+            if existing_filename:
+                existing_checks.append(f"Eine Datei mit dem Namen '{file.filename}' wurde bereits hochgeladen (ID: {existing_filename.id})")
+        
+        # 3. Check: Gleicher File-Hash bereits vorhanden? (nur wenn Datei vorhanden)
+        if file and file.filename and 'file_data' in locals() and file_data.get('file_hash'):
+            existing_hash = db.query(DocumentModel).filter(
+                DocumentModel.file_hash == file_data['file_hash']
+            ).first()
+            if existing_hash:
+                existing_checks.append(f"Eine identische Datei (gleicher Inhalt) wurde bereits hochgeladen (ID: {existing_hash.id})")
+        
+        # Wenn Duplikate gefunden wurden, aussagekräftige Fehlermeldung geben
+        if existing_checks:
+            error_message = "❌ **Dokument-Duplikat gefunden!**\n\n" + "\n".join([f"• {check}" for check in existing_checks])
+            error_message += "\n\n**Mögliche Lösungen:**\n• Verwenden Sie einen anderen Titel\n• Laden Sie eine andere Datei hoch\n• Prüfen Sie die bestehenden Dokumente"
+            raise HTTPException(
+                status_code=409,  # Conflict
+                detail=error_message
+            )
+        
+        # Dokumentennummer generieren
+        document_number = generate_document_number(document_type)
+        
+        # Dokument erstellen
+        doc_data = {
+            'title': title,
+            'document_number': document_number,
+            'document_type': validated_doc_type,
+            'version': version,
+            'content': content,
+            'creator_id': creator_id,
+            'remarks': remarks,
+            'chapter_numbers': chapter_numbers,
+            'status': DocumentStatus.DRAFT,
+            'extracted_text': extracted_text,
+            **file_data
+        }
+        
+        db_document = DocumentModel(**doc_data)
+        db.add(db_document)
+        db.commit()
+        db.refresh(db_document)
+        
+        return db_document
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Fehler beim Erstellen des Dokuments: {str(e)}"
+        )
+
 @app.post("/api/documents", response_model=Document, tags=["Documents"])
 async def create_document(document: DocumentCreate, db: Session = Depends(get_db)):
     """
@@ -1702,12 +2128,12 @@ async def create_document(document: DocumentCreate, db: Session = Depends(get_db
         - Version folgt Semantic Versioning (1.0, 1.1, 2.0)
         - Dokumenttyp bestimmt Workflow und Berechtigungen
     """
-    # Prüfen ob created_by User existiert
-    user_exists = db.query(UserModel).filter(UserModel.id == document.created_by).first()
+    # Prüfen ob creator_id User existiert
+    user_exists = db.query(UserModel).filter(UserModel.id == document.creator_id).first()
     if not user_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Benutzer mit ID {document.created_by} existiert nicht"
+            detail=f"Benutzer mit ID {document.creator_id} existiert nicht"
         )
     
     db_document = DocumentModel(**document.dict())
