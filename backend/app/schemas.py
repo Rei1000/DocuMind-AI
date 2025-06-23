@@ -1,18 +1,37 @@
 """
-Pydantic v2 kompatible Schemas für KI-QMS API.
+KI-QMS API Schemas - Pydantic v2 Datenvalidierung
 
 Dieses Modul definiert alle Datenvalidierungs-Schemas für die FastAPI-Anwendung
-mit umfassender Fehlerbehandlung und Dokumentation.
+mit umfassender Fehlerbehandlung, Type Safety und automatischer API-Dokumentation.
 
-Pydantic v2 Features:
-- @field_validator statt @validator
-- ConfigDict statt Config Klassen
-- json_schema_extra statt schema_extra
+Pydantic v2 Features verwendet:
+- @field_validator statt @validator (v1 deprecated)
+- ConfigDict statt Config Klassen 
+- Field() für erweiterte Feldvalidierung
+- EmailStr für E-Mail-Validierung
+- Automatische OpenAPI Schema-Generierung
+
+Schema-Kategorien:
+- InterestGroup: 13-Stakeholder-System Schemas
+- User: Benutzerverwaltung mit Rollensystem
+- Document: QMS-Dokumentenverwaltung (14 Dokumenttypen)
+- Equipment: Asset-Management mit Kalibrierung
+- Authentication: Login/Token Management
+- API Responses: Standardisierte API-Antworten
+
+Technologie-Stack:
+- FastAPI + Pydantic v2 für automatische Validierung
+- SQLAlchemy ORM Kompatibilität über from_attributes=True
+- JSON Schema für OpenAPI/Swagger Dokumentation
+- Type Safety durch umfassende Type Hints
+
+Autoren: KI-QMS Entwicklungsteam
+Version: 2.0.0 (Pydantic v2 Migration)
 """
 
 from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Union
 from .models import DocumentStatus, EquipmentStatus, DocumentType
 from enum import Enum
 import json
@@ -20,18 +39,41 @@ import json
 # === INTEREST GROUP SCHEMAS ===
 
 class InterestGroupBase(BaseModel):
-    name: str = Field(..., min_length=2, max_length=100)
-    code: str = Field(..., min_length=2, max_length=50)
-    description: Optional[str] = Field(None, max_length=500)
-    group_permissions: Optional[List[str]] = Field(default_factory=list)
-    ai_functionality: Optional[str] = Field(None, max_length=300)
-    typical_tasks: Optional[str] = Field(None, max_length=300)
-    is_external: bool = Field(False)
-    is_active: bool = Field(True)
+    """
+    Basis-Schema für Interessensgruppen im 13-Stakeholder-System.
+    
+    Definiert die Grundstruktur für alle InterestGroup-bezogenen Schemas
+    mit Validierung für Namenskonventionen und Berechtigungsstrukturen.
+    
+    Validation Rules:
+    - code: snake_case Format erforderlich
+    - group_permissions: Flexible JSON/String/List Eingabe
+    - Standard-Felder für alle CRUD-Operationen
+    """
+    name: str = Field(..., min_length=2, max_length=100, 
+                     description="Vollständiger Name der Interessensgruppe")
+    code: str = Field(..., min_length=2, max_length=50,
+                     description="Eindeutiger Code in snake_case Format")
+    description: Optional[str] = Field(None, max_length=500,
+                                     description="Detaillierte Beschreibung der Aufgaben")
+    group_permissions: Optional[List[str]] = Field(default_factory=list,
+                                                  description="Liste der Gruppen-Berechtigungen")
+    ai_functionality: Optional[str] = Field(None, max_length=300,
+                                          description="Verfügbare KI-Funktionen")
+    typical_tasks: Optional[str] = Field(None, max_length=300,
+                                       description="Typische Aufgaben der Gruppe")
+    is_external: bool = Field(False, description="True für externe Stakeholder")
+    is_active: bool = Field(True, description="Aktiv-Status der Gruppe")
     
     @field_validator('group_permissions', mode='before')
     @classmethod
-    def parse_group_permissions(cls, v):
+    def parse_group_permissions(cls, v: Union[str, List[str], None]) -> List[str]:
+        """
+        Flexible Validierung für group_permissions.
+        
+        Akzeptiert JSON-String, komma-separierte Strings oder Listen
+        und konvertiert zu standardisierter Liste.
+        """
         if v is None:
             return []
         if isinstance(v, str):
@@ -52,7 +94,15 @@ class InterestGroupBase(BaseModel):
     
     @field_validator('code')
     @classmethod
-    def validate_code(cls, v):
+    def validate_code(cls, v: str) -> str:
+        """
+        Validiert Code-Format für API-Konsistenz.
+        
+        Enforces:
+        - snake_case Format (nur lowercase, underscores)
+        - Keine führenden/nachfolgenden Underscores
+        - Alphanumerische Zeichen + Underscores
+        """
         if not v.replace('_', '').isalnum() or v != v.lower():
             raise ValueError('Code muss snake_case Format haben')
         if v.startswith('_') or v.endswith('_'):
@@ -60,9 +110,16 @@ class InterestGroupBase(BaseModel):
         return v
 
 class InterestGroupCreate(InterestGroupBase):
+    """Schema für Erstellung neuer Interessensgruppen."""
     pass
 
 class InterestGroupUpdate(BaseModel):
+    """
+    Schema für Aktualisierung bestehender Interessensgruppen.
+    
+    Alle Felder optional für partielle Updates. Validation Rules
+    gelten analog zu InterestGroupBase.
+    """
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     code: Optional[str] = Field(None, min_length=2, max_length=50)
     description: Optional[str] = Field(None, max_length=500)
@@ -74,7 +131,8 @@ class InterestGroupUpdate(BaseModel):
     
     @field_validator('group_permissions', mode='before')
     @classmethod
-    def parse_group_permissions(cls, v):
+    def parse_group_permissions(cls, v: Union[str, List[str], None]) -> Optional[List[str]]:
+        """Analog zu InterestGroupBase, aber None-tolerant für Updates."""
         if v is None:
             return None
         if isinstance(v, str):
@@ -91,14 +149,21 @@ class InterestGroupUpdate(BaseModel):
             return []
 
 class InterestGroup(InterestGroupBase):
-    id: int
-    created_at: datetime
+    """
+    Vollständiges InterestGroup-Schema mit Metadaten.
+    
+    Verwendet für API-Responses mit allen Datenbankfeldern
+    inklusive Auto-generierter Werte (id, created_at).
+    """
+    id: int = Field(description="Eindeutige Interessensgruppen-ID")
+    created_at: datetime = Field(description="Zeitpunkt der Erstellung")
     
     model_config = ConfigDict(from_attributes=True)
     
     @field_validator('group_permissions', mode='before')
     @classmethod
-    def parse_group_permissions(cls, v):
+    def parse_group_permissions(cls, v: Union[str, List[str], None]) -> List[str]:
+        """Konsistente group_permissions Parsing für API-Responses."""
         if v is None:
             return []
         if isinstance(v, str):
@@ -117,17 +182,33 @@ class InterestGroup(InterestGroupBase):
 # === USER SCHEMAS ===
 
 class UserBase(BaseModel):
-    email: EmailStr = Field(...)
-    full_name: str = Field(..., min_length=2, max_length=200)
-    employee_id: Optional[str] = Field(None, max_length=50)
-    organizational_unit: Optional[str] = Field(None, max_length=100)
-    individual_permissions: Optional[List[str]] = Field(default_factory=list)
-    is_department_head: bool = Field(False)
-    approval_level: int = Field(1, ge=1, le=4)
+    """
+    Basis-Schema für Benutzerverwaltung.
+    
+    Definiert die Grundstruktur für alle User-bezogenen Schemas
+    mit Validierung für Rollen-System und Berechtigungen.
+    
+    Permission System:
+    - individual_permissions: Benutzer-spezifische Rechte
+    - approval_level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager
+    - is_department_head: Sonderrecht für Freigabe-Workflows
+    """
+    email: EmailStr = Field(..., description="Email-Adresse (eindeutig)")
+    full_name: str = Field(..., min_length=2, max_length=200,
+                          description="Vollständiger Name (Vor- und Nachname)")
+    employee_id: Optional[str] = Field(None, max_length=50,
+                                     description="Mitarbeiternummer")
+    organizational_unit: Optional[str] = Field(None, max_length=100,
+                                             description="Abteilung/Organisationseinheit")
+    individual_permissions: Optional[List[str]] = Field(default_factory=list,
+                                                      description="Individuelle Benutzer-Berechtigungen")
+    is_department_head: bool = Field(False, description="Abteilungsleiter-Status")
+    approval_level: int = Field(1, ge=1, le=4, description="Freigabe-Level (1-4)")
     
     @field_validator('individual_permissions', mode='before')
     @classmethod
-    def parse_individual_permissions(cls, v):
+    def parse_individual_permissions(cls, v: Union[str, List[str], None]) -> List[str]:
+        """Flexible Parsing für individual_permissions analog zu group_permissions."""
         if v is None:
             return []
         if isinstance(v, str):
@@ -143,30 +224,46 @@ class UserBase(BaseModel):
     
     @field_validator('approval_level')
     @classmethod
-    def validate_approval_level(cls, v):
+    def validate_approval_level(cls, v: int) -> int:
+        """Validiert Freigabe-Level im gültigen Bereich."""
         if not 1 <= v <= 4:
             raise ValueError('approval_level muss zwischen 1 und 4 liegen')
         return v
     
     @field_validator('email')
     @classmethod
-    def validate_email_business_rules(cls, v):
+    def validate_email_business_rules(cls, v: str) -> str:
+        """Business-Rules für Email-Adressen."""
         if '@' not in v:
             raise ValueError('Ungültiges Email-Format')
         return v.lower()
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8, max_length=128)
+    """
+    Schema für Benutzer-Erstellung mit Passwort.
+    
+    Erweitert UserBase um Passwort-Validierung für sichere
+    Account-Erstellung.
+    """
+    password: str = Field(..., min_length=8, max_length=128,
+                         description="Passwort (mindestens 8 Zeichen)")
     
     @field_validator('password')
     @classmethod
-    def validate_password_strength(cls, v):
+    def validate_password_strength(cls, v: str) -> str:
+        """Basis-Passwort-Validierung."""
         if len(v) < 8:
             raise ValueError('Passwort muss mindestens 8 Zeichen lang sein')
         return v
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
+    """
+    Schema für Benutzer-Updates.
+    
+    Alle Felder optional für partielle Updates. Passwort wird
+    separat über spezielle Endpoints verwaltet.
+    """
+    email: Optional[EmailStr] = Field(None, description="Neue Email-Adresse")
     full_name: Optional[str] = Field(None, min_length=2, max_length=200)
     employee_id: Optional[str] = Field(None, max_length=50)
     organizational_unit: Optional[str] = Field(None, max_length=100)
@@ -177,7 +274,8 @@ class UserUpdate(BaseModel):
     
     @field_validator('individual_permissions', mode='before')
     @classmethod
-    def parse_individual_permissions(cls, v):
+    def parse_individual_permissions(cls, v: Union[str, List[str], None]) -> Optional[List[str]]:
+        """None-tolerante Version für Updates."""
         if v is None:
             return None
         if isinstance(v, str):
@@ -193,34 +291,53 @@ class UserUpdate(BaseModel):
     
     @field_validator('approval_level')
     @classmethod
-    def validate_approval_level(cls, v):
+    def validate_approval_level(cls, v: Optional[int]) -> Optional[int]:
+        """Validierung für optionale approval_level Updates."""
         if v is not None and not 1 <= v <= 4:
             raise ValueError('approval_level muss zwischen 1 und 4 liegen')
         return v
 
 class User(UserBase):
-    id: int
-    is_active: bool
-    created_at: datetime
+    """
+    Vollständiges User-Schema für API-Responses.
+    
+    Inklusive Metadaten und ohne sensible Daten (Passwort).
+    """
+    id: int = Field(description="Eindeutige Benutzer-ID")
+    is_active: bool = Field(description="Account-Status (aktiv/deaktiviert)")
+    created_at: datetime = Field(description="Zeitpunkt der Account-Erstellung")
     
     model_config = ConfigDict(from_attributes=True)
 
-# === MEMBERSHIP SCHEMAS ===
+# === USER GROUP MEMBERSHIP SCHEMAS ===
 
 class UserGroupMembershipBase(BaseModel):
-    user_id: int
-    interest_group_id: int
-    is_active: bool = Field(True)
+    """
+    Basis-Schema für Many-to-Many Beziehung User ↔ InterestGroup.
+    
+    Ermöglicht flexible Zuordnung von Benutzern zu mehreren Interessensgruppen
+    mit spezifischen Rollen. Unterstützt Matrix-Organisationen.
+    """
+    user_id: int = Field(description="Referenz auf User")
+    interest_group_id: int = Field(description="Referenz auf InterestGroup")
+    is_active: bool = Field(True, description="Aktiv-Status der Zuordnung")
 
 class UserGroupMembershipCreate(UserGroupMembershipBase):
-    role_in_group: Optional[str] = Field(None, max_length=100)
+    """Schema für Erstellung neuer User-Group Zuordnungen."""
+    role_in_group: Optional[str] = Field(None, max_length=100,
+                                       description="Spezifische Rolle in der Gruppe")
 
 class UserGroupMembership(UserGroupMembershipBase):
-    id: int
-    joined_at: datetime
-    role_in_group: Optional[str] = None
-    user: Optional['User'] = None
-    interest_group: Optional['InterestGroup'] = None
+    """
+    Vollständiges UserGroupMembership-Schema mit Metadaten.
+    
+    Inklusive Relationships für vollständige API-Responses.
+    """
+    id: int = Field(description="Eindeutige Zuordnungs-ID")
+    joined_at: datetime = Field(description="Zeitpunkt des Beitritts")
+    role_in_group: Optional[str] = Field(None, description="Rolle in der Gruppe")
+    user: Optional['User'] = Field(None, description="Vollständige User-Daten")
+    interest_group: Optional['InterestGroup'] = Field(None, description="Vollständige Group-Daten")
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -471,7 +588,10 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     expires_in: int
-    user: User
+    user_id: int
+    user_name: str
+    groups: List[str] = []
+    permissions: List[str] = []
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -482,6 +602,43 @@ class LoginRequest(BaseModel):
 
 # === GENERIC SCHEMAS ===
 
+# === DOCUMENT STATUS WORKFLOW SCHEMAS ===
+
+class DocumentStatusChange(BaseModel):
+    """Schema für Dokumentstatus-Änderungen"""
+    status: DocumentStatus = Field(..., description="Neuer Dokumentstatus")
+    comment: Optional[str] = Field(None, max_length=1000, description="Kommentar zur Status-Änderung")
+    
+    @field_validator('comment')
+    @classmethod
+    def validate_comment(cls, v):
+        if v and len(v.strip()) == 0:
+            return None
+        return v
+
+class DocumentStatusHistory(BaseModel):
+    """Status-Change History für Audit-Trail"""
+    id: int
+    document_id: int
+    old_status: Optional[DocumentStatus]
+    new_status: DocumentStatus
+    changed_by_id: int
+    changed_at: datetime
+    comment: Optional[str]
+    changed_by: Optional[User] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificationInfo(BaseModel):
+    """Benachrichtigung für Status-Änderungen"""
+    message: str
+    recipients: List[str]  # Email-Adressen
+    document_title: str
+    new_status: DocumentStatus
+    changed_by: str
+
+# === GENERIC RESPONSES ===
+
 class GenericResponse(BaseModel):
     message: str
     success: bool = True
@@ -490,4 +647,95 @@ class PaginatedResponse(BaseModel):
     total: int
     limit: int
     offset: int
-    items: List[dict] 
+    items: List[dict]
+
+# === BENUTZER-SELBSTVERWALTUNG SCHEMAS ===
+
+class PasswordChangeRequest(BaseModel):
+    """
+    Schema für Benutzer-Passwort-Änderung (Selbstverwaltung).
+    
+    DSGVO-konform: Benutzer können eigenes Passwort ändern.
+    Erfordert Bestätigung des aktuellen Passworts für Sicherheit.
+    """
+    current_password: str = Field(..., min_length=1, max_length=128,
+                                description="Aktuelles Passwort zur Bestätigung")
+    new_password: str = Field(..., min_length=8, max_length=128,
+                            description="Neues Passwort (min. 8 Zeichen)")
+    confirm_password: str = Field(..., min_length=8, max_length=128,
+                                description="Bestätigung des neuen Passworts")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """
+        Passwort-Stärke Validierung für Sicherheit.
+        
+        Anforderungen:
+        - Mindestens 8 Zeichen
+        - Mindestens ein Großbuchstabe
+        - Mindestens eine Zahl oder Sonderzeichen
+        """
+        if len(v) < 8:
+            raise ValueError('Passwort muss mindestens 8 Zeichen haben')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Passwort muss mindestens einen Großbuchstaben enthalten')
+        if not any(c.isdigit() or not c.isalnum() for c in v):
+            raise ValueError('Passwort muss mindestens eine Zahl oder ein Sonderzeichen enthalten')
+        return v
+    
+    def validate_passwords_match(self) -> 'PasswordChangeRequest':
+        """Validiert, dass neues Passwort und Bestätigung übereinstimmen."""
+        if self.new_password != self.confirm_password:
+            raise ValueError('Neues Passwort und Bestätigung stimmen nicht überein')
+        return self
+
+class AdminPasswordResetRequest(BaseModel):
+    """
+    Schema für Admin-Passwort-Reset (Notfall-Funktion).
+    
+    Nur für System-Administratoren verfügbar.
+    Generiert temporäres Passwort für Benutzer.
+    """
+    user_id: int = Field(..., description="Benutzer-ID für Passwort-Reset")
+    temporary_password: Optional[str] = Field(None, min_length=12, max_length=128,
+                                            description="Optionales temporäres Passwort (wird generiert falls leer)")
+    force_change_on_login: bool = Field(True, 
+                                      description="Benutzer muss Passwort beim nächsten Login ändern")
+    reset_reason: str = Field(..., min_length=5, max_length=500,
+                            description="Grund für den Admin-Reset (Audit-Trail)")
+
+class UserProfileResponse(BaseModel):
+    """
+    Schema für Benutzerprofil-Anzeige (Selbstverwaltung).
+    
+    DSGVO-konform: Benutzer können eigene Daten einsehen.
+    Zeigt alle relevanten Account-Informationen ohne sensible Daten.
+    """
+    id: int = Field(description="Benutzer-ID")
+    email: EmailStr = Field(description="Email-Adresse")
+    full_name: str = Field(description="Vollständiger Name")
+    employee_id: Optional[str] = Field(None, description="Mitarbeiternummer")
+    organizational_unit: Optional[str] = Field(None, description="Abteilung/Organisationseinheit")
+    individual_permissions: List[str] = Field(default_factory=list, 
+                                            description="Individuelle Berechtigungen")
+    is_department_head: bool = Field(description="Abteilungsleiter-Status")
+    approval_level: int = Field(description="Freigabe-Level (1-4)")
+    is_active: bool = Field(description="Account-Status")
+    created_at: datetime = Field(description="Account-Erstellungsdatum")
+    
+    # Zusätzliche Profile-Informationen
+    interest_groups: List[str] = Field(default_factory=list,
+                                     description="Zugeordnete Interessensgruppen")
+    last_login: Optional[datetime] = Field(None, description="Letzter Login")
+    password_changed_at: Optional[datetime] = Field(None, description="Letzter Passwort-Wechsel")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class PasswordResetResponse(BaseModel):
+    """Response für erfolgreichen Passwort-Reset."""
+    message: str = Field(description="Bestätigungsnachricht")
+    temporary_password: Optional[str] = Field(None, description="Temporäres Passwort (nur bei Admin-Reset)")
+    force_change_required: bool = Field(description="Passwort-Änderung beim nächsten Login erforderlich")
+    reset_by_admin: bool = Field(description="Reset wurde von Administrator durchgeführt")
+    reset_at: datetime = Field(description="Zeitpunkt des Resets") 

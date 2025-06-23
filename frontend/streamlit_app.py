@@ -270,20 +270,414 @@ def delete_document(document_id: int) -> bool:
     result = safe_api_call(_delete)
     return result is True
 
+def change_document_status(document_id: int, new_status: str, comment: str = "", token: str = "") -> Optional[Dict]:
+    """Ändert den Status eines Dokuments"""
+    def _change_status():
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        payload = {
+            "status": new_status,
+            "comment": comment
+        }
+        
+        response = requests.put(
+            f"{API_BASE_URL}/api/documents/{document_id}/status",
+            json=payload,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 403:
+            st.error("❌ Keine Berechtigung für diese Status-Änderung")
+            return None
+        else:
+            st.error(f"❌ Fehler beim Status-Update: {response.status_code}")
+            return None
+    
+    return safe_api_call(_change_status)
+
+def get_documents_by_status(status: str) -> List[Dict]:
+    """Lädt Dokumente nach Status gefiltert"""
+    def _get_docs_by_status():
+        response = requests.get(f"{API_BASE_URL}/api/documents/status/{status}", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    
+    result = safe_api_call(_get_docs_by_status)
+    return result if result else []
+
+def get_document_status_history(document_id: int) -> List[Dict]:
+    """Lädt Status-History eines Dokuments"""
+    def _get_history():
+        response = requests.get(f"{API_BASE_URL}/api/documents/{document_id}/status-history", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    
+    result = safe_api_call(_get_history)
+    return result if result else []
+
+def create_user(user_data: Dict, token: str = "") -> Optional[Dict]:
+    """Erstellt einen neuen Benutzer"""
+    def _create_user():
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        response = requests.post(
+            f"{API_BASE_URL}/api/users",
+            json=user_data,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 409:
+            st.error("❌ Email-Adresse bereits registriert")
+            return None
+        elif response.status_code == 422:
+            try:
+                error_detail = response.json()
+                st.error(f"❌ Validierungsfehler: {error_detail}")
+            except:
+                st.error(f"❌ Validierungsfehler (422): Bitte überprüfen Sie Ihre Eingaben")
+            return None
+        else:
+            try:
+                error_detail = response.json()
+                st.error(f"❌ Fehler beim Erstellen ({response.status_code}): {error_detail}")
+            except:
+                st.error(f"❌ Fehler beim Erstellen: HTTP {response.status_code}")
+            return None
+    
+    return safe_api_call(_create_user)
+
+def get_all_users() -> List[Dict]:
+    """Lädt alle Benutzer für die Verwaltung"""
+    def _get_all_users():
+        response = requests.get(f"{API_BASE_URL}/api/users?limit=100", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    
+    result = safe_api_call(_get_all_users)
+    return result if result else []
+
+def update_user(user_id: int, update_data: Dict, token: str = "") -> Optional[Dict]:
+    """Aktualisiert einen Benutzer"""
+    def _update_user():
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        response = requests.put(
+            f"{API_BASE_URL}/api/users/{user_id}",
+            json=update_data,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"❌ Update fehlgeschlagen: {response.status_code}")
+            return None
+    
+    return safe_api_call(_update_user)
+
+def login_user(email: str, password: str) -> Optional[Dict]:
+    """Benutzer-Login"""
+    def _login():
+        payload = {"email": email, "password": password}
+        response = requests.post(
+            f"{API_BASE_URL}/api/auth/login",
+            json=payload,
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            st.error("❌ Ungültige Anmeldedaten")
+            return None
+        elif response.status_code == 404:
+            st.error("❌ Benutzer nicht gefunden")
+            return None
+        else:
+            st.error(f"❌ Login-Fehler: {response.status_code}")
+            return None
+    
+    return safe_api_call(_login)
+
+def get_user_departments(user_id: int) -> List[Dict]:
+    """Holt alle Abteilungszuordnungen für einen User"""
+    def _get_departments():
+        # Token prüfen
+        token = st.session_state.get("auth_token", "")
+        if not token:
+            return []
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(
+            f"{API_BASE_URL}/api/users/{user_id}/departments",
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            # Token ungültig - User abmelden
+            st.session_state.authenticated = False
+            st.session_state.auth_token = ""
+            return []
+        return []
+    
+    return safe_api_call(_get_departments) or []
+
+def add_user_department(user_id: int, department_data: Dict, token: str = "") -> Optional[Dict]:
+    """Fügt einem User eine neue Abteilung hinzu (nur System Admin)"""
+    def _add_department():
+        response = requests.post(
+            f"{API_BASE_URL}/api/users/{user_id}/departments",
+            json=department_data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"❌ Fehler: {response.text}")
+            return None
+    
+    return safe_api_call(_add_department)
+
+def update_user_department(user_id: int, membership_id: int, update_data: Dict, token: str = "") -> Optional[Dict]:
+    """Aktualisiert User-Abteilungszuordnung (nur System Admin)"""
+    def _update_department():
+        response = requests.put(
+            f"{API_BASE_URL}/api/users/{user_id}/departments/{membership_id}",
+            json=update_data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"❌ Fehler: {response.text}")
+            return None
+    
+    return safe_api_call(_update_department)
+
+def remove_user_department(user_id: int, membership_id: int, token: str = "") -> bool:
+    """Entfernt User aus Abteilung (nur System Admin)"""
+    def _remove_department():
+        response = requests.delete(
+            f"{API_BASE_URL}/api/users/{user_id}/departments/{membership_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=REQUEST_TIMEOUT
+        )
+        return response.status_code == 200
+    
+    return safe_api_call(_remove_department) or False
+
+def delete_user_permanently(user_id: int, confirm_password: str, token: str = "") -> bool:
+    """Löscht User permanent (nur System Admin mit Passwort-Bestätigung)"""
+    def _delete_permanently():
+        response = requests.delete(
+            f"{API_BASE_URL}/api/users/{user_id}/permanent",
+            json={"confirm_password": confirm_password},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return True
+        else:
+            st.error(f"❌ Fehler: {response.text}")
+            return False
+    
+    return safe_api_call(_delete_permanently) or False
+
+# === BENUTZER-SELBSTVERWALTUNG API-FUNKTIONEN ===
+
+def clear_session_cache():
+    """Löscht alle Session-State-Daten und cached Profile"""
+    keys_to_clear = [
+        "my_profile", "users_cache", "documents_cache", 
+        "auth_token", "current_user", "authenticated"
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    # Session State neu initialisieren
+    init_session_state()
+    st.success("✅ Cache geleert! Bitte melden Sie sich neu an.")
+    st.rerun()
+
+def get_my_profile(token: str = "") -> Optional[Dict]:
+    """Ruft das eigene Benutzerprofil ab - DSGVO-konform"""
+    def _get_profile():
+        auth_token = token if token else st.session_state.get("auth_token", "")
+        
+        if not auth_token:
+            st.error("❌ Kein gültiger Authentifizierungs-Token")
+            return None
+        
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/api/users/me/profile",
+                headers={"Authorization": f"Bearer {auth_token}"},
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 401:
+                st.error("❌ Authentifizierung fehlgeschlagen - Session wird zurückgesetzt")
+                # Bei Auth-Fehlern Session löschen
+                clear_session_cache()
+                return None
+            elif response.status_code == 403:
+                st.error("❌ Keine Berechtigung für Profil-Zugriff")
+                return None
+            elif response.status_code == 500:
+                st.error("❌ Server-Fehler beim Laden des Profils - Cache wird geleert")
+                # Bei Server-Fehlern Session löschen
+                clear_session_cache()
+                return None
+            else:
+                st.error(f"❌ Fehler beim Laden des Profils: {response.status_code}")
+                if response.status_code >= 500:
+                    clear_session_cache()
+                return None
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Verbindungsfehler: {str(e)}")
+            return None
+    
+    return safe_api_call(_get_profile)
+
+def change_my_password(current_password: str, new_password: str, confirm_password: str, token: str = "") -> Optional[Dict]:
+    """Ändert das eigene Passwort"""
+    def _change_password():
+        auth_token = token if token else st.session_state.auth_token
+        
+        response = requests.put(
+            f"{API_BASE_URL}/api/users/me/password",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={
+                "current_password": current_password,
+                "new_password": new_password,
+                "confirm_password": confirm_password
+            },
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            # Validierungsfehler
+            error_detail = response.json().get("detail", "Unbekannter Fehler")
+            st.error(f"❌ {error_detail}")
+        elif response.status_code == 401:
+            st.error("❌ Aktuelles Passwort ist falsch")
+        else:
+            st.error(f"❌ Fehler beim Passwort-Wechsel: {response.status_code}")
+        return None
+    
+    return safe_api_call(_change_password)
+
+def admin_reset_user_password(user_id: int, reset_reason: str, temporary_password: str = "", token: str = "") -> Optional[Dict]:
+    """Admin-Passwort-Reset für Notfälle"""
+    def _admin_reset():
+        auth_token = token if token else st.session_state.auth_token
+        
+        request_data = {
+            "user_id": user_id,  # Backend braucht user_id im Request Body
+            "reset_reason": reset_reason,
+            "force_change_on_login": True
+        }
+        
+        if temporary_password:
+            request_data["temporary_password"] = temporary_password
+        
+        response = requests.put(
+            f"{API_BASE_URL}/api/users/{user_id}/password/admin-reset",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json=request_data,
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 403:
+            st.error("❌ Nur System-Administratoren dürfen Passwörter zurücksetzen")
+        elif response.status_code == 422:
+            st.error("❌ Ungültige Daten - prüfen Sie alle Eingaben")
+        else:
+            st.error(f"❌ Fehler beim Admin-Reset: {response.status_code}")
+        return None
+    
+    return safe_api_call(_admin_reset)
+
+def generate_temp_password(user_id: int, token: str = "") -> Optional[Dict]:
+    """Generiert temporäres Passwort für User"""
+    def _generate_temp():
+        auth_token = token if token else st.session_state.auth_token
+        
+        response = requests.post(
+            f"{API_BASE_URL}/api/users/{user_id}/temp-password",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 403:
+            st.error("❌ Nur System-Administratoren dürfen temporäre Passwörter generieren")
+        else:
+            st.error(f"❌ Fehler beim Generieren: {response.status_code}")
+        return None
+    
+    return safe_api_call(_generate_temp)
+
 # ===== SESSION STATE =====
 def init_session_state():
     """Initialisiert Session State"""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    
+    if "auth_token" not in st.session_state:
+        st.session_state.auth_token = ""
+    
     if "current_user" not in st.session_state:
+        # Default-User für nicht-authentifizierte Sessions
         st.session_state.current_user = {
-            "id": 2,
-            "full_name": "Dr. Maria Qualität",
-            "email": "maria.qm@company.com",
-            "approval_level": 4,
-            "organizational_unit": "Qualitätsmanagement"
+            "id": 0,
+            "full_name": "Gast",
+            "email": "gast@qms.com",
+            "approval_level": 1,
+            "organizational_unit": "Nicht angemeldet",
+            "groups": [],
+            "permissions": []
         }
     
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "upload"
+        st.session_state.current_page = "workflow"
     
     if "upload_success" not in st.session_state:
         st.session_state.upload_success = None
@@ -302,15 +696,70 @@ def render_sidebar():
     """Rendert die Sidebar mit Navigation und Status"""
     st.sidebar.title("🏥 KI-QMS Navigation")
     
-    # Navigation
+    # Login-Bereich
+    if not st.session_state.authenticated:
+        st.sidebar.markdown("### 🔐 Login")
+        with st.sidebar.form("login_form"):
+            email = st.text_input("Email", value="test@qms.com")
+            password = st.text_input("Passwort", type="password", value="test123")
+            
+            if st.form_submit_button("🔑 Anmelden", use_container_width=True):
+                login_result = login_user(email, password)
+                if login_result:
+                    st.session_state.authenticated = True
+                    st.session_state.auth_token = login_result["access_token"]
+                    
+                    # Hole echte User-Details vom Backend
+                    user_details = safe_api_call(lambda: requests.get(
+                        f"{API_BASE_URL}/api/users/{login_result['user_id']}",
+                        headers={"Authorization": f"Bearer {login_result['access_token']}"},
+                        timeout=REQUEST_TIMEOUT
+                    ).json())
+                    
+                    if user_details:
+                        # Echte User-Daten verwenden
+                        st.session_state.current_user = {
+                            "id": user_details["id"],
+                            "full_name": user_details["full_name"],
+                            "email": user_details["email"],
+                            "approval_level": user_details["approval_level"],
+                            "organizational_unit": user_details["organizational_unit"],
+                            "individual_permissions": user_details["individual_permissions"],
+                            "is_department_head": user_details.get("is_department_head", False),
+                            "employee_id": user_details.get("employee_id", ""),
+                            "groups": login_result["groups"],
+                            "permissions": login_result["permissions"]
+                        }
+                    else:
+                        # Fallback falls API-Aufruf fehlschlägt
+                        st.session_state.current_user = {
+                            "id": login_result["user_id"],
+                            "full_name": login_result["user_name"],
+                            "email": email,
+                            "approval_level": 4,
+                            "organizational_unit": "System Administration",
+                            "individual_permissions": login_result["permissions"],
+                            "groups": login_result["groups"],
+                            "permissions": login_result["permissions"]
+                        }
+                    st.sidebar.success("✅ Login erfolgreich!")
+                    st.rerun()
+                else:
+                    st.sidebar.error("❌ Login fehlgeschlagen")
+        return
+    
+    # Navigation (nur für eingeloggte User)
     pages = {
+        "📋 QM-Workflow": "workflow",
         "📤 Upload": "upload",
         "📚 Dokumente": "documents",
+        "👥 Benutzer": "users",
         "📊 Dashboard": "dashboard",
+        "👤 Mein Profil": "profile",
         "⚙️ Einstellungen": "settings"
     }
     
-    current_page = st.session_state.get("current_page", "upload")
+    current_page = st.session_state.get("current_page", "workflow")
     
     for label, page_id in pages.items():
         if st.sidebar.button(label, key=f"nav_{page_id}", use_container_width=True):
@@ -327,15 +776,67 @@ def render_sidebar():
         st.sidebar.markdown("**Backend starten:**")
         st.sidebar.code("cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
     
-    # Benutzer-Info
+    # Benutzer-Info mit dynamischen Abteilungen
     st.sidebar.markdown("---")
     user = st.session_state.current_user
+    
+    # User-Basis-Info
     st.sidebar.markdown(f"""
-    **👤 {user['full_name']}**  
-    📧 {user['email']}  
-    🏷️ Level {user['approval_level']}  
-    🏢 {user['organizational_unit']}
+    **👤 {user.get('full_name', 'Unbekannt')}**  
+    📧 {user.get('email', 'Unbekannt')}  
+    🆔 ID: {user.get('id', 'N/A')}
     """)
+    
+    # === DYNAMISCHE ABTEILUNGS-ANZEIGE ===
+    # Zuerst prüfen ob es ein System Admin ist (KEINE API-Aufrufe nötig)
+    perms = user.get('individual_permissions', [])
+    if isinstance(perms, str):
+        import json
+        try:
+            perms = json.loads(perms)
+        except:
+            perms = []
+    
+    if "system_administration" in perms:
+        # System Administrator - DYNAMISCH, keine API-Aufrufe!
+        st.sidebar.markdown("🏢 **System Administration**")
+        st.sidebar.markdown("⭐ Level 4")
+        st.sidebar.markdown("🔧 **System Administrator**")
+    else:
+        # Normale User - lade Abteilungen von API
+        try:
+            user_departments = get_user_departments(user.get('id', 0))
+            
+            if user_departments and len(user_departments) > 0:
+                st.sidebar.markdown("**🏢 Abteilungen:**")
+                
+                for dept in user_departments:
+                    dept_name = dept.get("interest_group_name", "Unbekannt")
+                    approval_level = dept.get("approval_level", 1)
+                    
+                    # Emoji basierend auf Level
+                    level_emoji = ["👤", "👥", "👑", "⭐"][approval_level - 1] if 1 <= approval_level <= 4 else "❓"
+                    
+                    st.sidebar.markdown(f"• **{dept_name}**")
+                    st.sidebar.markdown(f"  {level_emoji} Level {approval_level}")
+            else:
+                # Normaler User ohne Abteilungszuordnungen
+                dept_info = user.get('organizational_unit', 'Unbekannt')
+                approval_level = user.get('approval_level', 1)
+                st.sidebar.markdown(f"🏢 **{dept_info}**")
+                st.sidebar.markdown(f"⭐ Level {approval_level}")
+        
+        except Exception as e:
+            # Fallback bei API-Fehlern für normale User
+            st.sidebar.markdown("🏢 **Abteilung:** Laden...")
+            print(f"Sidebar Abteilungen Fehler: {e}")
+    
+    # Logout
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.auth_token = ""
+        st.session_state.current_page = "workflow"
+        st.rerun()
 
 def render_upload_page():
     """Rendert die Upload-Seite - ZUVERLÄSSIG!"""
@@ -579,7 +1080,8 @@ def render_documents_page():
                 """)
             
             if doc.get('content'):
-                st.markdown(f"**Beschreibung:** {doc.get('content')[:200]}...")
+                content = doc.get('content') or ""
+                st.markdown(f"**Beschreibung:** {content[:200]}...")
             
             # Aktionen
             col1, col2, col3 = st.columns(3)
@@ -590,6 +1092,152 @@ def render_documents_page():
                         st.rerun()
                     else:
                         st.error("❌ Löschen fehlgeschlagen!")
+
+def render_workflow_page():
+    """Rendert die QM-Workflow Seite - NEUE HAUPTSEITE"""
+    st.markdown("## 📋 QM-Workflow Dashboard")
+    
+    if not st.session_state.authenticated:
+        st.warning("🔐 Bitte loggen Sie sich ein, um den Workflow zu verwenden.")
+        st.info("**Test-Login:** Email: `test@qms.com`, Passwort: `test123`")
+        
+        # Zeige auch anonyme Statistiken
+        all_docs = get_documents()
+        st.markdown("### 📊 Öffentliche Statistiken")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📁 Dokumente gesamt", len(all_docs))
+        with col2:
+            st.metric("✅ Backend-Status", "Online" if check_backend_status() else "Offline")
+        with col3:
+            st.metric("🏥 System", "KI-QMS v2.0")
+        return
+    
+    # Workflow-Statistiken
+    col1, col2, col3, col4 = st.columns(4)
+    
+    draft_docs = get_documents_by_status("draft")
+    reviewed_docs = get_documents_by_status("reviewed") 
+    approved_docs = get_documents_by_status("approved")
+    all_docs = get_documents()
+    
+    with col1:
+        st.metric("✏️ Entwürfe", len(draft_docs))
+    
+    with col2:
+        st.metric("🔍 Zu prüfen", len(reviewed_docs), help="Warten auf QM-Freigabe")
+    
+    with col3:
+        st.metric("✅ Freigegeben", len(approved_docs))
+    
+    with col4:
+        st.metric("📁 Gesamt", len(all_docs))
+    
+    st.markdown("---")
+    
+    # QM-Workflow Aktionen
+    user = st.session_state.current_user
+    is_qm_user = "quality_management" in user.get("groups", [])
+    
+    if is_qm_user:
+        st.markdown("### 🎯 QM-Manager Aktionen")
+        
+        if reviewed_docs:
+            st.markdown("#### 📋 Dokumente zur Freigabe:")
+            for doc in reviewed_docs:
+                with st.expander(f"📄 {doc['title'][:60]}... (ID: {doc['id']})"):
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.write(f"**Typ:** {doc['document_type']}")
+                        st.write(f"**Version:** {doc['version']}")
+                        st.write(f"**Ersteller:** {doc.get('creator_id', 'N/A')}")
+                        st.write(f"**Erstellt:** {doc['created_at'][:16]}")
+                    
+                    with col2:
+                        # Status-Änderungs-Buttons
+                        if st.button(f"✅ Freigeben", key=f"approve_{doc['id']}"):
+                            result = change_document_status(
+                                doc['id'], 
+                                "approved", 
+                                "QM-Freigabe erteilt", 
+                                st.session_state.auth_token
+                            )
+                            if result:
+                                st.success(f"✅ Dokument {doc['id']} freigegeben!")
+                                st.rerun()
+                        
+                        comment = st.text_input(f"Kommentar", key=f"comment_{doc['id']}", placeholder="Optional...")
+                        
+                        if st.button(f"❌ Ablehnen", key=f"reject_{doc['id']}"):
+                            result = change_document_status(
+                                doc['id'], 
+                                "draft", 
+                                comment or "Zurück zur Überarbeitung", 
+                                st.session_state.auth_token
+                            )
+                            if result:
+                                st.warning(f"↩️ Dokument {doc['id']} zur Überarbeitung zurückgesendet")
+                                st.rerun()
+        else:
+            st.info("✅ Alle Dokumente sind bearbeitet!")
+    else:
+        st.markdown("### 👤 Standard-User Aktionen")
+        st.info("Als Standard-User können Sie Dokumente erstellen und zur Prüfung weiterleiten.")
+    
+    st.markdown("---")
+    
+    # Workflow-Status Übersicht
+    st.markdown("### 📊 Dokument-Status Übersicht")
+    
+    status_tabs = st.tabs(["✏️ Entwürfe", "🔍 Geprüft", "✅ Freigegeben"])
+    
+    with status_tabs[0]:
+        if draft_docs:
+            for doc in draft_docs[:10]:
+                with st.expander(f"📄 {doc['title'][:50]}..."):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**ID:** {doc['id']} | **Typ:** {doc['document_type']}")
+                        st.write(f"**Erstellt:** {doc['created_at'][:16]}")
+                    with col2:
+                        if st.button(f"🔍 Zur Prüfung", key=f"review_{doc['id']}"):
+                            result = change_document_status(
+                                doc['id'], 
+                                "reviewed", 
+                                "Zur fachlichen Prüfung weitergeleitet", 
+                                st.session_state.auth_token
+                            )
+                            if result:
+                                st.success("🔍 Zur Prüfung weitergeleitet!")
+                                st.rerun()
+        else:
+            st.info("Keine Entwürfe vorhanden")
+    
+    with status_tabs[1]:
+        if reviewed_docs:
+            for doc in reviewed_docs[:10]:
+                st.write(f"📋 **{doc['title'][:50]}...** (ID: {doc['id']})")
+                st.write(f"   📅 {doc['created_at'][:16]} | 📂 {doc['document_type']}")
+        else:
+            st.info("Keine Dokumente in Prüfung")
+    
+    with status_tabs[2]:
+        if approved_docs:
+            for doc in approved_docs[:10]:
+                with st.expander(f"✅ {doc['title'][:50]}..."):
+                    st.write(f"**ID:** {doc['id']} | **Typ:** {doc['document_type']}")
+                    st.write(f"**Freigegeben:** {doc.get('approved_at', 'N/A')[:16]}")
+                    
+                    # Status-History anzeigen
+                    if st.button(f"📊 Historie", key=f"history_{doc['id']}"):
+                        history = get_document_status_history(doc['id'])
+                        if history:
+                            st.write("**Status-Verlauf:**")
+                            for h in history:
+                                st.write(f"• {h['old_status']} → {h['new_status']} ({h['comment']})")
+        else:
+            st.info("Noch keine freigegebenen Dokumente")
 
 def render_dashboard_page():
     """Rendert das Dashboard"""
@@ -631,6 +1279,817 @@ def render_dashboard_page():
         
         for doc_type, count in type_counts.items():
             st.write(f"**{doc_type}:** {count}")
+
+def render_users_page():
+    """Rendert die Benutzerverwaltung"""
+    st.markdown("## 👥 Benutzerverwaltung")
+    
+    if not st.session_state.authenticated:
+        st.warning("🔐 Bitte loggen Sie sich ein, um Benutzer zu verwalten.")
+        return
+    
+    # Check if user has admin permissions
+    user = st.session_state.current_user
+    is_admin = "system_administration" in user.get("permissions", [])
+    
+    if not is_admin:
+        st.warning("⚠️ Keine Berechtigung für Benutzerverwaltung")
+        st.info("Nur Benutzer mit 'system_administration' Berechtigung können Benutzer verwalten.")
+        return
+    
+    # Tabs für verschiedene Verwaltungsfunktionen
+    tab1, tab2, tab3 = st.tabs(["👤 Neuer Benutzer", "📋 Benutzerliste", "📊 Statistiken"])
+    
+    with tab1:
+        st.markdown("### ➕ Neuen Benutzer erstellen")
+        
+        with st.form("create_user_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                email = st.text_input("Email *", placeholder="max.mustermann@company.com")
+                full_name = st.text_input("Vollständiger Name *", placeholder="Max Mustermann")
+                employee_id = st.text_input("Mitarbeiter-ID", placeholder="MM001")
+                password = st.text_input("Passwort *", type="password", placeholder="Mindestens 8 Zeichen")
+            
+            with col2:
+                # 13 Interessengruppen als Abteilungsoptionen
+                organizational_unit = st.selectbox(
+                    "Abteilung",
+                    [
+                        "System Administration",  # Für QMS Admin
+                        "Team/Eingangsmodul", 
+                        "Qualitätsmanagement", 
+                        "Entwicklung", 
+                        "Einkauf", 
+                        "Produktion", 
+                        "HR/Schulung", 
+                        "Dokumentation", 
+                        "Service/Support", 
+                        "Vertrieb", 
+                        "Regulatory Affairs", 
+                        "IT-Abteilung", 
+                        "Externe Auditoren", 
+                        "Lieferanten"
+                    ]
+                )
+                
+                approval_level = st.selectbox(
+                    "Freigabe-Level",
+                    [1, 2, 3, 4],
+                    format_func=lambda x: f"Level {x} - {['Mitarbeiter', 'Teamleiter', 'Abteilungsleiter', 'QM-Manager'][x-1]}"
+                )
+            
+            # Spezielle Berechtigungen nur für Systemadmin
+            is_system_admin = organizational_unit == "System Administration"
+            
+            if is_system_admin:
+                st.info("ℹ️ **System Administrator** - Automatische Vollberechtigung bei Abteilung 'System Administration'")
+            
+            if st.form_submit_button("👤 Benutzer erstellen", use_container_width=True):
+                # Validierung
+                if not all([full_name.strip(), email.strip(), employee_id.strip(), password.strip()]):
+                    st.error("Bitte füllen Sie alle Pflichtfelder aus!")
+                elif not "@" in email:
+                    st.error("Bitte geben Sie eine gültige E-Mail-Adresse ein!")
+                elif len(password) < 8:
+                    st.error("Passwort muss mindestens 8 Zeichen lang sein!")
+                else:
+                    # Benutzer-Daten zusammenstellen
+                    user_data = {
+                        "full_name": full_name,
+                        "email": email,
+                        "employee_id": employee_id,
+                        "organizational_unit": organizational_unit,
+                        "password": password,
+                        "approval_level": approval_level,
+                        "is_department_head": approval_level >= 3,
+                        "individual_permissions": []
+                    }
+                    
+                    # System Admin Berechtigungen automatisch setzen
+                    if organizational_unit == "System Administration":
+                        user_data["individual_permissions"].extend(["system_administration", "user_management", "all_rights"])
+                    
+                    result = create_user(user_data, st.session_state.auth_token)
+                    if result:
+                        st.success(f"✅ Benutzer '{full_name}' erfolgreich erstellt!")
+                        st.info(f"🆔 Benutzer-ID: {result['id']}")
+                        st.rerun()
+    
+    with tab2:
+        st.markdown("### 📋 Alle Benutzer")
+        
+        # Benutzer laden
+        users = get_all_users()
+        if users:
+            st.info(f"📊 **{len(users)}** Benutzer im System")
+            
+            # Filter
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                status_filter = st.selectbox("Status", ["Alle", "Aktiv", "Inaktiv"])
+            with col2:
+                dept_filter = st.selectbox(
+                    "Abteilung", 
+                    ["Alle"] + list(set(u.get("organizational_unit", "Unbekannt") for u in users))
+                )
+            with col3:
+                level_filter = st.selectbox("Level", ["Alle", "1", "2", "3", "4"])
+            
+            # Filter anwenden
+            filtered_users = users
+            if status_filter != "Alle":
+                active = status_filter == "Aktiv"
+                filtered_users = [u for u in filtered_users if u.get("is_active", True) == active]
+            if dept_filter != "Alle":
+                filtered_users = [u for u in filtered_users if u.get("organizational_unit") == dept_filter]
+            if level_filter != "Alle":
+                filtered_users = [u for u in filtered_users if u.get("approval_level") == int(level_filter)]
+            
+            st.markdown(f"**Gefilterte Ergebnisse: {len(filtered_users)}**")
+            
+            # Benutzer-Tabelle
+            for user in filtered_users:
+                with st.expander(f"👤 {user['full_name']} ({user['email']})"):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.write(f"**ID:** {user['id']}")
+                        st.write(f"**Mitarbeiter-ID:** {user.get('employee_id', 'N/A')}")
+                        st.write(f"**Abteilung:** {user.get('organizational_unit', 'N/A')}")
+                        st.write(f"**Level:** {user.get('approval_level', 1)}")
+                    
+                    with col2:
+                        st.write(f"**Abteilungsleiter:** {'✅' if user.get('is_department_head') else '❌'}")
+                        st.write(f"**Status:** {'🟢 Aktiv' if user.get('is_active', True) else '🔴 Inaktiv'}")
+                        st.write(f"**Erstellt:** {user.get('created_at', 'N/A')[:10]}")
+                    
+                    with col3:
+                        perms = user.get('individual_permissions', [])
+                        if isinstance(perms, str):
+                            try:
+                                import json
+                                perms = json.loads(perms)
+                            except:
+                                perms = []
+                        
+                        if perms:
+                            st.write("**Berechtigungen:**")
+                            for perm in perms[:3]:  # Nur erste 3 anzeigen
+                                st.write(f"• {perm}")
+                            if len(perms) > 3:
+                                st.write(f"• ... und {len(perms)-3} weitere")
+                        else:
+                            st.write("**Berechtigungen:** Keine speziellen")
+                    
+                    # Admin-Aktionen - ERWEITERT für Multiple-Abteilungen
+                    current_user_email = st.session_state.current_user.get("email", "")
+                    is_system_admin = "system_administration" in st.session_state.current_user.get("permissions", [])
+                    is_qms_admin = user.get("email") == "qms.admin@company.com"
+                    is_self_action = user.get("email") == current_user_email
+                    
+                    col_edit, col_dept, col_delete = st.columns(3)
+                    
+                    with col_edit:
+                        if st.button(f"📝 Bearbeiten", key=f"edit_{user['id']}"):
+                            st.session_state[f"editing_user_{user['id']}"] = True
+                            st.rerun()
+                    
+                    # === INLINE BEARBEITUNG ===
+                    if st.session_state.get(f"editing_user_{user['id']}", False):
+                        st.markdown("---")
+                        st.markdown(f"**✏️ Bearbeite User: {user['full_name']}**")
+                        
+                        # === BASIS-DATEN BEARBEITEN ===
+                        with st.form(f"edit_user_form_{user['id']}"):
+                            st.markdown("### ✏️ Basis-Daten bearbeiten")
+                            new_name = st.text_input("Name", value=user.get("full_name", ""))
+                            new_email = st.text_input("E-Mail", value=user.get("email", ""))
+                            new_employee_id = st.text_input("Mitarbeiter-ID", value=user.get("employee_id", ""))
+                            
+                            # Form-Buttons
+                            col_save, col_cancel = st.columns(2)
+                            
+                            with col_save:
+                                if st.form_submit_button("💾 Änderungen speichern"):
+                                    update_data = {
+                                        "full_name": new_name,
+                                        "email": new_email,
+                                        "employee_id": new_employee_id
+                                    }
+                                    
+                                    result = update_user(user['id'], update_data, st.session_state.auth_token)
+                                    if result:
+                                        st.success("User aktualisiert!")
+                                        st.session_state[f"editing_user_{user['id']}"] = False
+                                        st.rerun()
+                            
+                            with col_cancel:
+                                if st.form_submit_button("❌ Abbrechen"):
+                                    st.session_state[f"editing_user_{user['id']}"] = False
+                                    st.rerun()
+                        
+                        # === ABTEILUNGEN VERWALTEN (außerhalb der Form) ===
+                        # Keine Abteilungsverwaltung für den QMS System Administrator (hat alle Rechte)
+                        if is_system_admin and user['id'] != 1:
+                            st.markdown("### 🏢 Abteilungen verwalten")
+                            
+                            # Aktuelle Abteilungen anzeigen
+                            user_departments = get_user_departments(user['id'])
+                            
+                            if user_departments:
+                                st.markdown("**Aktuelle Abteilungen:**")
+                                for i, dept in enumerate(user_departments):
+                                    col_dept, col_level, col_action = st.columns([3, 2, 1])
+                                    
+                                    with col_dept:
+                                        st.text(dept.get("interest_group_name", "Unbekannt"))
+                                    
+                                    with col_level:
+                                        current_level = dept.get("approval_level", 1)
+                                        new_level = st.selectbox(
+                                            "Level",
+                                            [1, 2, 3, 4],
+                                            index=current_level - 1,
+                                            format_func=lambda x: f"Level {x}",
+                                            key=f"level_{user['id']}_{dept['id']}"
+                                        )
+                                        
+                                        if new_level != current_level:
+                                            if st.button(f"💾 Level ändern", key=f"update_level_{user['id']}_{dept['id']}"):
+                                                result = update_user_department(
+                                                    user['id'],
+                                                    dept.get("id", 0),
+                                                    {"approval_level": new_level},
+                                                    st.session_state.auth_token
+                                                )
+                                                if result:
+                                                    st.success(f"Level auf {new_level} geändert!")
+                                                    st.rerun()
+                                    
+                                    with col_action:
+                                        if st.button(f"🗑️", key=f"remove_dept_{user['id']}_{dept['id']}", help="Aus Abteilung entfernen"):
+                                            if remove_user_department(
+                                                user['id'],
+                                                dept.get("id", 0),
+                                                st.session_state.auth_token
+                                            ):
+                                                st.success("Aus Abteilung entfernt!")
+                                                st.rerun()
+                            
+                            # === NEUE ABTEILUNG HINZUFÜGEN ===
+                            st.markdown("**➕ Neue Abteilung hinzufügen:**")
+                            
+                            col_new_dept, col_new_level, col_add_btn = st.columns([3, 2, 1])
+                            
+                            with col_new_dept:
+                                available_groups = [
+                                    {"id": 1, "name": "Team/Eingangsmodul"},
+                                    {"id": 2, "name": "Qualitätsmanagement"},
+                                    {"id": 3, "name": "Entwicklung"},
+                                    {"id": 4, "name": "Einkauf"},
+                                    {"id": 5, "name": "Produktion"},
+                                    {"id": 6, "name": "HR/Schulung"},
+                                    {"id": 7, "name": "Dokumentation"},
+                                    {"id": 8, "name": "Service/Support"},
+                                    {"id": 9, "name": "Vertrieb"},
+                                    {"id": 10, "name": "Regulatory Affairs"},
+                                    {"id": 11, "name": "IT-Abteilung"},
+                                    {"id": 12, "name": "Externe Auditoren"},
+                                    {"id": 13, "name": "Lieferanten"}
+                                ]
+                                
+                                new_dept_id = st.selectbox(
+                                    "Abteilung",
+                                    [g["id"] for g in available_groups],
+                                    format_func=lambda x: next(g["name"] for g in available_groups if g["id"] == x),
+                                    key=f"new_dept_{user['id']}"
+                                )
+                            
+                            with col_new_level:
+                                new_dept_level = st.selectbox(
+                                    "Level",
+                                    [1, 2, 3, 4],
+                                    format_func=lambda x: f"Level {x} - {['Mitarbeiter', 'Teamleiter', 'Abteilungsleiter', 'QM-Manager'][x-1]}",
+                                    key=f"new_level_{user['id']}"
+                                )
+                            
+                            with col_add_btn:
+                                if st.button(f"➕ Hinzufügen", key=f"add_dept_{user['id']}"):
+                                    department_data = {
+                                        "interest_group_id": new_dept_id,
+                                        "approval_level": new_dept_level,
+                                        "role_in_group": f"Level {new_dept_level}",
+                                        "notes": f"Hinzugefügt durch {current_user_email}"
+                                    }
+                                    
+                                    result = add_user_department(
+                                        user['id'],
+                                        department_data,
+                                        st.session_state.auth_token
+                                    )
+                                    
+                                    if result:
+                                        st.success("Abteilung hinzugefügt!")
+                                        st.rerun()
+                    
+                    # === DEPARTMENT STATUS ANZEIGE ===
+                    with col_dept:
+                        # Für QMS System Administrator: zeige Status ohne API-Aufruf
+                        if user['id'] == 1:
+                            st.text("🏢 System Administration")
+                            st.caption("• Alle Rechte")
+                        else:
+                            user_departments = get_user_departments(user['id'])
+                            if user_departments:
+                                dept_names = [dept.get("interest_group_name", "Unbekannt") for dept in user_departments]
+                                st.text(f"🏢 {len(dept_names)} Abteilung(en)")
+                                for dept in dept_names[:2]:  # Zeige max. 2 Abteilungen
+                                    st.caption(f"• {dept}")
+                            else:
+                                st.text("🏢 Keine Abteilungen")
+                    
+                    # === SICHERES LÖSCHEN ===
+                    with col_delete:
+                        if not user.get('is_active', True):
+                            if st.button(f"✅ Aktivieren", key=f"activate_{user['id']}"):
+                                result = update_user(user['id'], {"is_active": True}, st.session_state.auth_token)
+                                if result:
+                                    st.success("Benutzer aktiviert!")
+                                    st.rerun()
+                        else:
+                            # SICHERHEITS-CHECKS für Deaktivierung/Löschung
+                            if is_qms_admin and is_self_action:
+                                st.warning("🚨 QMS Admin kann sich nicht selbst deaktivieren!")
+                            elif is_qms_admin:
+                                st.warning("⚠️ Haupt-QMS Administrator!")
+                                if st.button(f"⚠️ Trotzdem deaktivieren", key=f"force_deactivate_{user['id']}"):
+                                    result = update_user(user['id'], {"is_active": False}, st.session_state.auth_token)
+                                    if result:
+                                        st.error("⚠️ QMS Administrator deaktiviert!")
+                                        st.rerun()
+                            else:
+                                # Standard-User Aktionen
+                                col_deact, col_pass, col_del = st.columns(3)
+                                
+                                with col_deact:
+                                    if st.button(f"❌ Deaktivieren", key=f"deactivate_{user['id']}"):
+                                        result = update_user(user['id'], {"is_active": False}, st.session_state.auth_token)
+                                        if result:
+                                            st.warning("Benutzer deaktiviert!")
+                                            st.rerun()
+                                
+                                with col_pass:
+                                    # PASSWORT-RESET (nur System Admin)
+                                    if is_system_admin:
+                                        reset_btn_key = f"reset_btn_{user['id']}"
+                                        reset_state_key = f"reset_dialog_{user['id']}"
+                                        if st.button(f"🔐 Passwort zurücksetzen", key=reset_btn_key):
+                                            st.session_state[reset_state_key] = True
+                                            st.rerun()
+                                
+                                with col_del:
+                                    # PERMANENT LÖSCHEN (nur System Admin)
+                                    if is_system_admin:
+                                        if st.button(f"🗑️ LÖSCHEN", key=f"delete_{user['id']}", type="primary"):
+                                            st.session_state[f"confirm_delete_{user['id']}"] = True
+                                            st.rerun()
+                                        
+                                        # Bestätigungs-Dialog
+                                        if st.session_state.get(f"confirm_delete_{user['id']}", False):
+                                            st.error(f"⚠️ **PERMANENT LÖSCHEN:** {user['full_name']}")
+                                            
+                                            admin_password = st.text_input(
+                                                "Admin-Passwort zur Bestätigung:",
+                                                type="password",
+                                                key=f"del_confirm_{user['id']}"
+                                            )
+                                            
+                                            col_confirm, col_abort = st.columns(2)
+                                            
+                                            with col_confirm:
+                                                if st.button(f"🗑️ ENDGÜLTIG LÖSCHEN", key=f"final_delete_{user['id']}", type="primary"):
+                                                    if admin_password:
+                                                        if delete_user_permanently(user['id'], admin_password, st.session_state.auth_token):
+                                                            st.success(f"User {user['full_name']} permanent gelöscht!")
+                                                            st.rerun()
+                                            
+                                            with col_abort:
+                                                if st.button(f"❌ Abbrechen", key=f"abort_delete_{user['id']}"):
+                                                    st.session_state[f"confirm_delete_{user['id']}"] = False
+                                                    st.rerun()
+                    
+                    # === TEMPORÄRES PASSWORT ANZEIGEN ===
+                    temp_pw_key = f"temp_password_{user['id']}"
+                    show_temp_pw_key = f"show_temp_password_{user['id']}"
+                    
+                    if st.session_state.get(show_temp_pw_key, False):
+                        temp_pw = st.session_state.get(temp_pw_key, "")
+                        if temp_pw:
+                            st.markdown("---")
+                            st.markdown("### 🔑 **TEMPORÄRES PASSWORT**")
+                            
+                            # Großer, gut sichtbarer Container
+                            st.markdown(f"""
+                            <div style="
+                                background-color: #FFE4B5; 
+                                border: 3px solid #FF8C00; 
+                                border-radius: 10px; 
+                                padding: 20px; 
+                                text-align: center; 
+                                margin: 20px 0;
+                                font-size: 1.2em;
+                                font-weight: bold;
+                            ">
+                                🔐 NEUES PASSWORT FÜR: <strong>{user['full_name']}</strong><br/>
+                                <span style="font-size: 1.5em; color: #B22222; font-family: monospace; background: white; padding: 10px; border-radius: 5px; margin: 10px; display: inline-block;">
+                                    {temp_pw}
+                                </span><br/>
+                                📋 Dieses Passwort an den Benutzer weitergeben!
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Anweisungen für das Passwort
+                            st.warning("⚠️ **WICHTIG:** Dieses Passwort sofort und sicher an den Benutzer übermitteln!")
+                            st.info("ℹ️ Der Benutzer muss das Passwort beim nächsten Login ändern.")
+                            st.info("💡 **Tipp:** Markieren Sie das Passwort oben und kopieren Sie es (Strg+C / Cmd+C)")
+                            
+                            # Button zum Schließen
+                            if st.button("✅ Passwort übermittelt", key=f"close_temp_pw_{user['id']}"):
+                                st.session_state[show_temp_pw_key] = False
+                                if temp_pw_key in st.session_state:
+                                    del st.session_state[temp_pw_key]
+                                st.rerun()
+                            
+                            st.markdown("---")
+                    
+                    # === PASSWORT-RESET-DIALOG ===
+                    reset_state_key = f"reset_dialog_{user['id']}"
+                    if st.session_state.get(reset_state_key, False):
+                        st.markdown("---")
+                        st.markdown(f"### 🔐 Passwort zurücksetzen für: **{user['full_name']}**")
+                        
+                        st.warning("""
+                        **Sicherheitshinweis:** 
+                        - Ein temporäres Passwort wird generiert
+                        - Der Benutzer muss es beim nächsten Login ändern
+                        - Diese Aktion wird protokolliert
+                        """)
+                        
+                        # Option: Eigenes temporäres Passwort oder automatisch generieren (außerhalb Form)
+                        use_custom_password = st.checkbox(
+                            "Eigenes temporäres Passwort verwenden",
+                            key=f"custom_pw_checkbox_{user['id']}"
+                        )
+                        
+                        temp_password = ""
+                        if use_custom_password:
+                            temp_password = st.text_input(
+                                "Temporäres Passwort",
+                                type="password",
+                                help="Mindestens 12 Zeichen für Sicherheit",
+                                placeholder="Eigenes sicheres Passwort eingeben...",
+                                key=f"temp_password_input_{user['id']}"
+                            )
+                            st.warning("⚠️ **Wichtig:** Das Passwort sollte sicher sein (min. 12 Zeichen, gemischt)")
+                        else:
+                            st.info("✨ Ein sicheres temporäres Passwort wird automatisch generiert")
+                        
+                        with st.form(f"password_reset_form_{user['id']}"):
+                            reset_reason = st.text_area(
+                                "Grund für Passwort-Reset *",
+                                placeholder="z.B. Benutzer hat Passwort vergessen, Sicherheitsvorfall, etc.",
+                                help="Begründung ist für Audit-Trail erforderlich"
+                            )
+                            
+                            col_reset, col_cancel = st.columns(2)
+                            
+                            with col_reset:
+                                if st.form_submit_button("🔐 Passwort zurücksetzen", type="primary"):
+                                    # State aus Session State lesen da außerhalb Form
+                                    current_use_custom_pw = st.session_state.get(f"custom_pw_checkbox_{user['id']}", False)
+                                    current_temp_pw = st.session_state.get(f"temp_password_input_{user['id']}", "")
+                                    
+                                    if not reset_reason.strip():
+                                        st.error("❌ Bitte Grund für Reset angeben!")
+                                    elif current_use_custom_pw and len(current_temp_pw) < 12:
+                                        st.error("❌ Temporäres Passwort muss mindestens 12 Zeichen haben!")
+                                    elif current_use_custom_pw and not current_temp_pw.strip():
+                                        st.error("❌ Bitte ein temporäres Passwort eingeben!")
+                                    else:
+                                        with st.spinner("🔐 Setze Passwort zurück..."):
+                                            result = admin_reset_user_password(
+                                                user['id'],
+                                                reset_reason,
+                                                current_temp_pw,
+                                                st.session_state.auth_token
+                                            )
+                                            
+                                            if result:
+                                                st.success("✅ Passwort erfolgreich zurückgesetzt!")
+                                                
+                                                # Temporäres Passwort in Session State speichern
+                                                temp_pw = result.get('temporary_password')
+                                                if temp_pw:
+                                                    st.session_state[f"temp_password_{user['id']}"] = temp_pw
+                                                    st.session_state[f"show_temp_password_{user['id']}"] = True
+                                                
+                                                st.session_state[reset_state_key] = False
+                                                st.rerun()
+                            
+                            with col_cancel:
+                                if st.form_submit_button("❌ Abbrechen"):
+                                    st.session_state[reset_state_key] = False
+                                    st.rerun()
+        else:
+            st.info("Keine Benutzer gefunden oder Berechtigung fehlt.")
+    
+    with tab3:
+        st.markdown("### 📊 Benutzer-Statistiken")
+        
+        users = get_all_users()
+        if users:
+            # Statistiken berechnen
+            total_users = len(users)
+            active_users = len([u for u in users if u.get('is_active', True)])
+            dept_heads = len([u for u in users if u.get('is_department_head', False)])
+            
+            # Metriken anzeigen
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("👥 Gesamt", total_users)
+            with col2:
+                st.metric("🟢 Aktiv", active_users)
+            with col3:
+                st.metric("👑 Führungskräfte", dept_heads)
+            with col4:
+                st.metric("📊 Aktiv-Rate", f"{(active_users/total_users*100):.1f}%" if total_users > 0 else "0%")
+            
+            # Abteilungsverteilung
+            st.markdown("#### 🏢 Abteilungsverteilung")
+            dept_counts = {}
+            for user in users:
+                dept = user.get("organizational_unit", "Unbekannt")
+                dept_counts[dept] = dept_counts.get(dept, 0) + 1
+            
+            for dept, count in sorted(dept_counts.items()):
+                st.write(f"**{dept}:** {count} Benutzer")
+            
+            # Level-Verteilung
+            st.markdown("#### 🏷️ Level-Verteilung")
+            level_counts = {}
+            for user in users:
+                level = user.get("approval_level", 1)
+                level_counts[level] = level_counts.get(level, 0) + 1
+            
+            for level in sorted(level_counts.keys()):
+                level_name = ['Mitarbeiter', 'Teamleiter', 'Abteilungsleiter', 'QM-Manager'][level-1]
+                st.write(f"**Level {level} ({level_name}):** {level_counts[level]} Benutzer")
+
+def render_profile_page():
+    """
+    Rendert die Benutzerprofil-Seite - DSGVO-konform
+    
+    Ermöglicht Benutzern:
+    - Eigene Daten einsehen (DSGVO Art. 15)
+    - Passwort selbst ändern (DSGVO Art. 16)
+    """
+    st.markdown("## 👤 Mein Profil")
+    
+    if not check_backend_status():
+        st.error("❌ Backend nicht erreichbar!")
+        return
+    
+    # Tabs für verschiedene Profil-Bereiche
+    tab1, tab2 = st.tabs(["📄 Profil-Informationen", "🔐 Passwort ändern"])
+    
+    with tab1:
+        st.markdown("### 📄 Meine Profil-Informationen")
+        st.markdown("""
+        <div class="info-box">
+            <strong>DSGVO-Hinweis:</strong> Sie haben das Recht auf Auskunft über Ihre personenbezogenen Daten (Art. 15 DSGVO).
+            Diese Seite zeigt alle über Sie gespeicherten Informationen.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Profil-Aktionen
+        if st.button("🔄 Profil aktualisieren"):
+            # Cache löschen und neu laden
+            st.session_state["my_profile"] = None
+            profile = get_my_profile()
+            if profile:
+                st.session_state["my_profile"] = profile
+        
+        # Cache wird automatisch bei Fehlern geleert
+        
+        # IMMER AKTUELLES PROFIL LADEN - Session State Problem beheben
+        profile = None
+        
+        # Debugging: Prüfe Session State
+        cached_profile = st.session_state.get("my_profile")
+        if cached_profile:
+            st.info(f"🔧 Debug: Cache gefunden für {cached_profile.get('email', 'unbekannt')}")
+        
+        # FORCE: Immer frische Daten vom Backend holen
+        with st.spinner("📄 Lade aktuelle Profil-Daten..."):
+            profile = get_my_profile()
+            if profile:
+                st.session_state["my_profile"] = profile
+                st.success("✅ Profil erfolgreich aktualisiert!")
+        
+        if profile:
+            # DEBUG: Zeige rohe API-Daten
+            with st.expander("🔧 Debug: API-Response", expanded=False):
+                import json
+                st.json(profile)
+            
+            # Basis-Informationen
+            st.markdown("#### 👤 Persönliche Daten")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"**Vollständiger Name:** {profile.get('full_name', 'N/A')}")
+                st.markdown(f"**E-Mail:** {profile.get('email', 'N/A')}")
+                st.markdown(f"**Mitarbeiter-ID:** {profile.get('employee_id') or 'Nicht vergeben'}")
+                st.markdown(f"**Benutzer-ID:** {profile.get('id', 'N/A')}")
+            
+            with col2:
+                st.markdown(f"**Abteilung:** {profile.get('organizational_unit', 'N/A')}")
+                st.markdown(f"**Freigabe-Level:** {profile.get('approval_level', 1)}")
+                st.markdown(f"**Abteilungsleiter:** {'✅ Ja' if profile.get('is_department_head') else '❌ Nein'}")
+                st.markdown(f"**Account-Status:** {'🟢 Aktiv' if profile.get('is_active') else '🔴 Inaktiv'}")
+            
+            # Account-Metadaten
+            st.markdown("#### 📅 Account-Informationen")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                created_at = profile.get('created_at')
+                if created_at:
+                    from datetime import datetime
+                    try:
+                        if isinstance(created_at, str):
+                            created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        else:
+                            created_date = created_at
+                        st.markdown(f"**Account erstellt:** {created_date.strftime('%d.%m.%Y %H:%M')}")
+                    except:
+                        st.markdown(f"**Account erstellt:** {created_at}")
+                
+                last_login = profile.get('last_login')
+                if last_login:
+                    st.markdown(f"**Letzter Login:** {last_login}")
+                else:
+                    st.markdown("**Letzter Login:** Nicht verfügbar")
+            
+            with col2:
+                password_changed = profile.get('password_changed_at')
+                if password_changed:
+                    st.markdown(f"**Passwort geändert:** {password_changed}")
+                else:
+                    st.markdown("**Passwort geändert:** Nicht verfügbar")
+            
+            # Berechtigungen
+            st.markdown("#### 🔐 Meine Berechtigungen")
+            permissions = profile.get('individual_permissions', [])
+            if permissions:
+                st.markdown("**Individuelle Berechtigungen:**")
+                for perm in permissions:
+                    perm_emoji = {
+                        'system_administration': '🔧',
+                        'user_management': '👥',
+                        'document_management': '📋',
+                        'qm_approval': '✅',
+                        'all_rights': '⭐'
+                    }.get(perm, '🔹')
+                    st.markdown(f"• {perm_emoji} {perm}")
+            else:
+                st.markdown("**Berechtigungen:** Standard-Berechtigungen")
+            
+            # Interessensgruppen - VERBESSERTE ANZEIGE
+            st.markdown("#### 🏢 Meine Interessensgruppen")
+            interest_groups = profile.get('interest_groups', [])
+            
+            # DEBUG: Zeige rohe Daten
+            st.caption(f"🔧 Debug: interest_groups = {interest_groups} (Typ: {type(interest_groups)})")
+            
+            if interest_groups and len(interest_groups) > 0:
+                st.markdown("**Zugeordnete Gruppen:**")
+                for group in interest_groups:
+                    st.markdown(f"• 🏢 {group}")
+                st.success(f"✅ {len(interest_groups)} Interessensgruppen zugeordnet")
+            else:
+                st.warning("**Interessensgruppen:** Keine Zuordnungen")
+                st.caption("Wenn Sie Interessensgruppen haben sollten, wenden Sie sich an den Administrator.")
+            
+            # Datenexport (DSGVO Art. 20)
+            st.markdown("#### 📥 Datenexport")
+            st.markdown("""
+            <div class="info-box">
+                <strong>Recht auf Datenübertragbarkeit (Art. 20 DSGVO):</strong> 
+                Sie können Ihre Daten in einem strukturierten, gängigen Format herunterladen.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("📥 Meine Daten als JSON exportieren"):
+                import json
+                from datetime import datetime
+                profile_json = json.dumps(profile, indent=2, default=str, ensure_ascii=False)
+                st.download_button(
+                    label="💾 JSON-Datei herunterladen",
+                    data=profile_json,
+                    file_name=f"profil_{profile.get('email', 'user')}_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json"
+                )
+        else:
+            st.error("❌ Profil konnte nicht geladen werden. Bitte versuchen Sie es erneut.")
+    
+    with tab2:
+        st.markdown("### 🔐 Passwort ändern")
+        st.markdown("""
+        <div class="info-box">
+            <strong>Sicherheitshinweis:</strong> Sie können Ihr Passwort jederzeit selbst ändern.
+            Ihr aktuelles Passwort wird zur Bestätigung benötigt.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("password_change_form"):
+            current_password = st.text_input(
+                "🔐 Aktuelles Passwort", 
+                type="password",
+                help="Zur Sicherheit benötigen wir Ihr aktuelles Passwort"
+            )
+            
+            new_password = st.text_input(
+                "🆕 Neues Passwort", 
+                type="password",
+                help="Mindestens 8 Zeichen, 1 Großbuchstabe, 1 Zahl oder Sonderzeichen"
+            )
+            
+            confirm_password = st.text_input(
+                "✅ Neues Passwort bestätigen", 
+                type="password",
+                help="Wiederholen Sie das neue Passwort"
+            )
+            
+            # Passwort-Stärke-Anzeige
+            if new_password:
+                strength_score = 0
+                feedback = []
+                
+                if len(new_password) >= 8:
+                    strength_score += 1
+                else:
+                    feedback.append("❌ Mindestens 8 Zeichen")
+                
+                if any(c.isupper() for c in new_password):
+                    strength_score += 1
+                else:
+                    feedback.append("❌ Mindestens 1 Großbuchstabe")
+                
+                if any(c.isdigit() for c in new_password):
+                    strength_score += 1
+                else:
+                    feedback.append("❌ Mindestens 1 Zahl")
+                
+                if any(not c.isalnum() for c in new_password):
+                    strength_score += 1
+                else:
+                    feedback.append("❌ Mindestens 1 Sonderzeichen empfohlen")
+                
+                # Stärke-Anzeige
+                if strength_score >= 3:
+                    st.success("✅ Passwort-Stärke: Gut")
+                elif strength_score >= 2:
+                    st.warning("⚠️ Passwort-Stärke: Mittel")
+                else:
+                    st.error("❌ Passwort-Stärke: Schwach")
+                
+                # Feedback anzeigen
+                if feedback:
+                    for fb in feedback:
+                        st.caption(fb)
+            
+            # Submit Button
+            if st.form_submit_button("🔄 Passwort ändern", type="primary"):
+                if not current_password:
+                    st.error("❌ Aktuelles Passwort ist erforderlich")
+                elif not new_password:
+                    st.error("❌ Neues Passwort ist erforderlich")
+                elif new_password != confirm_password:
+                    st.error("❌ Neue Passwörter stimmen nicht überein")
+                elif len(new_password) < 8:
+                    st.error("❌ Neues Passwort muss mindestens 8 Zeichen haben")
+                else:
+                    with st.spinner("🔄 Passwort wird geändert..."):
+                        result = change_my_password(current_password, new_password, confirm_password)
+                        if result:
+                            st.success("✅ Passwort erfolgreich geändert!")
+                            st.balloons()
+                            # Session State zurücksetzen für Sicherheit
+                            time.sleep(2)
+                            st.rerun()
 
 def render_settings_page():
     """Rendert die Einstellungen"""
@@ -679,14 +2138,20 @@ def main():
     render_sidebar()
     
     # Page Routing
-    current_page = st.session_state.get("current_page", "upload")
+    current_page = st.session_state.get("current_page", "workflow")
     
-    if current_page == "upload":
+    if current_page == "workflow":
+        render_workflow_page()
+    elif current_page == "upload":
         render_upload_page()
     elif current_page == "documents":
         render_documents_page()
+    elif current_page == "users":
+        render_users_page()
     elif current_page == "dashboard":
         render_dashboard_page()
+    elif current_page == "profile":
+        render_profile_page()
     elif current_page == "settings":
         render_settings_page()
     else:

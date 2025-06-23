@@ -37,24 +37,42 @@ def init_interest_groups(db):
     """
     Initialisiert die 13 praxisorientierten Interessensgruppen.
     
-    Erstellt ein vollständiges Stakeholder-System für das QMS,
-    von internen Teams bis zu externen Partnern. Jede Gruppe
-    hat spezifische Berechtigungen und KI-Funktionalitäten.
+    WICHTIG: Verwendet die Master-Definition für Konsistenz!
     
     Args:
         db: SQLAlchemy Session für Datenbankoperationen
         
     Returns:
         list: Liste der erstellten InterestGroup-Objekte
-        
-    Gruppenkategorien:
-        - Interne Stakeholder: Einkauf, QM, Entwicklung, etc.
-        - Produktion & Service: Fertigung, Service, Schulung
-        - Compliance: Regulatory Affairs, Auditoren
-        - Externe Partner: Lieferanten, Distributoren, Kunden
     """
     
-    groups_data = [
+    # Import der Master-Definition
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from interest_groups_master import get_groups_for_db_init
+    
+    groups_data = get_groups_for_db_init()
+    
+    print("📊 Erstelle 13 Interessensgruppen (Master-Definition)...")
+    for group_data in groups_data:
+        existing_group = db.query(InterestGroup).filter(InterestGroup.code == group_data["code"]).first()
+        if not existing_group:
+            group = InterestGroup(**group_data)
+            db.add(group)
+            print(f"  ✅ {group_data['name']} ({group_data['code']})")
+        else:
+            print(f"  ⚠️  {group_data['name']} existiert bereits")
+    
+    db.commit()
+
+def init_interest_groups_old(db):
+    """
+    DEPRECATED: Alte Interessensgruppen-Definition (für Referenz)
+    Verwende init_interest_groups() mit Master-Definition!
+    """
+    
+    groups_data_old = [
         {
             "name": "Einkauf",
             "code": "procurement",

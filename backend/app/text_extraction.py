@@ -1,17 +1,37 @@
 """
-Text-Extraktion für KI-QMS Dokumentenmanagement
+KI-QMS Text-Extraktion für Dokumentenmanagement
 
-Dieses Modul extrahiert Text aus verschiedenen Dateiformaten für
-RAG-Indexierung und KI-Verarbeitung.
+Dieses Modul stellt robuste Text-Extraktion aus verschiedenen Dateiformaten
+bereit für RAG-Indexierung, KI-Verarbeitung und Volltext-Suche im QMS.
+
+Hauptfunktionalitäten:
+- 📄 Multi-Format Text-Extraktion (PDF, DOC, XLSX, TXT, MD)
+- 🔍 QMS-spezifische Keyword-Erkennung
+- 🧹 Text-Bereinigung für bessere KI-Verarbeitung
+- 📊 Strukturierte Datenextraktion (Tabellen, Überschriften)
+- 🛡️ Robuste Fehlerbehandlung und Fallback-Mechanismen
 
 Unterstützte Formate:
-- PDF: PyPDF2
-- Word: python-docx (DOCX)
-- Excel: openpyxl (XLSX)
-- Text: TXT, MD (Plain Text)
+- PDF: PyPDF2 mit Seiten-strukturierter Extraktion
+- Word: python-docx für DOCX mit Tabellen-Support
+- Excel: openpyxl für XLSX mit Multi-Sheet-Verarbeitung  
+- Text: TXT, MD mit UTF-8/Latin-1 Fallback
+- Legacy: DOC, XLS über Fehlermeldungen
+
+QMS-Features:
+- ISO 13485 relevante Keyword-Erkennung
+- Normreferenzen (ISO, IEC, DIN, EN) Detection
+- Compliance-Begriffe (MDR, FDA, CFR) Extraction
+- QMS-Prozess-Terminologie (CAPA, Audit, Kalibrierung)
+
+Performance:
+- Chunked Processing für große Dateien
+- Memory-effiziente Stream-Verarbeitung
+- Graceful Degradation bei Parsing-Fehlern
+- Logging für Debugging und Monitoring
 
 Autoren: KI-QMS Entwicklungsteam
-Version: 1.0.0
+Version: 2.0.0 (Enhanced für RAG-Integration)
 """
 
 from pathlib import Path
@@ -181,6 +201,162 @@ def extract_keywords(text: str) -> list[str]:
             found_keywords.append(keyword)
     
     return found_keywords
+
+def analyze_document_type(text: str, title: str = "") -> str:
+    """
+    Analysiert ersten 3000 Zeichen + Titel und bestimmt automatisch den Dokumenttyp.
+    
+    Args:
+        text: Extrahierter Text (erste 3000 Zeichen werden analysiert)
+        title: Dokumenttitel für zusätzliche Hinweise
+        
+    Returns:
+        str: Erkannter Dokumenttyp aus DocumentType Enum
+    """
+    # Erste 3000 Zeichen für Analyse verwenden
+    analysis_text = (title + " " + text)[:3000].lower()
+    
+    # Dokumenttyp-spezifische Keywords mit Gewichtung
+    type_indicators = {
+        "QM_MANUAL": [
+            ("qualitätsmanagement", 10), ("qm-handbuch", 15), ("qualitätshandbuch", 15),
+            ("unternehmenspolitik", 8), ("organisationsstruktur", 8), ("qualitätspolitik", 12),
+            ("iso 13485", 10), ("mdr", 8), ("qualitätsmanagementsystem", 12)
+        ],
+        "SOP": [
+            ("standard operating procedure", 15), ("sop", 15), ("standardarbeitsanweisung", 12),
+            ("verfahrensanweisung", 12), ("prozessanweisung", 12), ("durchführung", 8),
+            ("verantwortlichkeiten", 10), ("ablaufbeschreibung", 10), ("prozessbeschreibung", 10)
+        ],
+        "WORK_INSTRUCTION": [
+            ("arbeitsanweisung", 15), ("arbeitsvorschrift", 12), ("durchführungsanweisung", 12),
+            ("schritt-für-schritt", 10), ("anleitung", 8), ("detaillierte", 6),
+            ("bedienung", 8), ("handhabung", 8), ("ausführung", 6)
+        ],
+        "FORM": [
+            ("formular", 15), ("formblatt", 15), ("checkliste", 12), ("protokoll", 10),
+            ("prüfprotokoll", 12), ("nachweis", 8), ("dokumentation", 6),
+            ("unterschrift", 10), ("datum", 6), ("name", 4)
+        ],
+        "RISK_ASSESSMENT": [
+            ("risikoanalyse", 15), ("risikobewertung", 15), ("iso 14971", 15),
+            ("risikomanagement", 12), ("gefährdung", 10), ("schadensereignis", 10),
+            ("wahrscheinlichkeit", 8), ("schweregrad", 8), ("risikokontrolle", 10)
+        ],
+        "VALIDATION_PROTOCOL": [
+            ("validierung", 15), ("validierungsprotokoll", 15), ("iq", 12), ("oq", 12), ("pq", 12),
+            ("installation qualification", 12), ("operational qualification", 12),
+            ("performance qualification", 12), ("prüfplan", 10), ("testergebnis", 8)
+        ],
+        "CALIBRATION_PROCEDURE": [
+            ("kalibrierung", 15), ("kalibrierverfahren", 15), ("justierung", 10),
+            ("messgenauigkeit", 10), ("toleranz", 8), ("messmittel", 10),
+            ("prüfmittel", 10), ("normal", 6), ("rückführbarkeit", 12)
+        ],
+        "AUDIT_REPORT": [
+            ("audit", 15), ("auditbericht", 15), ("prüfbericht", 12), ("bewertung", 8),
+            ("feststellung", 10), ("abweichung", 10), ("konformität", 10),
+            ("nichtkonformität", 12), ("verbesserung", 8)
+        ],
+        "STANDARD_NORM": [
+            ("iso", 12), ("din", 12), ("en", 8), ("iec", 12), ("astm", 10),
+            ("norm", 10), ("standard", 10), ("anforderung", 8), ("spezifikation", 8),
+            ("technische regel", 10), ("richtlinie", 8)
+        ],
+        "SPECIFICATION": [
+            ("spezifikation", 15), ("anforderung", 10), ("technische daten", 10),
+            ("leistungsmerkmale", 10), ("parameter", 8), ("eigenschaft", 6),
+            ("charakteristikum", 8), ("kennwert", 8)
+        ]
+    }
+    
+    # Score für jeden Dokumenttyp berechnen
+    scores = {}
+    for doc_type, indicators in type_indicators.items():
+        score = 0
+        for keyword, weight in indicators:
+            if keyword in analysis_text:
+                score += weight
+                # Bonus für Keyword im Titel
+                if title and keyword in title.lower():
+                    score += weight * 0.5
+        scores[doc_type] = score
+    
+    # Besten Score finden
+    if scores:
+        best_type = max(scores, key=scores.get)
+        best_score = scores[best_type]
+        
+        # Mindest-Score für automatische Zuordnung
+        if best_score >= 10:
+            return best_type
+    
+    # Fallback: "OTHER" wenn keine klare Zuordnung möglich
+    return "OTHER"
+
+def extract_comprehensive_metadata(text: str, title: str = "") -> dict:
+    """
+    Extrahiert umfassende Metadaten aus Dokumententext.
+    
+    Args:
+        text: Vollständiger extrahierter Text
+        title: Dokumenttitel
+        
+    Returns:
+        dict: Umfassende Metadaten inkl. Dokumenttyp, Keywords, etc.
+    """
+    # Erste 3000 Zeichen für Analyse
+    analysis_text = text[:3000]
+    
+    metadata = {
+        "detected_type": analyze_document_type(text, title),
+        "keywords": extract_keywords(text),
+        "text_length": len(text),
+        "analysis_excerpt": analysis_text,
+        "has_tables": "tabelle" in text.lower() or "|" in text,
+        "has_procedures": any(word in text.lower() for word in ["schritt", "verfahren", "durchführung", "ablauf"]),
+        "compliance_indicators": [],
+        "complexity_score": _calculate_complexity_score(analysis_text)
+    }
+    
+    # Compliance-Indikatoren sammeln
+    compliance_terms = ["iso", "mdr", "fda", "cfr", "gmp", "audit", "validierung", "kalibrierung"]
+    for term in compliance_terms:
+        if term in text.lower():
+            metadata["compliance_indicators"].append(term.upper())
+    
+    return metadata
+
+def _calculate_complexity_score(text: str) -> int:
+    """
+    Berechnet Komplexitäts-Score basierend auf Textmerkmalen.
+    
+    Args:
+        text: Zu analysierender Text
+        
+    Returns:
+        int: Komplexitätsscore (1-10)
+    """
+    score = 1
+    
+    # Länge berücksichtigen
+    if len(text) > 1000:
+        score += 2
+    if len(text) > 2000:
+        score += 2
+    
+    # Fachbegriffe zählen
+    technical_terms = ["spezifikation", "validierung", "kalibrierung", "verifikation", "risiko"]
+    tech_count = sum(1 for term in technical_terms if term in text.lower())
+    score += min(tech_count, 3)
+    
+    # Struktur bewerten
+    if "1." in text or "a)" in text:  # Nummerierte Listen
+        score += 1
+    if text.count("\n") > 10:  # Viele Absätze
+        score += 1
+    
+    return min(score, 10)
 
 def clean_extracted_text(text: str) -> str:
     """

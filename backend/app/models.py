@@ -32,10 +32,19 @@ from .database import Base
 
 # === ENUMS ===
 class DocumentStatus(enum.Enum):
-    DRAFT = "draft"
-    REVIEW = "review"
-    APPROVED = "approved"
-    OBSOLETE = "obsolete"
+    """
+    Dokumentenstatus für QM-Workflow nach ISO 13485.
+    
+    Vierstufiger Freigabe-Workflow:
+    - DRAFT: Entwurf in Bearbeitung
+    - REVIEWED: Fachlich geprüft, wartet auf QM-Freigabe  
+    - APPROVED: QM-freigegeben, offiziell gültig
+    - OBSOLETE: Nicht mehr gültig, archiviert
+    """
+    DRAFT = "draft"          # ✏️ Entwurf - wird erstellt/überarbeitet
+    REVIEWED = "reviewed"    # 🔍 Geprüft - fachliche Prüfung abgeschlossen
+    APPROVED = "approved"    # ✅ Freigegeben - QM-Freigabe erhalten
+    OBSOLETE = "obsolete"    # 🗑️ Obsolet - nicht mehr gültig
 
 class DocumentType(enum.Enum):
     """
@@ -180,20 +189,29 @@ class UserGroupMembership(Base):
     """
     Zuordnungstabelle für Many-to-Many Beziehung User ↔ InterestGroup.
     
+    **ERWEITERT für Multiple Abteilungen pro User:**
     Ermöglicht flexible Zuordnung von Benutzern zu mehreren Interessensgruppen
-    mit spezifischen Rollen innerhalb jeder Gruppe. Unterstützt komplexe
-    Organisationsstrukturen und Matrix-Organisationen.
+    mit **individuellen Approval-Levels** je Abteilung. Unterstützt komplexe
+    Organisationsstrukturen wo ein User verschiedene Rollen hat.
+    
+    **Beispiel:**
+    ```
+    User: reiner@company.com
+    ├── QM-Abteilung (Level 2 - Teamleiter) 
+    ├── Service (Level 3 - Abteilungsleiter)
+    └── Entwicklung (Level 1 - Mitarbeiter)
+    ```
     
     Geschäftslogik:
     - Ein User kann mehreren Gruppen angehören
-    - Verschiedene Rollen in verschiedenen Gruppen möglich
+    - **Verschiedene Approval-Levels** in verschiedenen Gruppen
     - Zeitstempel für Audit-Trail und Historisierung
     - Deaktivierung ohne Datenverlust möglich
     
     Anwendungsfälle:
     - QM-Manager in mehreren Produktgruppen
-    - Entwickler in verschiedenen Projektteams
-    - Externe Auditoren mit temporärem Zugang
+    - Entwickler in verschiedenen Projektteams  
+    - Abteilungsleiter mit Mitarbeiter-Status in anderen Bereichen
     """
     __tablename__ = "user_group_memberships"
     
@@ -203,15 +221,30 @@ class UserGroupMembership(Base):
                      comment="Referenz auf User.id")
     interest_group_id = Column(Integer, ForeignKey("interest_groups.id"), nullable=False, index=True,
                               comment="Referenz auf InterestGroup.id")
-    role_in_group = Column(String(50), comment="Spezifische Rolle des Users in dieser Gruppe")
+    
+    # === ERWEITERTE FELDER FÜR MULTIPLE ABTEILUNGEN ===
+    role_in_group = Column(String(50), comment="Spezifische Rolle des Users in dieser Gruppe (z.B. 'Teamleiter', 'Fachexperte')")
+    approval_level = Column(Integer, default=1, nullable=False,
+                           comment="Freigabe-Level in dieser Abteilung: 1=Mitarbeiter, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager")
+    is_department_head = Column(Boolean, default=False, nullable=False, 
+                               comment="Abteilungsleiter-Status in dieser spezifischen Gruppe")
+    
+    # === AUDIT & VERWALTUNG ===
     is_active = Column(Boolean, default=True, nullable=False,
                       comment="Aktiv-Status der Zuordnung")
     joined_at = Column(DateTime, default=datetime.utcnow, nullable=False,
                       comment="Zeitpunkt des Beitritts zur Gruppe")
+    assigned_by_id = Column(Integer, ForeignKey("users.id"), nullable=True,
+                           comment="System Admin der diese Zuordnung erstellt hat")
+    notes = Column(Text, comment="Bemerkungen zur Zuordnung (z.B. 'Temporär für Projekt XY')")
     
     # Relationships
-    user = relationship("User", back_populates="group_memberships")
+    user = relationship("User", back_populates="group_memberships", foreign_keys=[user_id])
     interest_group = relationship("InterestGroup", back_populates="user_memberships")
+    assigned_by = relationship("User", foreign_keys=[assigned_by_id], post_update=True)
+    
+    def __repr__(self):
+        return f"<UserGroupMembership(user_id={self.user_id}, group_id={self.interest_group_id}, level={self.approval_level})>"
 
 # === DOKUMENTEN-MODELL: QMS-SPEZIFISCHE DOKUMENTENVERWALTUNG ===
 
@@ -283,6 +316,11 @@ class Document(Base):
     approved_by_id = Column(Integer, ForeignKey("users.id"), comment="Genehmiger (QM-Manager)")
     approved_at = Column(DateTime, comment="Zeitpunkt der Freigabe")
     
+    # === STATUS-CHANGE TRACKING ===
+    status_changed_by_id = Column(Integer, ForeignKey("users.id"), comment="User der letzten Status-Änderung")
+    status_changed_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der letzten Status-Änderung")
+    status_comment = Column(Text, comment="Kommentar zur Status-Änderung")
+    
     # Metadata
     creator_id = Column(Integer, ForeignKey("users.id"), comment="Ersteller des Dokuments (User.id)")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der Erstellung")
@@ -292,9 +330,11 @@ class Document(Base):
     creator = relationship("User", back_populates="documents_created", foreign_keys=[creator_id])
     reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
+    status_changed_by = relationship("User", foreign_keys=[status_changed_by_id])
     parent_document = relationship("Document", remote_side=[id], back_populates="child_documents")
     child_documents = relationship("Document", back_populates="parent_document")
     norm_mappings = relationship("DocumentNormMapping", back_populates="document")
+    status_history = relationship("DocumentStatusHistory", back_populates="document", order_by="DocumentStatusHistory.changed_at.desc()")
 
 # === NORMEN & COMPLIANCE ===
 
@@ -457,4 +497,37 @@ class CalibrationRequirement(Base):
     requirements_text = Column(Text)
     
     # Relationships
-    norm = relationship("Norm", back_populates="calibration_requirements") 
+    norm = relationship("Norm", back_populates="calibration_requirements")
+
+class DocumentStatusHistory(Base):
+    """
+    Audit-Trail für Dokumentstatus-Änderungen.
+    
+    Vollständige Nachverfolgung aller Status-Wechsel für Compliance
+    nach ISO 13485 Anforderungen. Unterstützt Rollback-Funktionalität
+    und forensische Analyse.
+    
+    Workflow-Tracking:
+    - Automatische Erfassung bei jedem Status-Change
+    - User-Identifikation für Verantwortlichkeit
+    - Kommentar-System für Begründungen
+    - Unveränderlicher Audit-Trail
+    """
+    __tablename__ = "document_status_history"
+    
+    id = Column(Integer, primary_key=True, index=True,
+                comment="Eindeutige History-Eintrag-ID")
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True,
+                        comment="Referenz auf das Dokument")
+    old_status = Column(Enum(DocumentStatus), comment="Vorheriger Status")
+    new_status = Column(Enum(DocumentStatus), nullable=False,
+                       comment="Neuer Status nach Änderung")
+    changed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False,
+                          comment="User der die Änderung durchgeführt hat")
+    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True,
+                       comment="Zeitpunkt der Status-Änderung")
+    comment = Column(Text, comment="Kommentar/Begründung für Status-Änderung")
+    
+    # Relationships
+    document = relationship("Document", back_populates="status_history")
+    changed_by = relationship("User") 

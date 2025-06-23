@@ -61,6 +61,9 @@ CONTRIBUTING.md
 phase1.md
 phase2.md
 
+# Archivierte/veraltete Dateien (aus Dokumentations-Bereinigung)
+obsolete/
+
 # Database Files (sensible Daten)
 *.db
 *.db-shm

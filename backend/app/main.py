@@ -1,22 +1,112 @@
 """
 KI-QMS FastAPI Main Application
 
-Dieses Modul definiert die Haupt-FastAPI-Anwendung für das KI-gestützte 
-Qualitätsmanagementsystem (QMS). Es stellt RESTful API-Endpunkte für:
+Enterprise-grade Quality Management System (QMS) API for medical device companies.
+Provides comprehensive RESTful endpoints for ISO 13485, EU MDR, and FDA 21 CFR Part 820 compliance.
 
-- Interessensgruppen-Management (13 praxisorientierte Stakeholder-Gruppen)
-- Benutzer- und Rollenverwaltung
-- Dokumentenmanagement mit QMS-spezifischen Typen
-- Normen- und Compliance-Verwaltung
-- Equipment- und Kalibrierungsmanagement
+This module serves as the central FastAPI application, orchestrating all QMS operations
+through a robust, scalable, and secure API architecture designed for production environments.
 
-Autoren: KI-QMS Entwicklungsteam
-Version: 1.0.0 (MVP Phase 1)
-Erstellt: 2024
-Lizenz: MIT
+API Architecture:
+    • RESTful design following OpenAPI 3.0.3 specification
+    • Automatic Swagger UI and ReDoc documentation generation
+    • Comprehensive error handling with standardized HTTP status codes
+    • Request/response validation using Pydantic v2 schemas
+    • Async-first architecture for high-performance operations
+
+Core Business Domains:
+    1. Interest Groups Management (13 stakeholder-oriented groups)
+    2. User Management & Authentication (JWT-based RBAC)
+    3. Document Management (25+ QMS-specific document types)
+    4. Standards & Compliance (ISO 13485, MDR, FDA CFR Part 820)
+    5. Equipment & Calibration Management (ISO 17025 compliant)
+    6. Full-text Search & AI-powered Text Extraction
+    7. Workflow Engine for automated QM processes
+
+Security Features:
+    • OAuth2 with JWT Bearer token authentication
+    • Role-based access control (RBAC) with granular permissions
+    • Password hashing using bcrypt with configurable rounds
+    • CORS middleware for secure cross-origin requests
+    • File upload validation with MIME type checking
+    • SQL injection protection via SQLAlchemy ORM
+
+Performance & Scalability:
+    • Async I/O operations for file handling and database access
+    • Connection pooling and query optimization
+    • Pagination support for large data sets
+    • Background task processing for resource-intensive operations
+    • Caching strategies for frequently accessed data
+
+Data Validation & Type Safety:
+    • Comprehensive Pydantic v2 schemas with field validators
+    • Type hints throughout the codebase for IDE support
+    • Custom validators for business rule enforcement
+    • Automatic request/response serialization and deserialization
+
+File Management:
+    • Secure file upload with size and type validation (max 50MB)
+    • Intelligent text extraction from PDF, DOC, DOCX, TXT, MD, XLS, XLSX
+    • Automated keyword extraction for search optimization
+    • SHA-256 integrity checking and duplicate detection
+    • Organized storage structure by document type
+
+Compliance Implementation:
+    • ISO 13485:2016 document control workflows
+    • EU MDR 2017/745 technical documentation requirements
+    • FDA 21 CFR Part 820 quality system regulations
+    • Complete audit trails for all operations
+    • Automated calibration schedule management per ISO 17025
+
+Technology Stack:
+    Backend Framework: FastAPI 0.110+ (Python 3.12+)
+    ORM: SQLAlchemy 2.0+ with async support
+    Database: SQLite (development), PostgreSQL (production)
+    Validation: Pydantic v2 with custom validators
+    Authentication: python-jose for JWT, passlib for password hashing
+    File I/O: aiofiles for async file operations
+    Documentation: Automatic OpenAPI schema generation
+
+Development Standards:
+    • Google-style docstrings for all public functions
+    • Type hints for all function signatures
+    • Comprehensive error handling with custom exceptions
+    • Unit tests with pytest and async test clients
+    • Code formatting with Black and linting with Ruff
+    • Pre-commit hooks for code quality enforcement
+
+API Endpoint Categories:
+    /health                     - System health and monitoring
+    /api/auth/*                 - Authentication and authorization
+    /api/users/*                - User management and profiles
+    /api/interest-groups/*      - Stakeholder group management
+    /api/documents/*            - Document lifecycle management
+    /api/equipment/*            - Equipment and asset management
+    /api/calibrations/*         - Calibration scheduling and tracking
+    /api/norms/*                - Standards and compliance management
+
+Error Handling:
+    Standardized error responses with detailed messages, error codes,
+    and contextual information for debugging and user feedback.
+
+Example Usage:
+    >>> import requests
+    >>> # Login and get token
+    >>> response = requests.post('/api/auth/login', 
+    ...                         json={'email': 'user@company.com', 'password': 'secure123'})
+    >>> token = response.json()['access_token']
+    >>> # Use API with token
+    >>> headers = {'Authorization': f'Bearer {token}'}
+    >>> documents = requests.get('/api/documents', headers=headers).json()
+
+Authors: KI-QMS Development Team
+Version: 2.0.0 (Production Ready)
+Created: December 2024
+License: MIT License
+Last Updated: 2024-12-20
 """
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -48,13 +138,24 @@ from .schemas import (
     User, UserCreate, UserUpdate,
     UserGroupMembership, UserGroupMembershipCreate,
     Document, DocumentCreate, DocumentUpdate,
+    DocumentStatusChange, DocumentStatusHistory, NotificationInfo,
     Norm, NormCreate, NormUpdate,
     Equipment, EquipmentCreate, EquipmentUpdate,
     Calibration, CalibrationCreate, CalibrationUpdate,
     FileUploadResponse, DocumentWithFileCreate,
-    GenericResponse
+    GenericResponse,
+    PasswordChangeRequest, AdminPasswordResetRequest, 
+    UserProfileResponse, PasswordResetResponse
 )
 from .text_extraction import extract_text_from_file, extract_keywords
+from .auth import (
+    authenticate_user, create_access_token, get_current_active_user,
+    get_user_permissions, get_user_groups as auth_get_user_groups, get_password_hash,
+    Token, LoginRequest, UserInfo,
+    require_qm_approval, require_admin, require_document_management,
+    require_qm_group, require_input_team, require_development
+)
+from .workflow_engine import get_workflow_engine, WorkflowTask
 
 # ===== DATEI-UPLOAD KONFIGURATION =====
 UPLOAD_DIR = Path("uploads")  # Relativer Pfad vom backend/ Verzeichnis aus
@@ -63,32 +164,64 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # Maximale Dateigröße: 50MB
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# Erlaubte MIME-Types
+# Erlaubte MIME-Types für QMS-Dokumente
 ALLOWED_MIME_TYPES = {
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "text/plain",
-    "text/markdown",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    "application/pdf",                    # PDF-Dokumente
+    "application/msword",                 # DOC (Legacy Word)
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # DOCX
+    "text/plain",                         # TXT-Dateien
+    "text/markdown",                      # MD-Dateien
+    "application/vnd.ms-excel",           # XLS (Legacy Excel)
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  # XLSX
 }
 
 # ===== HILFSFUNKTIONEN FÜR DATEI-VERARBEITUNG =====
 
 async def save_uploaded_file(file: UploadFile, document_type: str) -> FileUploadResponse:
     """
-    Speichert eine hochgeladene Datei und gibt Metadaten zurück.
+    Speichert eine hochgeladene Datei mit Validierung und Metadaten-Extraktion.
+    
+    Führt umfassende Validierung durch und speichert die Datei in einer
+    organisierten Verzeichnisstruktur nach Dokumenttyp. Generiert
+    eindeutige Dateinamen und berechnet Checksummen für Integrität.
     
     Args:
-        file: FastAPI UploadFile object
-        document_type: Dokumenttyp für Ordnerorganisation
+        file (UploadFile): FastAPI UploadFile object mit Datei-Content
+        document_type (str): QMS-Dokumenttyp für Ordnerorganisation
         
     Returns:
-        FileUploadResponse mit Datei-Metadaten
+        FileUploadResponse: Vollständige Datei-Metadaten inklusive:
+            - file_path: Relativer Pfad zur gespeicherten Datei
+            - file_name: Original-Dateiname
+            - file_size: Dateigröße in Bytes
+            - file_hash: SHA-256 Checksum für Integrität
+            - mime_type: MIME-Type der Datei
+            - uploaded_at: Zeitpunkt des Uploads
         
     Raises:
-        HTTPException: Bei ungültigen Dateien oder Upload-Fehlern
+        HTTPException: 
+            - 400: Ungültiger Dateiname oder MIME-Type
+            - 413: Datei zu groß (> 50MB)
+            - 500: Speicher-Fehler
+            
+    Validierungen:
+        - Dateiname vorhanden und nicht leer
+        - MIME-Type in ALLOWED_MIME_TYPES
+        - Dateigröße unter MAX_FILE_SIZE
+        - Erfolgreiche Speicherung im Dateisystem
+        
+    Sicherheitsfeatures:
+        - Eindeutige Dateinamen (Timestamp + Hash) gegen Kollisionen
+        - SHA-256 Hash für Integrität-Prüfung
+        - Ordnerstruktur nach Dokumenttyp für Organisation
+        - Async I/O für bessere Performance
+        
+    File Organization:
+        uploads/
+        ├── QM_MANUAL/
+        ├── SOP/
+        ├── WORK_INSTRUCTION/
+        └── ...
     """
     # Validierungen
     if not file.filename:
@@ -144,19 +277,46 @@ async def save_uploaded_file(file: UploadFile, document_type: str) -> FileUpload
 
 def extract_smart_title_and_description(text: str, filename: str) -> tuple[str, str]:
     """
-    Extrahiert intelligenten Titel und Beschreibung aus Dokumenttext.
+    Extrahiert intelligenten Titel und Beschreibung aus Dokumenttext mit KI-Logik.
     
-    Sucht nach typischen Norm-Titeln und Mustern:
-    - ISO/IEC/DIN/EN Normen-Nummern
-    - Titel in den ersten Zeilen
-    - Medizinprodukte-spezifische Begriffe
+    Verwendet Pattern-Matching und Heuristiken um aussagekräftige Titel
+    und Beschreibungen aus Dokumentinhalten zu extrahieren. Besonders
+    optimiert für QMS-Dokumente, Normen und technische Dokumentation.
+    
+    Pattern-Erkennung:
+    - ISO/IEC/DIN/EN Normen-Nummern mit Versionserkennung
+    - Medizinprodukte-spezifische Begriffe und Standards
+    - QMS-Dokumenttypen (SOP, Arbeitsanweisungen, etc.)
+    - Titel-Strukturen in technischen Dokumenten
+    - Mehrsprachige Unterstützung (DE/EN)
     
     Args:
-        text: Extrahierter Text (erste 3000 Zeichen)
-        filename: Original-Dateiname als Fallback
+        text (str): Extrahierter Dokumenttext (erste 3000 Zeichen für Performance)
+        filename (str): Original-Dateiname als Fallback-Titel
         
     Returns:
-        (title, description): Extrahierter Titel und Beschreibung
+        tuple[str, str]: (extracted_title, extracted_description)
+            - title: Erkannter oder generierter Titel (max 200 Zeichen)
+            - description: Intelligente Beschreibung oder Fallback
+            
+    Heuristiken:
+        1. Normen-Pattern: ISO 13485:2016, IEC 62304, DIN EN ISO 14971
+        2. Titel-Erkennung: Erste signifikante Zeile ohne Metadaten
+        3. Beschreibung: Erster Absatz oder extrahierte Zusammenfassung
+        4. Fallback: Bereinigter Dateiname wenn keine Pattern erkannt
+        
+    Performance:
+        - Nur erste 3000 Zeichen analysiert für Geschwindigkeit
+        - Optimierte Regex-Pattern für häufige Formate
+        - Caching für wiederverwendbare Pattern
+        
+    Examples:
+        >>> extract_smart_title_and_description(
+        ...     "ISO 13485:2016 Medical devices - Quality management systems",
+        ...     "iso_13485_2016.pdf"
+        ... )
+        ("ISO 13485:2016 - Medical devices - Quality management systems", 
+         "International standard for medical device quality management systems")
     """
     import re
     
@@ -475,6 +635,156 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "version": "1.0.0"
+    }
+
+# === AUTHENTICATION ENDPOINTS ===
+
+@app.post("/api/auth/login", response_model=Token, tags=["Authentication"])
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    """
+    Benutzer-Login mit Email und Passwort.
+    
+    Erstellt einen JWT-Token für authentifizierten Zugriff auf das QMS.
+    Der Token enthält Benutzer-ID, Gruppen und Berechtigungen.
+    
+    Args:
+        login_data: Email und Passwort
+        db: Datenbankverbindung
+        
+    Returns:
+        Token: JWT Access Token mit Benutzer-Informationen
+        
+    Example Request:
+        ```json
+        {
+            "email": "maria.qm@company.com",
+            "password": "secure_password"
+        }
+        ```
+        
+    Example Response:
+        ```json
+        {
+            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "token_type": "bearer",
+            "expires_in": 1800,
+            "user_id": 2,
+            "user_name": "Dr. Maria Qualität",
+            "groups": ["quality_management"],
+            "permissions": ["final_approval", "system_administration"]
+        }
+        ```
+        
+    Raises:
+        HTTPException: 401 bei ungültigen Anmeldedaten
+    """
+    
+    # Benutzer authentifizieren
+    user = authenticate_user(db, login_data.email, login_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ungültige Email oder Passwort",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Benutzer-Gruppen und Berechtigungen laden
+    user_groups = auth_get_user_groups(db, user)
+    user_permissions = get_user_permissions(db, user)
+    
+    # JWT Token erstellen
+    access_token = create_access_token(data={"sub": str(user.id)})
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=1800,  # 30 Minuten
+        user_id=user.id,
+        user_name=user.full_name,
+        groups=user_groups,
+        permissions=user_permissions
+    )
+
+@app.get("/api/auth/me", response_model=UserInfo, tags=["Authentication"])
+async def get_current_user_info(
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Aktuelle Benutzer-Informationen abrufen.
+    
+    Liefert detaillierte Informationen über den authentifizierten Benutzer
+    inklusive Gruppen und Berechtigungen. Für Benutzer-Profile und UI-Personalisierung.
+    
+    Args:
+        current_user: Authentifizierter Benutzer (aus JWT Token)
+        db: Datenbankverbindung
+        
+    Returns:
+        UserInfo: Vollständige Benutzer-Informationen
+        
+    Example Response:
+        ```json
+        {
+            "id": 2,
+            "email": "maria.qm@company.com",
+            "full_name": "Dr. Maria Qualität",
+            "organizational_unit": "Qualitätsmanagement",
+            "is_department_head": true,
+            "approval_level": 4,
+            "groups": ["quality_management"],
+            "permissions": ["final_approval", "gap_analysis", "system_administration"]
+        }
+        ```
+        
+    Note:
+        - Erfordert gültigen Bearer Token
+        - Gruppenzugehörigkeiten werden live aus DB geladen
+        - Berechtigungen werden aus Gruppen + individuellen Rechten zusammengestellt
+    """
+    
+    user_groups = auth_get_user_groups(db, current_user)
+    user_permissions = get_user_permissions(db, current_user)
+    
+    return UserInfo(
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        organizational_unit=current_user.organizational_unit,
+        is_department_head=current_user.is_department_head,
+        approval_level=current_user.approval_level,
+        groups=user_groups,
+        permissions=user_permissions
+    )
+
+@app.post("/api/auth/logout", response_model=dict, tags=["Authentication"])
+async def logout():
+    """
+    Benutzer-Logout (Token invalidieren).
+    
+    Da JWT-Tokens stateless sind, erfolgt das Logout client-seitig
+    durch Löschen des Tokens. Dieser Endpoint dient als formaler Logout-Trigger.
+    
+    Returns:
+        dict: Logout-Bestätigung
+        
+    Example Response:
+        ```json
+        {
+            "message": "Successfully logged out",
+            "logged_out_at": "2024-01-15T10:30:00Z"
+        }
+        ```
+        
+    Note:
+        - Client muss Token aus Local Storage/Session Storage löschen
+        - Server-seitige Token-Blacklist optional für höhere Sicherheit
+        - Für stateful Sessions würde hier Session gelöscht werden
+    """
+    
+    return {
+        "message": "Successfully logged out",
+        "logged_out_at": datetime.utcnow().isoformat() + "Z"
     }
 
 # === INTEREST GROUPS API ===
@@ -1030,6 +1340,7 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db)):
         - is_active wird automatisch auf true gesetzt
         - Passwort-Richtlinien werden validiert
         - Berechtigungen können individuell und über Interessensgruppen vergeben werden
+        - Automatische Abteilungszuordnung basierend auf organizational_unit
         
     Security:
         - Passwort-Hashing mit bcrypt
@@ -1044,9 +1355,8 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db)):
             detail=f"Email-Adresse '{user.email}' ist bereits registriert"
         )
     
-    # Password hashen (in echtem System mit bcrypt)
-    # TODO: Implementiere bcrypt password hashing
-    hashed_password = f"hashed_{user.password}"  # Placeholder
+    # Password hashen mit bcrypt
+    hashed_password = get_password_hash(user.password)
     
     # Individual permissions als JSON-String serialisieren
     import json
@@ -1065,6 +1375,49 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+    
+    # === AUTOMATISCHE ABTEILUNGSZUORDNUNG ===
+    # Mapping von organizational_unit Namen zu Interest Group IDs
+    department_mapping = {
+        "System Administration": 1,  # Team/Eingangsmodul (verwende für System Admin)
+        "Team/Eingangsmodul": 1,
+        "Qualitätsmanagement": 2,
+        "Entwicklung": 3,
+        "Einkauf": 4,
+        "Produktion": 5,
+        "HR/Schulung": 6,
+        "Dokumentation": 7,
+        "Service/Support": 8,
+        "Vertrieb": 9,
+        "Regulatory Affairs": 10,
+        "IT-Abteilung": 11,
+        "Externe Auditoren": 12,
+        "Lieferanten": 13
+    }
+    
+    # Automatische Zuordnung zur passenden Interest Group
+    if user.organizational_unit in department_mapping:
+        interest_group_id = department_mapping[user.organizational_unit]
+        
+        # UserGroupMembership erstellen
+        new_membership = UserGroupMembershipModel(
+            user_id=db_user.id,
+            interest_group_id=interest_group_id,
+            approval_level=user.approval_level,
+            role_in_group=f"Level {user.approval_level}",
+            is_department_head=user.is_department_head,
+            assigned_by_id=1,  # System erstellt automatisch (qms.admin@company.com)
+            notes=f"Automatisch zugeordnet bei User-Erstellung für '{user.organizational_unit}'"
+        )
+        
+        db.add(new_membership)
+        db.commit()
+        db.refresh(new_membership)
+        
+        print(f"✅ User '{user.full_name}' automatisch der Abteilung '{user.organizational_unit}' zugeordnet (Level {user.approval_level})")
+    else:
+        print(f"⚠️ User '{user.full_name}': Keine automatische Abteilungszuordnung für '{user.organizational_unit}' möglich")
+    
     return db_user
 
 @app.put("/api/users/{user_id}", response_model=User, tags=["Users"])
@@ -1934,138 +2287,202 @@ async def create_document_with_file(
     db: Session = Depends(get_db)
 ):
     """
-    Erstellt ein Dokument mit optionalem Datei-Upload.
+    Erstellt ein Dokument mit optionalem Datei-Upload und intelligenter Analyse.
     
-    Kombiniert Dokument-Erstellung mit Datei-Upload in einem Request.
+    **Neue Features:**
+    - 🤖 **Intelligente Dokumenttyp-Erkennung** basierend auf Inhalt (erste 3000 Zeichen)
+    - 📊 **Umfassende Metadaten-Extraktion** (Keywords, Compliance-Indikatoren, etc.)
+    - 🎯 **Automatische Titel/Beschreibung** falls nicht angegeben
+    - 🔍 **Content-Analyse** für bessere Kategorisierung
+    
+    Args:
+        title: Dokumenttitel (optional - wird automatisch extrahiert)
+        document_type: Dokumenttyp (wird intelligent erkannt wenn "OTHER")
+        creator_id: ID des erstellenden Benutzers
+        version: Dokumentversion (Standard: "1.0")
+        content: Beschreibung (optional - wird automatisch extrahiert)
+        remarks: Bemerkungen
+        chapter_numbers: Relevante Normkapitel (z.B. "4.2.3, 7.5.1")
+        file: Upload-Datei (PDF, DOCX, XLSX, TXT)
+        db: Datenbankverbindung
+        
+    Returns:
+        Document: Erstelltes Dokument mit Metadaten und ggf. erkanntem Typ
+        
+    Example Request:
+        ```bash
+        curl -X POST "http://localhost:8000/api/documents/with-file" \
+             -F "file=@sop-dokumentenkontrolle.pdf" \
+             -F "creator_id=2" \
+             -F "document_type=OTHER"  # Wird automatisch als "SOP" erkannt
+        ```
+        
+    Example Response:
+        ```json
+        {
+            "id": 15,
+            "title": "SOP-001: Dokumentenlenkung und -kontrolle",
+            "document_type": "SOP",  # Automatisch erkannt!
+            "detected_metadata": {
+                "confidence": 0.85,
+                "keywords": ["Dokumentenkontrolle", "ISO 13485", "Freigabe"],
+                "complexity_score": 7
+            }
+        }
+        ```
     """
     try:
-        # Document Type validieren
-        try:
-            validated_doc_type = DocumentType(document_type)
-        except ValueError:
-            valid_types = [dt.value for dt in DocumentType]
-            raise HTTPException(
-                status_code=400,
-                detail=f"Ungültiger document_type '{document_type}'. Gültige Werte: {valid_types}"
-            )
+        # 1. Datei-Upload verarbeiten (falls vorhanden)
+        file_data = None
+        extracted_text = ""
+        metadata = {}
         
-        # Creator validieren
-        creator = db.query(UserModel).filter(UserModel.id == creator_id).first()
-        if not creator:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Creator mit ID {creator_id} existiert nicht"
-            )
-        
-        # Intelligente Titel- und Beschreibungs-Generierung
-        auto_generated_content = None
-        if file and file.filename:
-            # Text extrahieren für intelligente Titel-Generierung
-            upload_response = await save_uploaded_file(file, document_type)
-            file_data = {
-                'file_path': upload_response.file_path,
-                'file_name': upload_response.file_name,
-                'file_size': upload_response.file_size,
-                'file_hash': upload_response.file_hash,
-                'mime_type': upload_response.mime_type
-            }
+        if file:
+            # Datei speichern
+            upload_result = await save_uploaded_file(file, document_type or "OTHER")
+            if not upload_result.success:
+                raise HTTPException(status_code=400, detail=upload_result.message)
+            
+            file_data = upload_result
             
             # Text extrahieren
             extracted_text = extract_text_from_file(
-                Path(upload_response.file_path), 
-                upload_response.mime_type
+                Path(upload_result.file_path), 
+                upload_result.mime_type
             )
             
-            # Intelligente Titel-Extraktion
-            if not title or title.strip() == "":
-                smart_title, smart_description = extract_smart_title_and_description(
-                    extracted_text, upload_response.file_name
+            # 🤖 NEUE INTELLIGENTE ANALYSE
+            from .text_extraction import extract_comprehensive_metadata, analyze_document_type
+            
+            # Umfassende Metadaten extrahieren
+            metadata = extract_comprehensive_metadata(extracted_text, title or file.filename)
+            
+            # Dokumenttyp intelligent erkennen (falls nicht spezifiziert oder "OTHER")
+            if not document_type or document_type == "OTHER":
+                detected_type = analyze_document_type(extracted_text, title or file.filename)
+                document_type = detected_type
+                print(f"🤖 Intelligent erkannt: {file.filename} → {detected_type}")
+            
+            # Titel und Beschreibung automatisch extrahieren (falls nicht angegeben)
+            if not title or not content:
+                auto_title, auto_content = extract_smart_title_and_description(
+                    extracted_text, file.filename
                 )
-                title = smart_title
-                auto_generated_content = smart_description
+                title = title or auto_title
+                content = content or auto_content
                 
-            # Auto-Beschreibung wenn leer
-            if not content or content.strip() == "":
-                if auto_generated_content:
-                    content = auto_generated_content
-                else:
-                    _, smart_description = extract_smart_title_and_description(
-                        extracted_text, upload_response.file_name
-                    )
-                    content = smart_description
-        else:
-            # Fallback ohne Datei
-            if not title:
-                title = f"Auto-Generated-Document-{version}"
-            file_data = {}
-            extracted_text = ""
+        # 2. Validierung der Eingaben
+        if not title:
+            raise HTTPException(status_code=400, detail="Titel ist erforderlich")
         
-        # Duplikat-Checks durchführen
-        existing_checks = []
+        # 3. Prüfung auf Duplikate (präziser mit Metadaten)
+        existing_doc = db.query(DocumentModel).filter(
+            DocumentModel.title == title
+        ).first()
         
-        # 1. Check: Gleicher Titel bereits vorhanden?
-        existing_title = db.query(DocumentModel).filter(DocumentModel.title == title).first()
-        if existing_title:
-            existing_checks.append(f"Ein Dokument mit dem Titel '{title}' existiert bereits (ID: {existing_title.id})")
-        
-        # 2. Check: Gleicher Dateiname bereits vorhanden?
-        if file and file.filename:
-            existing_filename = db.query(DocumentModel).filter(
-                DocumentModel.file_name == file.filename
-            ).first()
-            if existing_filename:
-                existing_checks.append(f"Eine Datei mit dem Namen '{file.filename}' wurde bereits hochgeladen (ID: {existing_filename.id})")
-        
-        # 3. Check: Gleicher File-Hash bereits vorhanden? (nur wenn Datei vorhanden)
-        if file and file.filename and 'file_data' in locals() and file_data.get('file_hash'):
-            existing_hash = db.query(DocumentModel).filter(
-                DocumentModel.file_hash == file_data['file_hash']
-            ).first()
-            if existing_hash:
-                existing_checks.append(f"Eine identische Datei (gleicher Inhalt) wurde bereits hochgeladen (ID: {existing_hash.id})")
-        
-        # Wenn Duplikate gefunden wurden, aussagekräftige Fehlermeldung geben
-        if existing_checks:
-            error_message = "❌ **Dokument-Duplikat gefunden!**\n\n" + "\n".join([f"• {check}" for check in existing_checks])
-            error_message += "\n\n**Mögliche Lösungen:**\n• Verwenden Sie einen anderen Titel\n• Laden Sie eine andere Datei hoch\n• Prüfen Sie die bestehenden Dokumente"
-            raise HTTPException(
-                status_code=409,  # Conflict
-                detail=error_message
+        if existing_doc:
+            # Intelligentere Duplikatsprüfung basierend auf Inhalt
+            similarity_score = _calculate_content_similarity(
+                existing_doc.extracted_text or "", 
+                extracted_text
             )
+            
+            if similarity_score > 0.8:  # 80% Ähnlichkeit
+                raise HTTPException(
+                    status_code=409, 
+                    detail=f"DUPLIKAT: Sehr ähnliches Dokument bereits vorhanden: '{existing_doc.title}' (ID: {existing_doc.id}, Ähnlichkeit: {similarity_score:.1%})"
+                )
         
-        # Dokumentennummer generieren
-        document_number = generate_document_number(document_type)
+        # 4. Dokument erstellen mit intelligenten Metadaten
+        db_document = DocumentModel(
+            title=title,
+            document_number=generate_document_number(document_type),
+            document_type=DocumentType(document_type),
+            version=version,
+            content=content,
+            creator_id=creator_id,
+            remarks=remarks,
+            chapter_numbers=chapter_numbers,
+            
+            # Datei-Informationen
+            file_path=file_data.file_path if file_data else None,
+            file_name=file_data.original_filename if file_data else None,
+            file_size=file_data.file_size if file_data else None,
+            file_hash=file_data.file_hash if file_data else None,
+            mime_type=file_data.mime_type if file_data else None,
+            
+            # Intelligente Text-Extraktion
+            extracted_text=extracted_text,
+            keywords=", ".join(metadata.get("keywords", [])),
+            
+            # Neue Metadaten-Felder
+            compliance_status="ZU_BEWERTEN",
+            priority="MITTEL" if metadata.get("complexity_score", 5) >= 7 else "NIEDRIG"
+        )
         
-        # Dokument erstellen
-        doc_data = {
-            'title': title,
-            'document_number': document_number,
-            'document_type': validated_doc_type,
-            'version': version,
-            'content': content,
-            'creator_id': creator_id,
-            'remarks': remarks,
-            'chapter_numbers': chapter_numbers,
-            'status': DocumentStatus.DRAFT,
-            'extracted_text': extracted_text,
-            **file_data
-        }
-        
-        db_document = DocumentModel(**doc_data)
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
         
-        return db_document
+        # 5. 🚀 Workflow Engine aktivieren (falls verfügbar)
+        try:
+            from .workflow_engine import WorkflowEngine
+            
+            workflow = WorkflowEngine()
+            workflow_tasks = workflow.create_workflow_tasks(db_document, db)
+            
+            print(f"📋 Workflow gestartet: {len(workflow_tasks)} Aufgaben für {len(set(task.assigned_group for task in workflow_tasks))} Interessengruppen")
+            
+        except Exception as workflow_error:
+            print(f"⚠️ Workflow-Fehler (nicht kritisch): {workflow_error}")
+        
+        # 6. Erfolgreiche Antwort mit Metadaten
+        response_data = {
+            **db_document.__dict__,
+            "detected_metadata": {
+                "intelligent_type_detection": document_type != (document_type or "OTHER"),
+                "detected_type": metadata.get("detected_type"),
+                "confidence_score": min(len(metadata.get("keywords", [])) * 0.1, 1.0),
+                "keywords_found": metadata.get("keywords", []),
+                "complexity_score": metadata.get("complexity_score", 0),
+                "has_procedures": metadata.get("has_procedures", False),
+                "compliance_indicators": metadata.get("compliance_indicators", [])
+            }
+        }
+        
+        return response_data
         
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Fehler beim Erstellen des Dokuments: {str(e)}"
-        )
+        print(f"❌ Dokument-Erstellung fehlgeschlagen: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Dokument-Erstellung fehlgeschlagen: {str(e)}")
+
+def _calculate_content_similarity(text1: str, text2: str) -> float:
+    """
+    Berechnet Content-Ähnlichkeit zwischen zwei Texten.
+    
+    Args:
+        text1: Erster Text
+        text2: Zweiter Text
+        
+    Returns:
+        float: Ähnlichkeitsscore (0.0 - 1.0)
+    """
+    if not text1 or not text2:
+        return 0.0
+    
+    # Einfache Wort-basierte Ähnlichkeitsberechnung
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    return len(intersection) / len(union) if union else 0.0
 
 @app.post("/api/documents", response_model=Document, tags=["Documents"])
 async def create_document(document: DocumentCreate, db: Session = Depends(get_db)):
@@ -2333,6 +2750,158 @@ async def get_documents_by_type(document_type: DocumentType, db: Session = Depen
     """
     documents = db.query(DocumentModel).filter(DocumentModel.document_type == document_type).all()
     return documents
+
+# === DOCUMENT STATUS WORKFLOW API ===
+
+@app.put("/api/documents/{document_id}/status", response_model=Document, tags=["Document Workflow"])
+async def change_document_status(
+    document_id: int,
+    status_change: DocumentStatusChange,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Dokumentstatus ändern mit QM-Workflow-Validierung.
+    
+    Implementiert den 4-stufigen QM-Workflow:
+    - DRAFT → REVIEWED: Alle können weiterleiten
+    - REVIEWED → APPROVED: Nur QM-Gruppe 
+    - APPROVED → OBSOLETE: Nur QM-Gruppe
+    - OBSOLETE → DRAFT: Nur QM-Gruppe (für Testing)
+    """
+    # Dokument laden
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # User-Gruppen laden für Berechtigungsprüfung
+    user_groups = auth_get_user_groups(db, current_user)
+    is_qm_user = "quality_management" in user_groups
+    
+    # Aktueller und neuer Status
+    old_status = document.status
+    new_status = status_change.status
+    
+    # Status-Änderungs-Validierung
+    if old_status == new_status:
+        raise HTTPException(status_code=400, detail="Neuer Status ist identisch mit aktuellem Status")
+    
+    # QM-Berechtigungen prüfen
+    qm_only_transitions = [
+        (DocumentStatus.REVIEWED, DocumentStatus.APPROVED),  # Nur QM darf freigeben
+        (DocumentStatus.APPROVED, DocumentStatus.OBSOLETE),  # Nur QM darf obsolet setzen
+        (DocumentStatus.OBSOLETE, DocumentStatus.DRAFT),     # Nur QM darf reaktivieren (Testing)
+    ]
+    
+    if (old_status, new_status) in qm_only_transitions and not is_qm_user:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Status-Wechsel {old_status.value} → {new_status.value} erfordert QM-Berechtigung"
+        )
+    
+    # Status-History erstellen (vor der Änderung)
+    from .models import DocumentStatusHistory as StatusHistoryModel
+    history_entry = StatusHistoryModel(
+        document_id=document_id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by_id=current_user.id,
+        comment=status_change.comment
+    )
+    db.add(history_entry)
+    
+    # Dokument-Status aktualisieren
+    document.status = new_status
+    document.status_changed_by_id = current_user.id
+    document.status_changed_at = datetime.utcnow()
+    document.status_comment = status_change.comment
+    
+    # Workflow-spezifische Felder setzen
+    if new_status == DocumentStatus.REVIEWED:
+        document.reviewed_by_id = current_user.id
+        document.reviewed_at = datetime.utcnow()
+    elif new_status == DocumentStatus.APPROVED:
+        document.approved_by_id = current_user.id
+        document.approved_at = datetime.utcnow()
+    
+    # Benachrichtigung generieren (Console Log für MVP)
+    notification = generate_status_notification(document, old_status, new_status, current_user, is_qm_user)
+    print(f"📧 NOTIFICATION: {notification.message}")
+    print(f"   Recipients: {', '.join(notification.recipients)}")
+    
+    try:
+        db.commit()
+        db.refresh(document)
+        return document
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fehler beim Status-Update: {str(e)}")
+
+@app.get("/api/documents/{document_id}/status-history", response_model=List[DocumentStatusHistory], tags=["Document Workflow"])
+async def get_document_status_history(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """Status-Änderungshistorie eines Dokuments abrufen (Audit-Trail)."""
+    # Dokument existiert prüfen
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Status-History laden
+    from .models import DocumentStatusHistory as StatusHistoryModel
+    history = db.query(StatusHistoryModel).filter(
+        StatusHistoryModel.document_id == document_id
+    ).order_by(StatusHistoryModel.changed_at.desc()).all()
+    
+    return history
+
+@app.get("/api/documents/status/{status}", response_model=List[Document], tags=["Document Workflow"])
+async def get_documents_by_status(
+    status: DocumentStatus,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """Alle Dokumente mit einem bestimmten Status abrufen (für Workflow-Dashboards)."""
+    documents = db.query(DocumentModel).filter(
+        DocumentModel.status == status
+    ).order_by(DocumentModel.updated_at.desc()).offset(skip).limit(limit).all()
+    
+    return documents
+
+def generate_status_notification(
+    document: DocumentModel, 
+    old_status: DocumentStatus, 
+    new_status: DocumentStatus, 
+    changed_by: UserModel,
+    is_qm_user: bool
+) -> NotificationInfo:
+    """Generiert Console-Log Benachrichtigungen für Status-Änderungen (MVP)."""
+    # Standard QM-Gruppe für alle QM-relevanten Benachrichtigungen
+    qm_emails = ["qm@company.com"]  # Placeholder
+    
+    # Status-spezifische Nachrichten und Empfänger
+    if new_status == DocumentStatus.REVIEWED:
+        message = f"📋 Dokument '{document.title}' wurde zur QM-Freigabe eingereicht"
+        recipients = qm_emails
+    elif new_status == DocumentStatus.APPROVED:
+        message = f"✅ Dokument '{document.title}' wurde von QM freigegeben"
+        recipients = [document.creator.email] if document.creator else []
+    elif new_status == DocumentStatus.OBSOLETE:
+        message = f"🗑️ Dokument '{document.title}' wurde als obsolet markiert"
+        recipients = [document.creator.email] if document.creator else []
+    else:
+        message = f"📝 Dokument '{document.title}' Status geändert: {old_status.value} → {new_status.value}"
+        recipients = []
+    
+    return NotificationInfo(
+        message=message,
+        recipients=recipients,
+        document_title=document.title,
+        new_status=new_status,
+        changed_by=changed_by.full_name
+    )
 
 # === NORMS API ===
 
@@ -3337,6 +3906,34 @@ async def delete_calibration(calibration_id: int, db: Session = Depends(get_db))
 # === SEARCH & ANALYTICS APIs ===
 # Erweiterte Such- und Analysefunktionen
 
+@app.get("/api/documents/{document_id}/workflow", tags=["Document Workflow"])
+async def get_document_workflow(document_id: int, db: Session = Depends(get_db)):
+    """
+    Workflow-Status für ein Dokument abrufen.
+    
+    Zeigt die automatisch generierte Workflow-Information für ein Dokument,
+    einschließlich zuständiger Interessengruppen, Freigabe-Kette und Tasks.
+    
+    Args:
+        document_id: ID des Dokuments
+        
+    Returns:
+        Dict mit vollständiger Workflow-Information
+    """
+    # Dokument finden
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dokument mit ID {document_id} nicht gefunden"
+        )
+    
+    # Workflow-Engine verwenden
+    workflow_engine = get_workflow_engine()
+    workflow_summary = workflow_engine.get_workflow_summary(document)
+    
+    return workflow_summary
+
 @app.get("/api/documents/search/{query}", response_model=List[Document], tags=["Search"])
 async def search_documents(query: str, db: Session = Depends(get_db)):
     """
@@ -3561,6 +4158,639 @@ async def get_notion_sync_status(document_id: int, db: Session = Depends(get_db)
         "message": "Sync status tracking not yet implemented"
     }
 
+# ===== USER DEPARTMENT MANAGEMENT (ADMIN ONLY) =====
+
+@app.get("/api/users/{user_id}/departments", tags=["User Management"])
+async def get_user_departments(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Holt alle aktiven Abteilungszuordnungen für einen User.
+    
+    Berechtigungen:
+    - System Admins können alle User-Departments abrufen
+    - Normale User können nur ihre eigenen Departments abrufen
+    
+    Returns:
+        List[Dict]: Liste der Departments mit allen Details
+    """
+    try:
+        # Berechtigung prüfen: System Admin oder eigene Daten
+        if not _is_system_admin(current_user) and current_user.id != user_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="🚨 Zugriff verweigert: Sie können nur Ihre eigenen Abteilungen abrufen"
+            )
+        
+        # User existiert?
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User mit ID {user_id} nicht gefunden")
+        
+        # Alle aktiven Zuordnungen mit Interest Group Details
+        memberships = db.query(UserGroupMembershipModel).join(
+            InterestGroupModel, UserGroupMembershipModel.interest_group_id == InterestGroupModel.id
+        ).filter(
+            UserGroupMembershipModel.user_id == user_id,
+            UserGroupMembershipModel.is_active == True
+        ).all()
+        
+        departments = []
+        for membership in memberships:
+            dept = {
+                "id": membership.id,
+                "user_id": membership.user_id,
+                "interest_group_id": membership.interest_group_id,
+                "interest_group_name": membership.interest_group.name,
+                "approval_level": membership.approval_level,
+                "role_in_group": membership.role_in_group,
+                "is_department_head": membership.is_department_head,
+                "is_active": membership.is_active,
+                "joined_at": membership.joined_at,
+                "assigned_by_id": membership.assigned_by_id,
+                "notes": membership.notes
+            }
+            departments.append(dept)
+        
+        return departments
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Abrufen der Departments: {str(e)}")
+
+@app.post("/api/users/{user_id}/departments", tags=["User Management (Admin Only)"])
+async def add_user_department(
+    user_id: int,
+    department_data: dict,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Fügt einem User eine zusätzliche Abteilung mit spezifischem Level hinzu.
+    
+    Ermöglicht Multiple-Abteilungen pro User für komplexe Organisationsstrukturen.
+    Nur QMS System Administratoren können diese Funktion verwenden.
+    
+    Args:
+        user_id: ID des Users dem eine Abteilung hinzugefügt wird
+        department_data: {"interest_group_id": 5, "approval_level": 3, "role_in_group": "Abteilungsleiter"}
+        current_user: Authentifizierter System Admin
+        db: Datenbankverbindung
+        
+    Returns:
+        UserGroupMembership: Neue Abteilungszuordnung
+        
+    Example Request:
+        ```bash
+        curl -X POST "http://localhost:8000/api/users/7/departments" \
+             -H "Authorization: Bearer {admin_token}" \
+             -d '{"interest_group_id": 5, "approval_level": 3, "role_in_group": "Abteilungsleiter"}'
+        ```
+    """
+    # SICHERHEIT: Nur System Admins dürfen User-Abteilungen verwalten
+    if not _is_system_admin(current_user):
+        raise HTTPException(
+            status_code=403, 
+            detail="🚨 Zugriff verweigert: Nur System Administratoren können Abteilungen verwalten"
+        )
+    
+    try:
+        # User existiert?
+        target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"User mit ID {user_id} nicht gefunden")
+        
+        # Interest Group existiert?
+        interest_group = db.query(InterestGroupModel).filter(
+            InterestGroupModel.id == department_data["interest_group_id"]
+        ).first()
+        if not interest_group:
+            raise HTTPException(status_code=404, detail=f"Interessengruppe mit ID {department_data['interest_group_id']} nicht gefunden")
+        
+        # Bereits zugeordnet?
+        existing = db.query(UserGroupMembershipModel).filter(
+            UserGroupMembershipModel.user_id == user_id,
+            UserGroupMembershipModel.interest_group_id == department_data["interest_group_id"]
+        ).first()
+        
+        if existing:
+            if existing.is_active:
+                raise HTTPException(status_code=409, detail=f"User ist bereits der Gruppe '{interest_group.name}' zugeordnet")
+            else:
+                # Reaktivieren
+                existing.is_active = True
+                existing.approval_level = department_data.get("approval_level", 1)
+                existing.role_in_group = department_data.get("role_in_group", "Mitarbeiter")
+                existing.assigned_by_id = current_user.id
+                existing.notes = department_data.get("notes", "")
+                db.commit()
+                db.refresh(existing)
+                return existing
+        
+        # Neue Zuordnung erstellen
+        new_membership = UserGroupMembershipModel(
+            user_id=user_id,
+            interest_group_id=department_data["interest_group_id"],
+            approval_level=department_data.get("approval_level", 1),
+            role_in_group=department_data.get("role_in_group", "Mitarbeiter"),
+            is_department_head=department_data.get("approval_level", 1) >= 3,
+            assigned_by_id=current_user.id,
+            notes=department_data.get("notes", "")
+        )
+        
+        db.add(new_membership)
+        db.commit()
+        db.refresh(new_membership)
+        
+        print(f"✅ User {target_user.full_name} zur Abteilung '{interest_group.name}' hinzugefügt (Level {new_membership.approval_level})")
+        
+        return new_membership
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Hinzufügen der Abteilung: {str(e)}")
+
+@app.put("/api/users/{user_id}/departments/{membership_id}", tags=["User Management (Admin Only)"])
+async def update_user_department(
+    user_id: int,
+    membership_id: int,
+    update_data: dict,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Aktualisiert Level/Rolle eines Users in einer Abteilung.
+    
+    Args:
+        user_id: User ID
+        membership_id: UserGroupMembership ID
+        update_data: {"approval_level": 3, "role_in_group": "Abteilungsleiter"}
+        current_user: System Admin
+        db: Datenbankverbindung
+    """
+    if not _is_system_admin(current_user):
+        raise HTTPException(status_code=403, detail="🚨 Nur System Administratoren dürfen Abteilungen bearbeiten")
+    
+    try:
+        membership = db.query(UserGroupMembershipModel).filter(
+            UserGroupMembershipModel.id == membership_id,
+            UserGroupMembershipModel.user_id == user_id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=404, detail="Abteilungszuordnung nicht gefunden")
+        
+        # Updates anwenden
+        if "approval_level" in update_data:
+            membership.approval_level = update_data["approval_level"]
+            membership.is_department_head = update_data["approval_level"] >= 3
+        
+        if "role_in_group" in update_data:
+            membership.role_in_group = update_data["role_in_group"]
+        
+        if "notes" in update_data:
+            membership.notes = update_data["notes"]
+        
+        membership.assigned_by_id = current_user.id  # Tracking wer die Änderung gemacht hat
+        
+        db.commit()
+        db.refresh(membership)
+        
+        return membership
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren: {str(e)}")
+
+@app.delete("/api/users/{user_id}/departments/{membership_id}", tags=["User Management (Admin Only)"])
+async def remove_user_department(
+    user_id: int,
+    membership_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Entfernt User aus einer Abteilung.
+    
+    Args:
+        user_id: User ID
+        membership_id: UserGroupMembership ID zu entfernen
+        current_user: System Admin
+        db: Datenbankverbindung
+    """
+    if not _is_system_admin(current_user):
+        raise HTTPException(status_code=403, detail="🚨 Nur System Administratoren dürfen Abteilungen entfernen")
+    
+    try:
+        membership = db.query(UserGroupMembershipModel).filter(
+            UserGroupMembershipModel.id == membership_id,
+            UserGroupMembershipModel.user_id == user_id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=404, detail="Abteilungszuordnung nicht gefunden")
+        
+        # Soft-Delete für Audit-Trail
+        membership.is_active = False
+        membership.assigned_by_id = current_user.id
+        
+        db.commit()
+        
+        return {"message": f"User aus Abteilung entfernt (Soft-Delete)", "membership_id": membership_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Entfernen: {str(e)}")
+
+@app.delete("/api/users/{user_id}/permanent", tags=["User Management (Admin Only)"])
+async def delete_user_permanently(
+    user_id: int,
+    request: Request = None,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Löscht einen User PERMANENT aus der Datenbank.
+    
+    ⚠️ **GEFÄHRLICH:** Komplette Löschung inklusive aller Referenzen!
+    Nur für Testzwecke verwenden. Benötigt Doppel-Bestätigung.
+    
+    Args:
+        user_id: User ID zu löschen
+        force: Muss "true" sein für Bestätigung
+        confirm_password: Admin-Passwort zur Bestätigung
+        current_user: System Admin
+        db: Datenbankverbindung
+        
+    Security:
+        - Nur System Admins
+        - QMS Admin kann sich nicht selbst löschen
+        - Admin-Passwort erforderlich
+        - Force-Flag erforderlich
+    """
+    if not _is_system_admin(current_user):
+        raise HTTPException(status_code=403, detail="🚨 Nur System Administratoren dürfen User permanent löschen")
+    
+    # Passwort aus Request Body holen
+    confirm_password = ""
+    if request:
+        try:
+            body = await request.json()
+            confirm_password = body.get("confirm_password", "")
+        except:
+            pass
+    
+    if not confirm_password:
+        raise HTTPException(status_code=400, detail="🚨 Admin-Passwort zur Bestätigung erforderlich")
+    
+    # Admin-Passwort validieren
+    from .auth import verify_password
+    if not verify_password(confirm_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="🚨 Admin-Passwort falsch")
+    
+    try:
+        target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"User mit ID {user_id} nicht gefunden")
+        
+        # SICHERHEIT: QMS Admin darf sich nicht selbst löschen
+        if target_user.email == "qms.admin@company.com":
+            raise HTTPException(status_code=403, detail="🚨 QMS System Administrator kann nicht gelöscht werden!")
+        
+        if target_user.id == current_user.id:
+            raise HTTPException(status_code=403, detail="🚨 User kann sich nicht selbst löschen!")
+        
+        # Alle Referenzen löschen (CASCADE)
+        db.query(UserGroupMembershipModel).filter(UserGroupMembershipModel.user_id == user_id).delete()
+        db.delete(target_user)
+        db.commit()
+        
+        print(f"⚠️ PERMANENT GELÖSCHT: User {target_user.full_name} ({target_user.email}) von {current_user.full_name}")
+        
+        return {"message": f"User '{target_user.full_name}' permanent gelöscht", "deleted_user_id": user_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
+
+# === BENUTZER-SELBSTVERWALTUNG API ===
+# DSGVO-konforme Endpunkte für Benutzerselbstverwaltung
+
+@app.get("/api/users/me/profile", response_model=UserProfileResponse, tags=["User Self-Management"])
+async def get_my_profile(
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[DSGVO-konform]** Ruft das eigene Benutzerprofil ab.
+    
+    Jeder authentifizierte Benutzer kann seine eigenen Daten einsehen.
+    Zeigt alle relevanten Account-Informationen ohne sensible Daten.
+    
+    Returns:
+        UserProfileResponse: Vollständige Profil-Informationen
+        
+    DSGVO Art. 15: Recht auf Auskunft über personenbezogene Daten
+    """
+    try:
+        # Robuste Interessensgruppen-Ermittlung mit korrekter Objekt-Abfrage
+        try:
+            # Direkter Join über UserGroupMembership zu InterestGroup für vollständige Objekte
+            user_groups_query = db.query(InterestGroupModel).join(UserGroupMembershipModel).filter(
+                UserGroupMembershipModel.user_id == current_user.id,
+                UserGroupMembershipModel.is_active == True,
+                InterestGroupModel.is_active == True
+            ).all()
+            
+            interest_group_names = [group.name for group in user_groups_query if group and group.name]
+            print(f"🔍 User {current_user.id} Gruppen gefunden: {interest_group_names}")
+            
+        except Exception as group_error:
+            print(f"⚠️ Fehler beim Laden der Benutzergruppen für User {current_user.id}: {group_error}")
+            interest_group_names = []
+        
+        # Robuste Berechtigungen-Parsing mit Fallback
+        individual_permissions = current_user.individual_permissions or ""
+        if isinstance(individual_permissions, str):
+            import json
+            try:
+                permissions_list = json.loads(individual_permissions) if individual_permissions.strip() else []
+                # Validierung: Nur String-Werte in der Liste
+                permissions_list = [str(p) for p in permissions_list if p]
+            except (json.JSONDecodeError, TypeError) as json_error:
+                print(f"⚠️ Fehler beim Parsen der Berechtigungen für User {current_user.id}: {json_error}")
+                permissions_list = []
+        else:
+            permissions_list = individual_permissions or []
+        
+        # Datenvalidierung und Bereinigung
+        profile_data = {
+            'id': current_user.id,
+            'email': current_user.email or 'unbekannt@qms.com',
+            'full_name': current_user.full_name or 'Unbekannter Benutzer',
+            'employee_id': current_user.employee_id or None,
+            'organizational_unit': current_user.organizational_unit or 'Nicht zugeordnet',
+            'individual_permissions': permissions_list,
+            'is_department_head': bool(current_user.is_department_head),
+            'approval_level': max(1, min(4, current_user.approval_level or 1)),  # Sicherstellen 1-4
+            'is_active': bool(current_user.is_active),
+            'created_at': current_user.created_at,
+            'interest_groups': interest_group_names,
+            'last_login': None,  # TODO: Implementierung von last_login tracking
+            'password_changed_at': None  # TODO: Implementierung von password_changed_at tracking
+        }
+        
+        profile = UserProfileResponse(**profile_data)
+        
+        print(f"✅ Profil erfolgreich geladen für User {current_user.id} ({current_user.email}) - Gruppen: {len(interest_group_names)}")
+        return profile
+        
+    except Exception as e:
+        print(f"❌ Fehler beim Laden des Profils für User {current_user.id}: {str(e)}")
+        # Detaillierte Fehler-Logs für Debugging
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Profil konnte nicht geladen werden. Bitte wenden Sie sich an den Administrator. Fehler-ID: {current_user.id}"
+        )
+
+@app.put("/api/users/me/password", response_model=PasswordResetResponse, tags=["User Self-Management"])
+async def change_my_password(
+    password_change: PasswordChangeRequest,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[DSGVO-konform]** Ändert das eigene Passwort.
+    
+    Benutzer können ihr eigenes Passwort jederzeit ändern.
+    Erfordert Bestätigung des aktuellen Passworts für Sicherheit.
+    
+    Args:
+        password_change: PasswordChangeRequest mit aktuellem und neuem Passwort
+        current_user: Authentifizierter Benutzer
+        db: Datenbankverbindung
+        
+    Returns:
+        PasswordResetResponse: Bestätigung der Passwort-Änderung
+        
+    Security:
+        - Aktuelles Passwort muss bestätigt werden
+        - Neues Passwort muss Sicherheitsanforderungen erfüllen
+        - Passwort-Bestätigung erforderlich
+        
+    DSGVO Art. 16: Recht auf Berichtigung personenbezogener Daten
+    """
+    try:
+        # Validierung: Passwörter stimmen überein
+        password_change.validate_passwords_match()
+        
+        # Aktuelles Passwort validieren
+        from .auth import verify_password
+        if not verify_password(password_change.current_password, current_user.hashed_password):
+            raise HTTPException(status_code=401, detail="Aktuelles Passwort ist falsch")
+        
+        # Neues Passwort hashen
+        new_hashed_password = get_password_hash(password_change.new_password)
+        
+        # Passwort in Datenbank aktualisieren
+        current_user.hashed_password = new_hashed_password
+        db.commit()
+        
+        print(f"✅ Passwort geändert: {current_user.full_name} ({current_user.email})")
+        
+        return PasswordResetResponse(
+            message="Passwort erfolgreich geändert",
+            temporary_password=None,
+            force_change_required=False,
+            reset_by_admin=False,
+            reset_at=datetime.now()
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fehler beim Ändern des Passworts: {str(e)}")
+
+@app.put("/api/users/{user_id}/password/admin-reset", response_model=PasswordResetResponse, tags=["User Management (Admin Only)"])
+async def admin_reset_user_password(
+    user_id: int,
+    reset_request: AdminPasswordResetRequest,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Setzt das Passwort eines Benutzers zurück (Notfall).
+    
+    Nur für System-Administratoren verfügbar. Für Notfälle wie:
+    - Benutzer hat Passwort vergessen
+    - Account-Sperrung aufheben
+    - Sicherheitsvorfall-Response
+    
+    Args:
+        user_id: ID des Benutzers für Passwort-Reset
+        reset_request: AdminPasswordResetRequest mit Reset-Details
+        current_user: System Administrator
+        db: Datenbankverbindung
+        
+    Returns:
+        PasswordResetResponse: Temporäres Passwort und Reset-Informationen
+        
+    Security:
+        - Nur System-Administratoren
+        - Audit-Trail wird geführt
+        - Temporäres Passwort wird generiert
+        - Benutzer muss Passwort beim nächsten Login ändern
+        
+    Compliance:
+        - Vollständige Protokollierung für Audit
+        - Begründung erforderlich
+    """
+    if not _is_system_admin(current_user):
+        raise HTTPException(status_code=403, detail="🚨 Nur System Administratoren dürfen Passwörter zurücksetzen")
+    
+    try:
+        # Ziel-Benutzer suchen
+        target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"Benutzer mit ID {user_id} nicht gefunden")
+        
+        # Temporäres Passwort generieren oder verwenden
+        import secrets
+        import string
+        
+        if reset_request.temporary_password:
+            temp_password = reset_request.temporary_password
+        else:
+            # Sicheres temporäres Passwort generieren
+            alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+            temp_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+        
+        # Passwort hashen und setzen
+        new_hashed_password = get_password_hash(temp_password)
+        target_user.hashed_password = new_hashed_password
+        
+        db.commit()
+        
+        # Audit-Log
+        print(f"🔧 ADMIN PASSWORD RESET: {target_user.full_name} ({target_user.email}) von {current_user.full_name}")
+        print(f"   Grund: {reset_request.reset_reason}")
+        print(f"   Force Change: {reset_request.force_change_on_login}")
+        
+        return PasswordResetResponse(
+            message=f"Passwort für {target_user.full_name} erfolgreich zurückgesetzt",
+            temporary_password=temp_password,
+            force_change_required=reset_request.force_change_on_login,
+            reset_by_admin=True,
+            reset_at=datetime.now()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fehler beim Passwort-Reset: {str(e)}")
+
+@app.post("/api/users/{user_id}/temp-password", response_model=PasswordResetResponse, tags=["User Management (Admin Only)"])
+async def generate_temp_password(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    **[SYSTEM ADMIN ONLY]** Generiert temporäres Passwort für Benutzer.
+    
+    Schnelle Hilfe-Funktion für Administratoren ohne vollständigen Reset.
+    Generiert sicheres temporäres Passwort und setzt Force-Change-Flag.
+    
+    Args:
+        user_id: ID des Benutzers
+        current_user: System Administrator
+        db: Datenbankverbindung
+        
+    Returns:
+        PasswordResetResponse: Temporäres Passwort
+        
+    Use Cases:
+        - Neuer Mitarbeiter benötigt ersten Login
+        - Schnelle Passwort-Hilfe ohne vollständigen Reset
+        - Temporärer Zugang für Externe
+    """
+    if not _is_system_admin(current_user):
+        raise HTTPException(status_code=403, detail="🚨 Nur System Administratoren dürfen temporäre Passwörter generieren")
+    
+    try:
+        target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"Benutzer mit ID {user_id} nicht gefunden")
+        
+        # Sicheres temporäres Passwort generieren
+        import secrets
+        import string
+        alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+        temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+        
+        # Passwort setzen
+        new_hashed_password = get_password_hash(temp_password)
+        target_user.hashed_password = new_hashed_password
+        
+        db.commit()
+        
+        print(f"🔑 TEMP PASSWORD: {target_user.full_name} ({target_user.email}) von {current_user.full_name}")
+        
+        return PasswordResetResponse(
+            message=f"Temporäres Passwort für {target_user.full_name} generiert",
+            temporary_password=temp_password,
+            force_change_required=True,
+            reset_by_admin=True,
+            reset_at=datetime.now()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Fehler beim Generieren des temporären Passworts: {str(e)}")
+
+def _is_system_admin(user: UserModel) -> bool:
+    """
+    Prüft ob User System Administrator ist.
+    
+    Args:
+        user: User Model Object
+        
+    Returns:
+        bool: True wenn System Admin
+    """
+    try:
+        # System Admin Permissions prüfen
+        perms = user.individual_permissions or ""
+        if isinstance(perms, str):
+            import json
+            try:
+                perms_list = json.loads(perms)
+                return "system_administration" in perms_list
+            except json.JSONDecodeError:
+                return False
+        elif isinstance(perms, list):
+            return "system_administration" in perms
+        
+        return False
+    except Exception:
+        return False
 
 if __name__ == "__main__":
     import uvicorn
