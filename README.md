@@ -1,9 +1,11 @@
 # KI-QMS - AI-Powered Quality Management System 🏥
 
-> **Version 2.0.0** | Ein intelligentes, ISO 13485-konformes Qualitätsmanagementsystem für die Medizintechnik mit KI-Unterstützung
+> **Version 2.1.0** | Ein intelligentes, ISO 13485-konformes Qualitätsmanagementsystem für die Medizintechnik mit KI-Unterstützung
+> 
+> **Letzte Aktualisierung:** 30. Juni 2025 | **Status:** ✅ Produktionsbereit
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green.svg)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.31+-red.svg)](https://streamlit.io)
 [![SQLite](https://img.shields.io/badge/SQLite-3.x-lightgrey.svg)](https://sqlite.org)
 [![ISO 13485](https://img.shields.io/badge/ISO_13485-compliant-blue.svg)](https://www.iso.org/standard/59752.html)
@@ -204,13 +206,15 @@ calibration_requirements (id, norm_id, equipment_type, required_interval_months,
 
 | Technologie | Version | Zweck | Best Practice Status |
 |-------------|---------|-------|---------------------|
-| **[FastAPI](https://fastapi.tiangolo.com/)** | 0.110+ | Moderne, schnelle Web-API | ✅ Production Ready |
-| **[SQLAlchemy](https://sqlalchemy.org/)** | 2.0+ | ORM für Datenbank-Operations | ✅ Async Support |
-| **[Pydantic](https://docs.pydantic.dev/)** | v2.5+ | Datenvalidierung und Serialisierung | ✅ Type Safety |
+| **[FastAPI](https://fastapi.tiangolo.com/)** | 0.104.1 | Moderne, schnelle Web-API | ✅ Production Ready |
+| **[SQLAlchemy](https://sqlalchemy.org/)** | 2.0.23 | ORM für Datenbank-Operations | ✅ Async Support |
+| **[Pydantic](https://docs.pydantic.dev/)** | v2.4.2 | Datenvalidierung und Serialisierung | ✅ Type Safety |
 | **[SQLite](https://sqlite.org/)** | 3.x | Embedded Datenbank (Migration zu PostgreSQL geplant) | ✅ ACID-compliant |
-| **[Uvicorn](https://uvicorn.org/)** | 0.24+ | ASGI Server für Produktion | ✅ High Performance |
-| **[Passlib](https://passlib.readthedocs.io/)** | 1.7+ | Passwort-Hashing (bcrypt) | ✅ Security Standard |
-| **[python-jose](https://python-jose.readthedocs.io/)** | 3.3+ | JWT Token Management | ✅ OAuth2 Compatible |
+| **[Uvicorn](https://uvicorn.org/)** | 0.24.0 | ASGI Server für Produktion | ✅ High Performance |
+| **[Starlette](https://starlette.io/)** | 0.27.0 | ASGI Framework/Toolkit | ✅ FastAPI Foundation |
+| **[Passlib](https://passlib.readthedocs.io/)** | 1.7.4 | Passwort-Hashing (bcrypt) | ✅ Security Standard |
+| **[python-jose](https://python-jose.readthedocs.io/)** | 3.3.0 | JWT Token Management | ✅ OAuth2 Compatible |
+| **[Cryptography](https://cryptography.io/)** | 41.0.7 | Kryptographische Primitiven | ✅ Stable & Secure |
 
 ### **Frontend (Python/Streamlit)**
 
@@ -300,7 +304,7 @@ pip install streamlit==1.31.0 pandas==2.1.0 plotly==5.17.0 requests==2.31.0
 
 ## ⚡ Schnellstart
 
-### Komplettes System starten
+### 🚀 Komplettes System starten (Empfohlen)
 
 ```bash
 # Beide Services automatisch starten
@@ -314,17 +318,34 @@ pip install streamlit==1.31.0 pandas==2.1.0 plotly==5.17.0 requests==2.31.0
 - 📖 **API Docs (ReDoc):** http://localhost:8000/redoc
 - ❤️ **Health Check:** http://localhost:8000/health
 
-### Manueller Start (Entwicklung)
+### 🔧 Manueller Start (Entwicklung)
+
+**WICHTIG:** Der Backend-Server muss aus dem `backend/` Verzeichnis gestartet werden:
 
 ```bash
-# Terminal 1: Backend starten
+# Terminal 1: Backend starten (aus backend/ Verzeichnis!)
 cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Terminal 2: Frontend starten  
+# Terminal 2: Frontend starten
 cd frontend
-streamlit run streamlit_app.py --server.port 8501
+streamlit run streamlit_app.py --server.port 8501 --server.headless true
 ```
+
+### 📋 Aktuelle System-Updates (Version 2.1.0)
+
+**✅ Behobene Probleme:**
+- **Dependencies:** Requirements.txt auf kompatible Versionen angepasst (FastAPI 0.104.1, Starlette 0.27.0)
+- **Upload-Funktionalität:** Vollständig repariert - Dokumente werden korrekt im Frontend angezeigt
+- **Historie-Feature:** Erweitert mit Zeitstempel-Formatierung (dd.mm.yyyy hh:mm) und vollständigen Benutzernamen
+- **Workflow-Engine:** QM-Manager Freigabe-Prozess mit verbesserter Kommentar-Behandlung
+- **Status-Tracking:** Emoji-Indikatoren für Dokumentstatus (📝 DRAFT, 🔍 REVIEWED, ✅ APPROVED)
+
+**🔄 Technische Verbesserungen:**
+- Minimale, stabile Requirements-Konfiguration
+- Verbesserte Fehlerbehandlung bei Datei-Uploads
+- Optimierte Datenbank-Queries mit `joinedload()` für bessere Performance
+- Zentrale `render_document_history()` Funktion zur Code-Reduzierung
 
 ### System stoppen
 
@@ -333,6 +354,35 @@ streamlit run streamlit_app.py --server.port 8501
 ./stop-all.sh
 
 # Oder Ctrl+C im jeweiligen Terminal
+```
+
+### 🛠️ Troubleshooting
+
+**Problem: `ModuleNotFoundError: No module named 'app'`**
+```bash
+# Lösung: Immer aus dem backend/ Verzeichnis starten
+cd backend  # WICHTIG!
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**Problem: Dependencies-Konflikte beim `start-all.sh`**
+```bash
+# Lösung: Minimale Requirements verwenden
+cd backend
+pip install -r requirements.txt  # Bereits auf kompatible Versionen angepasst
+```
+
+**Problem: Frontend nicht erreichbar**
+```bash
+# Lösung: Headless-Modus verwenden
+streamlit run streamlit_app.py --server.port 8501 --server.headless true
+```
+
+**Problem: Uploads funktionieren nicht**
+```bash
+# Lösung: Backend und Frontend müssen beide laufen
+curl http://localhost:8000/health  # Backend-Test
+curl http://localhost:8501         # Frontend-Test
 ```
 
 ## 📖 API-Dokumentation

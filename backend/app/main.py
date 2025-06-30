@@ -2340,9 +2340,7 @@ async def create_document_with_file(
         if file:
             # Datei speichern
             upload_result = await save_uploaded_file(file, document_type or "OTHER")
-            if not upload_result.success:
-                raise HTTPException(status_code=400, detail=upload_result.message)
-            
+            # FileUploadResponse hat kein success Attribut - es wird nur bei Erfolg zurückgegeben
             file_data = upload_result
             
             # Text extrahieren
@@ -2406,7 +2404,7 @@ async def create_document_with_file(
             
             # Datei-Informationen
             file_path=file_data.file_path if file_data else None,
-            file_name=file_data.original_filename if file_data else None,
+            file_name=file_data.file_name if file_data else None,  # file_name nicht original_filename
             file_size=file_data.file_size if file_data else None,
             file_hash=file_data.file_hash if file_data else None,
             mime_type=file_data.mime_type if file_data else None,
@@ -2848,9 +2846,12 @@ async def get_document_status_history(
     if not document:
         raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
     
-    # Status-History laden
+    # Status-History laden mit User-Beziehung
     from .models import DocumentStatusHistory as StatusHistoryModel
-    history = db.query(StatusHistoryModel).filter(
+    from sqlalchemy.orm import joinedload
+    history = db.query(StatusHistoryModel).options(
+        joinedload(StatusHistoryModel.changed_by)
+    ).filter(
         StatusHistoryModel.document_id == document_id
     ).order_by(StatusHistoryModel.changed_at.desc()).all()
     

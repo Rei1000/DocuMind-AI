@@ -322,6 +322,54 @@ def get_document_status_history(document_id: int) -> List[Dict]:
     result = safe_api_call(_get_history)
     return result if result else []
 
+def render_document_history(document_id: int):
+    """Rendert die Dokument-Historie mit verbesserter Formatierung"""
+    history = get_document_status_history(document_id)
+    if history:
+        st.write("**📜 Status-Verlauf:**")
+        for h in history:
+            # Formatiere Datum/Zeit
+            timestamp = h.get('changed_at', 'Unbekannt')
+            if timestamp and timestamp != 'Unbekannt':
+                try:
+                    # ISO Format parse und formatieren
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    formatted_time = dt.strftime("%d.%m.%Y %H:%M")
+                except:
+                    formatted_time = timestamp[:16]  # Fallback
+            else:
+                formatted_time = "Unbekannt"
+            
+            # User-Name holen
+            changed_by = h.get('changed_by', {})
+            user_name = changed_by.get('full_name', 'Unbekannt') if changed_by else 'Unbekannt'
+            
+            # Status-Übergang formatieren
+            old_status = h.get('old_status', 'DRAFT')
+            new_status = h.get('new_status', 'UNKNOWN')
+            
+            # Status-Emoji
+            status_emojis = {
+                'DRAFT': '📝',
+                'REVIEWED': '🔍', 
+                'APPROVED': '✅',
+                'OBSOLETE': '🗑️'
+            }
+            old_emoji = status_emojis.get(old_status, '❓')
+            new_emoji = status_emojis.get(new_status, '❓')
+            
+            # Bemerkung
+            comment = h.get('comment', '')
+            comment_text = f" - **{comment}**" if comment and comment.strip() else ""
+            
+            # Vollständige Zeile anzeigen
+            st.write(f"🕒 **{formatted_time}** | 👤 {user_name}")
+            st.write(f"   {old_emoji} {old_status} → {new_emoji} {new_status}{comment_text}")
+            st.write("---")
+    else:
+        st.info("Keine Status-Änderungen gefunden")
+
 def create_user(user_data: Dict, token: str = "") -> Optional[Dict]:
     """Erstellt einen neuen Benutzer"""
     def _create_user():
@@ -1155,30 +1203,37 @@ def render_workflow_page():
                         st.write(f"**Erstellt:** {doc['created_at'][:16]}")
                     
                     with col2:
+                        # Kommentar-Feld oben
+                        comment = st.text_input(f"Bemerkung", key=f"comment_{doc['id']}", placeholder="Optional: Freigabe-Kommentar...")
+                        
                         # Status-Änderungs-Buttons
-                        if st.button(f"✅ Freigeben", key=f"approve_{doc['id']}"):
-                            result = change_document_status(
-                                doc['id'], 
-                                "approved", 
-                                "QM-Freigabe erteilt", 
-                                st.session_state.auth_token
-                            )
-                            if result:
-                                st.success(f"✅ Dokument {doc['id']} freigegeben!")
-                                st.rerun()
+                        col_approve, col_reject = st.columns(2)
                         
-                        comment = st.text_input(f"Kommentar", key=f"comment_{doc['id']}", placeholder="Optional...")
+                        with col_approve:
+                            if st.button(f"✅ Freigeben", key=f"approve_{doc['id']}", use_container_width=True):
+                                approval_comment = comment or "QM-Freigabe erteilt"
+                                result = change_document_status(
+                                    doc['id'], 
+                                    "approved", 
+                                    approval_comment, 
+                                    st.session_state.auth_token
+                                )
+                                if result:
+                                    st.success(f"✅ Dokument {doc['id']} freigegeben!")
+                                    st.rerun()
                         
-                        if st.button(f"❌ Ablehnen", key=f"reject_{doc['id']}"):
-                            result = change_document_status(
-                                doc['id'], 
-                                "draft", 
-                                comment or "Zurück zur Überarbeitung", 
-                                st.session_state.auth_token
-                            )
-                            if result:
-                                st.warning(f"↩️ Dokument {doc['id']} zur Überarbeitung zurückgesendet")
-                                st.rerun()
+                        with col_reject:
+                            if st.button(f"❌ Ablehnen", key=f"reject_{doc['id']}", use_container_width=True):
+                                rejection_comment = comment or "Zurück zur Überarbeitung"
+                                result = change_document_status(
+                                    doc['id'], 
+                                    "draft", 
+                                    rejection_comment, 
+                                    st.session_state.auth_token
+                                )
+                                if result:
+                                    st.warning(f"↩️ Dokument {doc['id']} zur Überarbeitung zurückgesendet")
+                                    st.rerun()
         else:
             st.info("✅ Alle Dokumente sind bearbeitet!")
     else:
@@ -1200,6 +1255,11 @@ def render_workflow_page():
                     with col1:
                         st.write(f"**ID:** {doc['id']} | **Typ:** {doc['document_type']}")
                         st.write(f"**Erstellt:** {doc['created_at'][:16]}")
+                        
+                        # Status-History anzeigen
+                        if st.button(f"📊 Historie", key=f"history_draft_{doc['id']}"):
+                            render_document_history(doc['id'])
+                        
                     with col2:
                         if st.button(f"🔍 Zur Prüfung", key=f"review_{doc['id']}"):
                             result = change_document_status(
@@ -1217,8 +1277,13 @@ def render_workflow_page():
     with status_tabs[1]:
         if reviewed_docs:
             for doc in reviewed_docs[:10]:
-                st.write(f"📋 **{doc['title'][:50]}...** (ID: {doc['id']})")
-                st.write(f"   📅 {doc['created_at'][:16]} | 📂 {doc['document_type']}")
+                with st.expander(f"🔍 {doc['title'][:50]}..."):
+                    st.write(f"**ID:** {doc['id']} | **Typ:** {doc['document_type']}")
+                    st.write(f"**Erstellt:** {doc['created_at'][:16]}")
+                    
+                    # Status-History anzeigen
+                    if st.button(f"📊 Historie", key=f"history_reviewed_{doc['id']}"):
+                        render_document_history(doc['id'])
         else:
             st.info("Keine Dokumente in Prüfung")
     
@@ -1231,11 +1296,7 @@ def render_workflow_page():
                     
                     # Status-History anzeigen
                     if st.button(f"📊 Historie", key=f"history_{doc['id']}"):
-                        history = get_document_status_history(doc['id'])
-                        if history:
-                            st.write("**Status-Verlauf:**")
-                            for h in history:
-                                st.write(f"• {h['old_status']} → {h['new_status']} ({h['comment']})")
+                        render_document_history(doc['id'])
         else:
             st.info("Noch keine freigegebenen Dokumente")
 
@@ -1605,8 +1666,17 @@ def render_users_page():
                             if user_departments:
                                 dept_names = [dept.get("interest_group_name", "Unbekannt") for dept in user_departments]
                                 st.text(f"🏢 {len(dept_names)} Abteilung(en)")
-                                for dept in dept_names[:2]:  # Zeige max. 2 Abteilungen
-                                    st.caption(f"• {dept}")
+                                # Zeige alle Abteilungen, aber verwende Columns für bessere Darstellung bei vielen Abteilungen
+                                if len(dept_names) <= 3:
+                                    # Bei 1-3 Abteilungen: alle untereinander anzeigen
+                                    for dept in dept_names:
+                                        st.caption(f"• {dept}")
+                                else:
+                                    # Bei mehr als 3 Abteilungen: kompakte Darstellung
+                                    for i, dept in enumerate(dept_names[:3]):
+                                        st.caption(f"• {dept}")
+                                    if len(dept_names) > 3:
+                                        st.caption(f"• ... und {len(dept_names) - 3} weitere")
                             else:
                                 st.text("🏢 Keine Abteilungen")
                     

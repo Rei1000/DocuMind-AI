@@ -61,22 +61,22 @@ CONTRIBUTING.md
 phase1.md
 phase2.md
 
-# Interne Dokumentation (bleibt lokal/privat)
-API-BEST-PRACTICES.md
-API-DOCUMENTATION.md
-DEVELOPMENT-STANDARDS.md
+# Interne/Entwicklungsdokumentation (ausgewählte Dateien für GitHub)
+# API-BEST-PRACTICES.md          # Wird inkludiert
+# API-DOCUMENTATION.md           # Wird inkludiert  
+# DEVELOPMENT-STANDARDS.md       # Wird inkludiert
 DOCUMENTATION-CLEANUP-RECOMMENDATIONS.md
-NEXT-STEPS-ROADMAP.md
-PHASE1-STABILIZATION-PLAN.md
-QM-WORKFLOW-FEATURES.md
-WORKFLOW-TESTING-GUIDE.md
-DEPLOYMENT.md
+# NEXT-STEPS-ROADMAP.md          # Wird inkludiert
+# PHASE1-STABILIZATION-PLAN.md  # Wird inkludiert
+# QM-WORKFLOW-FEATURES.md        # Wird inkludiert
+# WORKFLOW-TESTING-GUIDE.md      # Wird inkludiert
+# DEPLOYMENT.md                  # Wird inkludiert
 README-SCRIPTS.md
 
 # Archivierte/veraltete Dateien (aus Dokumentations-Bereinigung)
 obsolete/
 
-# Database Files (sensible Daten)
+# Database Files (sensible Daten - nicht für GitHub)
 *.db
 *.db-shm
 *.db-wal
@@ -85,6 +85,7 @@ obsolete/
 *.sqlite-shm
 *.sqlite-wal
 qms_mvp*.db*
+backend/qms_mvp.db
 
 # Upload-Ordner (enthält potentiell sensible Dokumente)
 backend/uploads/
