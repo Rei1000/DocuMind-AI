@@ -24,7 +24,7 @@ Autoren: KI-QMS Entwicklungsteam
 Version: 1.0.0 (MVP Phase 1)
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum, JSON, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -117,16 +117,17 @@ class InterestGroup(Base):
                         comment="Detaillierte Beschreibung der Aufgaben und Verantwortlichkeiten")
     group_permissions = Column(Text, comment="JSON-String mit spezifischen Gruppen-Berechtigungen (z.B. 'supplier_evaluation', 'audit_management')")
     
-    @property
-    def group_permissions_list(self):
+    def get_group_permissions_list(self):
         """Gruppen-Permissions als Python-Liste"""
-        if self.group_permissions:
-            try:
-                import json
-                return json.loads(self.group_permissions)
-            except (json.JSONDecodeError, TypeError):
-                return []
-        return []
+        try:
+            import json
+            if hasattr(self, '_group_permissions_value') and self._group_permissions_value:
+                return json.loads(self._group_permissions_value)
+            elif hasattr(self, 'group_permissions') and getattr(self, 'group_permissions', None):
+                return json.loads(getattr(self, 'group_permissions'))
+            return []
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return []
     ai_functionality = Column(Text, comment="Beschreibung der verfügbaren KI-Funktionen für diese Gruppe")
     typical_tasks = Column(Text, comment="Typische Aufgaben und Anwendungsfälle der Gruppe")
     is_external = Column(Boolean, default=False, nullable=False,
@@ -530,4 +531,228 @@ class DocumentStatusHistory(Base):
     
     # Relationships
     document = relationship("Document", back_populates="status_history")
-    changed_by = relationship("User") 
+    changed_by = relationship("User")
+
+# === RAG & KI-ERWEITERTE MODELLE ===
+
+class DocumentIndex(Base):
+    """
+    Index-Modell für RAG-System und KI-basierte Dokumentensuche.
+    
+    Verwaltet Embeddings und Metadaten für semantische Suche in QMS-Dokumenten.
+    Optimiert für lokale Vector-Database (ChromaDB) Integration.
+    
+    Features:
+    - Chunk-basierte Textindexierung
+    - Embedding-Versionierung  
+    - Search-Performance-Tracking
+    - RAG-Query-Historie
+    """
+    __tablename__ = "document_indexes"
+    
+    id = Column(Integer, primary_key=True, index=True,
+                comment="Eindeutige Index-ID")
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True,
+                        comment="Referenz auf indexiertes Dokument")
+    chunk_text = Column(Text, nullable=False,
+                       comment="Textinhalt des Chunks")
+    chunk_index = Column(Integer, nullable=False,
+                        comment="Position des Chunks im Dokument")
+    embedding_model = Column(String(100), default="all-MiniLM-L6-v2",
+                           comment="Verwendetes Embedding-Model")
+    indexed_at = Column(DateTime, default=datetime.utcnow, nullable=False,
+                       comment="Zeitpunkt der Indexierung")
+    search_count = Column(Integer, default=0,
+                         comment="Anzahl der Suchtreffer für Analytics")
+    
+    # Relationships
+    document = relationship("Document")
+
+class RAGQuery(Base):
+    """
+    RAG-Query-Historie für Analytics und Verbesserung.
+    
+    Protokolliert alle RAG-Anfragen für Performance-Monitoring,
+    Query-Optimierung und User-Experience-Verbesserung.
+    """
+    __tablename__ = "rag_queries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    query_text = Column(Text, nullable=False,
+                       comment="Benutzer-Anfrage")
+    response_text = Column(Text,
+                          comment="KI-generierte Antwort")
+    confidence_score = Column(Float,
+                            comment="Konfidenz-Score der Antwort")
+    processing_time = Column(Float,
+                           comment="Verarbeitungszeit in Sekunden")
+    sources_used = Column(Text,
+                         comment="JSON mit verwendeten Quellen")
+    provider_used = Column(String(50),
+                          comment="Verwendeter KI-Provider")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Relationships
+    user = relationship("User")
+
+# === INTELLIGENTE WORKFLOW-MODELLE ===
+
+class TaskStatus(str, Enum):
+    """Task-Status für intelligente Workflows"""
+    OPEN = "open"              # 📋 Neu erstellt, noch nicht begonnen
+    IN_PROGRESS = "in_progress" # 🔄 In Bearbeitung
+    WAITING = "waiting"         # ⏳ Wartet auf Input/Freigabe
+    COMPLETED = "completed"     # ✅ Abgeschlossen
+    CANCELLED = "cancelled"     # ❌ Storniert
+
+class QMSTask(Base):
+    """
+    Task-Modell für intelligente Workflow-Engine.
+    
+    Zentrale Entität für alle automatisch generierten und manuellen
+    QMS-Aufgaben. Unterstützt rollenbasierte Zuweisung, Abhängigkeiten
+    und Compliance-Tracking.
+    
+    Features:
+    - Automatische Workflow-Generierung
+    - Rollenbasierte Zuweisungen
+    - Abhängigkeiten zwischen Tasks
+    - SLA-Monitoring
+    - Approval-Workflows
+    """
+    __tablename__ = "qms_tasks"
+    
+    id = Column(Integer, primary_key=True, index=True,
+                comment="Eindeutige Task-ID")
+    title = Column(String(255), nullable=False,
+                  comment="Task-Titel")
+    description = Column(Text,
+                        comment="Detaillierte Task-Beschreibung")
+    status = Column(String(20), default="open", index=True,
+                   comment="Aktueller Task-Status")
+    priority = Column(String(20), default="MEDIUM",
+                     comment="Priorität: CRITICAL, HIGH, MEDIUM, LOW")
+    
+    # Zuweisungen
+    assigned_group_id = Column(Integer, ForeignKey("interest_groups.id"), index=True,
+                              comment="Zugewiesene Interest Group")
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True,
+                             comment="Spezifisch zugewiesener User")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False,
+                       comment="Task-Ersteller")
+    
+    # Zeitmanagement
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    due_date = Column(DateTime, index=True,
+                     comment="Fälligkeitsdatum")
+    started_at = Column(DateTime,
+                       comment="Zeitpunkt des Bearbeitungsbeginns")
+    completed_at = Column(DateTime,
+                         comment="Zeitpunkt der Fertigstellung")
+    
+    # Workflow-Integration
+    workflow_id = Column(String(100), index=True,
+                        comment="ID des auslösenden Workflows")
+    workflow_context = Column(Text,
+                             comment="JSON mit Workflow-Kontext")
+    parent_task_id = Column(Integer, ForeignKey("qms_tasks.id"),
+                           comment="Übergeordneter Task für Abhängigkeiten")
+    
+    # Dokumentation
+    required_documents = Column(Text,
+                               comment="JSON-Liste benötigter Dokumente")
+    prerequisites = Column(Text,
+                          comment="JSON-Liste von Voraussetzungen")
+    completion_notes = Column(Text,
+                             comment="Notizen zur Fertigstellung")
+    
+    # Approval
+    approval_needed = Column(Boolean, default=False,
+                           comment="Freigabe durch Vorgesetzten erforderlich")
+    approved_by_id = Column(Integer, ForeignKey("users.id"),
+                           comment="Freigebender User")
+    approved_at = Column(DateTime,
+                        comment="Freigabezeitpunkt")
+    
+    # Relationships
+    assigned_group = relationship("InterestGroup")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    approver = relationship("User", foreign_keys=[approved_by_id])
+    parent_task = relationship("QMSTask", remote_side=[id], back_populates="subtasks")
+    subtasks = relationship("QMSTask", back_populates="parent_task")
+    comments = relationship("TaskComment", back_populates="task")
+
+class TaskComment(Base):
+    """
+    Kommentar-System für Tasks.
+    
+    Ermöglicht Kommunikation und Dokumentation während
+    der Task-Bearbeitung mit Audit-Trail.
+    """
+    __tablename__ = "task_comments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("qms_tasks.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    comment_text = Column(Text, nullable=False)
+    is_internal = Column(Boolean, default=True,
+                        comment="Interne Notiz oder öffentlicher Kommentar")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Relationships
+    task = relationship("QMSTask", back_populates="comments")
+    user = relationship("User")
+
+class WorkflowTemplate(Base):
+    """
+    Template-System für wiederverwendbare Workflows.
+    
+    Ermöglicht Konfiguration und Versionierung von
+    Standard-Workflows für häufige Szenarien.
+    """
+    __tablename__ = "workflow_templates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text)
+    trigger_type = Column(String(50), nullable=False, index=True,
+                         comment="Workflow-Trigger-Typ")
+    template_config = Column(Text,
+                            comment="JSON-Konfiguration des Templates")
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    creator = relationship("User")
+
+class WorkflowExecution(Base):
+    """
+    Workflow-Ausführungsprotokoll.
+    
+    Protokolliert alle ausgeführten Workflows für
+    Analytics und Prozessoptimierung.
+    """
+    __tablename__ = "workflow_executions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(String(100), unique=True, nullable=False, index=True)
+    template_id = Column(Integer, ForeignKey("workflow_templates.id"))
+    trigger_message = Column(Text,
+                            comment="Auslösende Nachricht")
+    trigger_context = Column(Text,
+                            comment="JSON mit Trigger-Kontext")
+    started_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = Column(DateTime,
+                         comment="Zeitpunkt der Workflow-Fertigstellung")
+    status = Column(String(50), default="active",
+                   comment="active, completed, cancelled, failed")
+    tasks_created = Column(Integer, default=0,
+                          comment="Anzahl erstellter Tasks")
+    
+    # Relationships
+    template = relationship("WorkflowTemplate")
+    starter = relationship("User") 

@@ -284,10 +284,13 @@ start_backend() {
     
     log_message "INFO" "BACKEND" "Starte FastAPI Backend..."
     
-    cd "$BACKEND_PATH"
+    # Expliziter Python-Pfad aus Virtual Environment
+    local python_path="$PWD/$VENV_PATH/bin/python"
+    local backend_dir="$PWD/$BACKEND_PATH"
     
-    # Backend im Hintergrund starten
-    nohup python -m uvicorn app.main:app --reload --port $BACKEND_PORT --host 127.0.0.1 \
+    # Backend im Hintergrund starten mit expliziten Pfaden
+    cd "$BACKEND_PATH"
+    nohup "$python_path" -m uvicorn app.main:app --reload --port $BACKEND_PORT --host 0.0.0.0 \
         > "../$LOG_DIR/backend.log" 2>&1 &
     
     local backend_pid=$!
@@ -295,13 +298,20 @@ start_backend() {
     
     cd ..
     
-    # Kurz warten und prüfen ob der Prozess läuft
-    sleep 3
+    # Länger warten für Module-Loading
+    sleep 5
     if kill -0 $backend_pid 2>/dev/null; then
         log_message "SUCCESS" "BACKEND" "Backend gestartet (PID: $backend_pid)"
         return 0
     else
         log_message "ERROR" "BACKEND" "Backend konnte nicht gestartet werden"
+        # Log-Output für Debugging
+        if [ -f "$LOG_DIR/backend.log" ]; then
+            log_message "ERROR" "BACKEND" "Letzte Log-Zeilen:"
+            tail -5 "$LOG_DIR/backend.log" | while read line; do
+                log_message "ERROR" "BACKEND" "$line"
+            done
+        fi
         return 1
     fi
 }
@@ -311,11 +321,14 @@ start_frontend() {
     
     log_message "INFO" "FRONTEND" "Starte Streamlit Frontend..."
     
+    # Expliziter Python-Pfad aus Virtual Environment
+    local python_path="$PWD/$VENV_PATH/bin/python"
+    
     cd "$FRONTEND_PATH"
     
-    # Frontend im Hintergrund starten (Standard Frontend für Upload-Tests)
-    nohup streamlit run streamlit_app.py --server.port $FRONTEND_PORT \
-        --server.headless true --server.runOnSave true \
+    # Frontend im Hintergrund starten mit explizitem Python-Pfad
+    nohup "$python_path" -m streamlit run streamlit_app.py --server.port $FRONTEND_PORT \
+        --server.headless true --server.runOnSave true --server.address 0.0.0.0 \
         > "../$LOG_DIR/frontend.log" 2>&1 &
     
     local frontend_pid=$!
@@ -323,13 +336,20 @@ start_frontend() {
     
     cd ..
     
-    # Kurz warten und prüfen ob der Prozess läuft
-    sleep 3
+    # Länger warten für Streamlit-Startup
+    sleep 5
     if kill -0 $frontend_pid 2>/dev/null; then
         log_message "SUCCESS" "FRONTEND" "Frontend gestartet (PID: $frontend_pid)"
         return 0
     else
         log_message "ERROR" "FRONTEND" "Frontend konnte nicht gestartet werden"
+        # Log-Output für Debugging
+        if [ -f "$LOG_DIR/frontend.log" ]; then
+            log_message "ERROR" "FRONTEND" "Letzte Log-Zeilen:"
+            tail -5 "$LOG_DIR/frontend.log" | while read line; do
+                log_message "ERROR" "FRONTEND" "$line"
+            done
+        fi
         return 1
     fi
 }
@@ -347,7 +367,7 @@ wait_for_services() {
     log_message "INFO" "BACKEND" "Health Check..."
     local backend_ready=false
     for i in {1..30}; do
-        if curl -s http://127.0.0.1:$BACKEND_PORT/health >/dev/null 2>&1; then
+        if curl -s http://localhost:$BACKEND_PORT/health >/dev/null 2>&1; then
             backend_ready=true
             break
         fi
@@ -364,12 +384,12 @@ wait_for_services() {
     # Frontend Health Check
     log_message "INFO" "FRONTEND" "Health Check..."
     local frontend_ready=false
-    for i in {1..20}; do
-        if curl -s http://127.0.0.1:$FRONTEND_PORT >/dev/null 2>&1; then
+    for i in {1..25}; do
+        if curl -s http://localhost:$FRONTEND_PORT >/dev/null 2>&1; then
             frontend_ready=true
             break
         fi
-        sleep 1
+        sleep 2
     done
     
     if [ "$frontend_ready" = true ]; then
@@ -395,9 +415,9 @@ show_startup_summary() {
     echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "${WHITE}📊 SYSTEM-STATUS:${NC}"
-    echo -e "   ✅ Backend:  http://127.0.0.1:$BACKEND_PORT"
-    echo -e "   ✅ Frontend: http://127.0.0.1:$FRONTEND_PORT"
-    echo -e "   ✅ API Docs: http://127.0.0.1:$BACKEND_PORT/docs"
+    echo -e "   ✅ Backend:  http://localhost:$BACKEND_PORT"
+    echo -e "   ✅ Frontend: http://localhost:$FRONTEND_PORT"
+    echo -e "   ✅ API Docs: http://localhost:$BACKEND_PORT/docs"
     echo ""
     echo -e "${WHITE}📁 WICHTIGE PFADE:${NC}"
     echo -e "   📋 Logs:     $LOG_DIR/"

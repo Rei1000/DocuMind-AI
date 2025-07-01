@@ -1,0 +1,163 @@
+# 🆓 KI-QMS Umgebungsvariablen - Kostenlose KI-Provider
+# Kopieren Sie diese Datei zu .env und füllen Sie die API-Keys aus
+
+# ===== KOSTENLOSE KI-PROVIDER =====
+
+# 🤗 Hugging Face (Kostenlos mit Limits)
+# Registrierung: https://huggingface.co/join
+# API Token: https://huggingface.co/settings/tokens
+HUGGINGFACE_API_KEY=
+
+# 🌟 Google Gemini Flash (Kostenlos: 1500 Anfragen/Tag)
+# Google AI Studio: https://aistudio.google.com/
+GOOGLE_AI_API_KEY=
+
+# ⚡ OpenAI (Optional, kostenpflichtig)
+# Nur ausfüllen wenn Sie kostenpflichtige OpenAI API nutzen möchten
+OPENAI_API_KEY=
+
+# 🧠 Anthropic Claude (Optional, kostenpflichtig)
+# Nur ausfüllen wenn Sie kostenpflichtige Claude API nutzen möchten
+ANTHROPIC_API_KEY=
+
+# ===== OLLAMA KONFIGURATION (Lokal & Kostenlos) =====
+
+# Ollama Base URL (Standard: http://localhost:11434)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Bevorzugtes Ollama Modell
+OLLAMA_MODEL=mistral:7b
+
+# Ollama Timeout in Sekunden
+OLLAMA_TIMEOUT=30
+
+# ===== KI-ENGINE KONFIGURATION =====
+
+# Provider Priorität (kommagetrennt, höchste Priorität zuerst)
+# Optionen: ollama, huggingface, gemini, openai, anthropic, rule_based
+AI_PROVIDER_PRIORITY=ollama,huggingface,gemini,rule_based
+
+# Standard Fallback Provider
+AI_FALLBACK_PROVIDER=rule_based
+
+# KI-Engine Debug-Modus
+AI_DEBUG_MODE=false
+
+# ===== DATENBANK KONFIGURATION =====
+
+# Datenbanktyp (sqlite für Entwicklung, postgresql für Produktion)
+DATABASE_TYPE=sqlite
+
+# SQLite Datenbankpfad (für Entwicklung)
+DATABASE_URL=sqlite:///./qms_mvp.db
+
+# PostgreSQL (für Produktion - optional)
+# DATABASE_URL=postgresql://user:password@localhost/qms_database
+# POSTGRES_USER=qms_user
+# POSTGRES_PASSWORD=secure_password
+# POSTGRES_DB=qms_database
+# POSTGRES_HOST=localhost
+# POSTGRES_PORT=5432
+
+# ===== SECURITY & AUTH =====
+
+# JWT Secret Key (generieren Sie einen starken Schlüssel!)
+SECRET_KEY=your-super-secret-jwt-key-change-this-in-production
+
+# JWT Token Ablaufzeit in Minuten
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# ===== LOGGING KONFIGURATION =====
+
+# Log Level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+LOG_LEVEL=INFO
+
+# Log zu Datei schreiben
+LOG_TO_FILE=true
+
+# Log Datei Pfad
+LOG_FILE_PATH=./logs/qms.log
+
+# ===== FRONTEND KONFIGURATION =====
+
+# Backend API URL für Frontend
+BACKEND_API_URL=http://localhost:8000
+
+# Frontend Port
+FRONTEND_PORT=8501
+
+# ===== DATEI-UPLOAD KONFIGURATION =====
+
+# Maximale Dateigröße in MB
+MAX_FILE_SIZE_MB=50
+
+# Upload Ordner
+UPLOAD_DIR=./uploads
+
+# ===== PERFORMANCE TUNING =====
+
+# Async Worker Anzahl
+ASYNC_WORKERS=4
+
+# Database Connection Pool Größe
+DB_POOL_SIZE=5
+
+# ===== ENTWICKLUNG & DEBUG =====
+
+# Entwicklungsmodus (true für mehr Logs und Hot-Reload)
+DEVELOPMENT_MODE=true
+
+# CORS erlaubte Origins (kommagetrennt)
+CORS_ORIGINS=http://localhost:3000,http://localhost:8501,http://127.0.0.1:8501
+
+# Auto-Reload für FastAPI
+AUTO_RELOAD=true
+
+# ===== NOTION INTEGRATION (Optional) =====
+
+# Notion API Key (nur wenn Notion Integration gewünscht)
+NOTION_API_KEY=
+
+# Notion Database ID
+NOTION_DATABASE_ID=
+
+# ===== MONITORING & ANALYTICS (Optional) =====
+
+# Sentry DSN für Error Tracking
+SENTRY_DSN=
+
+# Google Analytics ID
+GOOGLE_ANALYTICS_ID=
+
+# ===== BACKUP KONFIGURATION =====
+
+# Automatische Backups aktivieren
+AUTO_BACKUP_ENABLED=true
+
+# Backup Intervall in Stunden
+BACKUP_INTERVAL_HOURS=24
+
+# Backup Aufbewahrungsdauer in Tagen
+BACKUP_RETENTION_DAYS=30
+
+# ===== COMPLIANCE & AUDIT =====
+
+# Audit Log aktivieren
+AUDIT_LOG_ENABLED=true
+
+# Compliance Modus (strengere Validierung)
+COMPLIANCE_MODE=true
+
+# ===== ANWEISUNGEN =====
+#
+# 1. Kopieren Sie diese Datei: cp env-template.txt .env
+# 2. Füllen Sie mindestens die gewünschten KI-Provider API-Keys aus
+# 3. Generieren Sie einen starken SECRET_KEY
+# 4. Starten Sie das System: cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+#
+# Für kostenlose Nutzung:
+# - Lassen Sie HUGGINGFACE_API_KEY und GOOGLE_AI_API_KEY leer für Basis-Funktionalität
+# - Installieren Sie Ollama für beste kostenlose Ergebnisse: curl -fsSL https://ollama.ai/install.sh | sh
+# - Laden Sie Mistral Modell: ollama pull mistral:7b
+#
+# Mehr Infos: FREE-AI-SETUP.md 

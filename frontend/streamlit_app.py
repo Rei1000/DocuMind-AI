@@ -270,6 +270,134 @@ def delete_document(document_id: int) -> bool:
     result = safe_api_call(_delete)
     return result is True
 
+def analyze_document_with_ai(document_id: int, analyze_duplicates: bool = True) -> Optional[Dict]:
+    """🤖 Führt KI-Analyse für ein Dokument durch"""
+    def _analyze():
+        response = requests.post(
+            f"{API_BASE_URL}/api/documents/{document_id}/ai-analysis",
+            params={"analyze_duplicates": analyze_duplicates},
+            timeout=REQUEST_TIMEOUT * 2  # KI-Analyse braucht mehr Zeit
+        )
+        if response.status_code == 200:
+            logger.info(f"🤖 KI-Analyse abgeschlossen für Dokument {document_id}")
+            return response.json()
+        else:
+            logger.error(f"❌ KI-Analyse fehlgeschlagen: {response.status_code} - {response.text}")
+            return None
+    
+    return safe_api_call(_analyze)
+
+def analyze_text_with_ai(text: str, filename: Optional[str] = None) -> Optional[Dict]:
+    """🧠 Analysiert Text mit KI (ohne Dokumenterstellung)"""
+    def _analyze():
+        data = {
+            "text": text,
+            "filename": filename,
+            "analyze_duplicates": False
+        }
+        response = requests.post(
+            f"{API_BASE_URL}/api/ai/analyze-text",
+            json=data,
+            timeout=REQUEST_TIMEOUT * 2
+        )
+        if response.status_code == 200:
+            logger.info(f"🧠 Text-KI-Analyse abgeschlossen")
+            return response.json()
+        else:
+            logger.error(f"❌ Text-KI-Analyse fehlgeschlagen: {response.status_code}")
+            return None
+    
+    return safe_api_call(_analyze)
+
+def analyze_document_with_hybrid_ai(document_id: int, enhance_with_llm: bool = True, analyze_duplicates: bool = True) -> Optional[Dict]:
+    """🤖 Hybrid-KI-Analyse für Dokument"""
+    def _analyze():
+        try:
+            response = requests.post(
+                f"{API_BASE_URL}/api/documents/{document_id}/hybrid-analysis",
+                params={
+                    "enhance_with_llm": enhance_with_llm,
+                    "analyze_duplicates": analyze_duplicates
+                },
+                timeout=REQUEST_TIMEOUT * 3  # Längere Timeout für LLM-Analysen
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"API-Fehler: {response.status_code}")
+                return None
+        except Exception as e:
+            st.error(f"Verbindungsfehler: {e}")
+            return None
+    
+    return safe_api_call(_analyze)
+
+def analyze_text_with_hybrid_ai(text: str, filename: Optional[str] = None, enhance_with_llm: bool = True, analyze_duplicates: bool = False) -> Optional[Dict]:
+    """🤖 Hybrid-Text-Analyse"""
+    def _analyze():
+        try:
+            payload = {
+                "text": text,
+                "enhance_with_llm": enhance_with_llm,
+                "analyze_duplicates": analyze_duplicates
+            }
+            if filename:
+                payload["filename"] = filename
+            
+            response = requests.post(
+                f"{API_BASE_URL}/api/ai/hybrid-text-analysis",
+                json=payload,
+                timeout=REQUEST_TIMEOUT * 3  # Längere Timeout für LLM
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"API-Fehler: {response.status_code}")
+                return None
+        except Exception as e:
+            st.error(f"Verbindungsfehler: {e}")
+            return None
+    
+    return safe_api_call(_analyze)
+
+def get_hybrid_ai_config() -> Optional[Dict]:
+    """🤖 Abrufen der Hybrid-AI-Konfiguration"""
+    def _get_config():
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/api/ai/hybrid-config",
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+        except Exception as e:
+            return None
+    
+    return safe_api_call(_get_config)
+
+def get_hybrid_ai_cost_stats() -> Optional[Dict]:
+    """💰 Abrufen der LLM-Kosten-Statistiken"""
+    def _get_stats():
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/api/ai/hybrid-cost-statistics",
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+        except Exception as e:
+            return None
+    
+    return safe_api_call(_get_stats)
+
 def change_document_status(document_id: int, new_status: str, comment: str = "", token: str = "") -> Optional[Dict]:
     """Ändert den Status eines Dokuments"""
     def _change_status():
@@ -801,6 +929,11 @@ def render_sidebar():
         "📋 QM-Workflow": "workflow",
         "📤 Upload": "upload",
         "📚 Dokumente": "documents",
+        "🤖 KI-Analyse": "ai_analysis",
+        "🚀 AI Test": "ai_prompt_test",
+        "💬 RAG-Chat": "rag_chat",
+        "🌐 Intelligent Workflows": "intelligent_workflows",
+        "📋 Meine Tasks": "my_tasks",
         "👥 Benutzer": "users",
         "📊 Dashboard": "dashboard",
         "👤 Mein Profil": "profile",
@@ -1131,15 +1264,97 @@ def render_documents_page():
                 content = doc.get('content') or ""
                 st.markdown(f"**Beschreibung:** {content[:200]}...")
             
+            # KI-Analyse anzeigen (falls vorhanden)
+            if doc.get('keywords'):
+                st.markdown(f"**🏷️ Keywords:** {doc.get('keywords')}")
+            
             # Aktionen
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
+            
+            # Download-Button
             with col1:
+                if doc.get('file_path'):
+                    # Download-Link erstellen
+                    download_url = f"http://localhost:8000/api/documents/{doc['id']}/download"
+                    st.markdown(f"""
+                    <a href="{download_url}" target="_blank" style="
+                        display: inline-block;
+                        padding: 0.25rem 0.5rem;
+                        background-color: #1f77b4;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 0.25rem;
+                        font-size: 0.875rem;
+                        font-weight: 500;
+                        text-align: center;
+                        width: 100%;
+                        box-sizing: border-box;
+                    ">📄 Öffnen</a>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.button("📄 Keine Datei", disabled=True, key=f"no_file_{doc['id']}")
+            
+            with col2:
                 if st.button(f"🗑️ Löschen", key=f"delete_{doc['id']}"):
                     if delete_document(doc['id']):
                         st.success("✅ Dokument gelöscht!")
                         st.rerun()
                     else:
                         st.error("❌ Löschen fehlgeschlagen!")
+            
+            with col3:
+                if st.button(f"🤖 KI-Analyse", key=f"ai_analyze_{doc['id']}"):
+                    with st.spinner("🧠 KI-Analyse läuft..."):
+                        ai_result = analyze_document_with_ai(doc['id'])
+                        if ai_result:
+                            st.success("✅ KI-Analyse abgeschlossen!")
+                            
+                            # Spracherkennung
+                            lang_data = ai_result.get('language_analysis', {})
+                            if lang_data:
+                                st.info(f"🌍 **Sprache:** {lang_data.get('detected_language', 'unbekannt')} ({lang_data.get('confidence', 0):.1%} Konfidenz)")
+                            
+                            # Dokumenttyp-Vorhersage
+                            class_data = ai_result.get('document_classification', {})
+                            if class_data:
+                                predicted_type = class_data.get('predicted_type')
+                                confidence = class_data.get('confidence', 0)
+                                current_type = class_data.get('current_type')
+                                
+                                if predicted_type != current_type:
+                                    st.warning(f"📊 **KI-Empfehlung:** Dokumenttyp sollte '{predicted_type}' sein ({confidence:.1%} Konfidenz), aktuell: '{current_type}'")
+                                else:
+                                    st.success(f"📊 **Dokumenttyp bestätigt:** {predicted_type} ({confidence:.1%} Konfidenz)")
+                            
+                            # Norm-Referenzen
+                            norm_refs = ai_result.get('norm_references', [])
+                            if norm_refs:
+                                st.markdown("📋 **Gefundene Norm-Referenzen:**")
+                                for ref in norm_refs:
+                                    st.markdown(f"  - **{ref.get('norm_name')}**: {ref.get('description')} ({ref.get('confidence', 0):.1%})")
+                            
+                            # Qualitätsbewertung
+                            quality_data = ai_result.get('quality_assessment', {})
+                            if quality_data:
+                                quality_score = quality_data.get('content_quality', 0)
+                                completeness = quality_data.get('completeness', 0)
+                                st.markdown(f"📈 **Qualitätsbewertung:** {quality_score:.1%} | **Vollständigkeit:** {completeness:.1%}")
+                            
+                            # Empfehlungen
+                            recommendations = ai_result.get('recommendations', [])
+                            if recommendations:
+                                st.markdown("💡 **KI-Empfehlungen:**")
+                                for rec in recommendations:
+                                    priority = rec.get('priority', 'LOW')
+                                    message = rec.get('message', '')
+                                    if priority == 'HIGH':
+                                        st.error(f"🔴 {message}")
+                                    elif priority == 'MEDIUM':
+                                        st.warning(f"🟡 {message}")
+                                    else:
+                                        st.info(f"🔵 {message}")
+                        else:
+                            st.error("❌ KI-Analyse fehlgeschlagen!")
 
 def render_workflow_page():
     """Rendert die QM-Workflow Seite - NEUE HAUPTSEITE"""
@@ -2161,6 +2376,701 @@ def render_profile_page():
                             time.sleep(2)
                             st.rerun()
 
+def render_ai_analysis_page():
+    """🤖 Rendert die erweiterte KI-Analyse-Seite mit Hybrid-Funktionen"""
+    st.markdown("## 🤖 KI-Analyse - Hybrid Edition")
+    st.markdown("Erweiterte KI-Funktionalitäten mit optionaler LLM-Integration")
+    
+    # Backend-Status prüfen
+    if not check_backend_status():
+        st.error("❌ Backend nicht erreichbar! KI-Funktionen sind nicht verfügbar.")
+        return
+    
+    # Hybrid-AI Status anzeigen
+    hybrid_config = get_hybrid_ai_config()
+    if hybrid_config:
+        hybrid_status = hybrid_config.get("hybrid_ai_status", {})
+        llm_enabled = hybrid_status.get("enabled", False)
+        llm_provider = hybrid_status.get("provider", "none")
+        
+        if llm_enabled:
+            st.success(f"🤖 **Hybrid-Modus aktiv** - LLM: {llm_provider.upper()}")
+        else:
+            st.info("🏠 **Lokale KI aktiv** - Hybrid-Modus nicht konfiguriert")
+    
+    # Erweiterte Tabs für Hybrid-Features
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📝 Hybrid Text-Analyse", 
+        "📊 Dokument-Analyse", 
+        "🔍 Ähnlichkeits-Vergleich",
+        "💰 Kosten-Übersicht",
+        "⚙️ System-Status"
+    ])
+    
+    with tab1:
+        st.markdown("### 📝 Hybrid Text-Analyse")
+        st.markdown("Kombiniert lokale KI mit optionaler LLM-Enhancement für tiefere Insights")
+        
+        # Konfiguration
+        col1, col2 = st.columns(2)
+        with col1:
+            enhance_with_llm = st.checkbox("🤖 LLM-Enhancement aktivieren", value=False, help="Erweiterte Analyse mit Large Language Models")
+        with col2:
+            analyze_duplicates = st.checkbox("🔍 Duplikatsprüfung", value=False, help="Vergleich mit existierenden Dokumenten")
+        
+        # Text-Input
+        test_text = st.text_area(
+            "Text eingeben (min. 50 Zeichen):",
+            height=200,
+            placeholder="Standard Operating Procedure\nDokumentenkontrolle nach ISO 13485:2016\n\n1. Zweck\nDiese SOP beschreibt das Verfahren zur Kontrolle und Verwaltung von QMS-Dokumenten gemäß ISO 13485:2016 und MDR 2017/745..."
+        )
+        
+        filename = st.text_input("Dateiname (optional):", placeholder="z.B. sop_dokumentenkontrolle.pdf")
+        
+        # Analyse-Modus auswählen
+        analysis_mode = "Standard KI" if not enhance_with_llm else "Hybrid KI (LLM)"
+        st.info(f"📊 **Analyse-Modus:** {analysis_mode}")
+        
+        if st.button("🧠 Hybrid-Analyse starten", type="primary"):
+            if len(test_text.strip()) < 50:
+                st.error("❌ Text zu kurz! Mindestens 50 Zeichen erforderlich.")
+            else:
+                progress_text = "🤖 Lokale KI-Analyse..." if not enhance_with_llm else "🧠 Hybrid-Analyse (Lokale KI + LLM)..."
+                
+                with st.spinner(progress_text):
+                    # Verwende Hybrid-API wenn LLM aktiviert, sonst Standard
+                    if enhance_with_llm:
+                        ai_result = analyze_text_with_hybrid_ai(test_text, filename, enhance_with_llm, analyze_duplicates)
+                    else:
+                        ai_result = analyze_text_with_ai(test_text, filename)
+                    
+                    if ai_result:
+                        st.success("✅ Hybrid-Analyse abgeschlossen!")
+                        
+                        # Performance-Informationen
+                        processing_time = ai_result.get('processing_time_seconds', 0)
+                        st.info(f"⏱️ Verarbeitungszeit: {processing_time:.2f} Sekunden")
+                        
+                        # === LOKALE KI-ERGEBNISSE (immer vorhanden) ===
+                        st.markdown("### 🏠 Lokale KI-Analyse")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            # Spracherkennung
+                            if enhance_with_llm:
+                                local_analysis = ai_result.get('local_analysis', {})
+                                detected_lang = local_analysis.get('language', 'unbekannt')
+                                lang_conf = local_analysis.get('language_confidence', 0)
+                            else:
+                                lang_data = ai_result.get('language', {})
+                                detected_lang = lang_data.get('detected', 'unbekannt')
+                                lang_conf = lang_data.get('confidence', 0)
+                            
+                            st.markdown("#### 🌍 Sprache")
+                            if lang_conf > 0.7:
+                                st.success(f"**{detected_lang.upper()}** ({lang_conf:.1%})")
+                            else:
+                                st.warning(f"**{detected_lang.upper()}** ({lang_conf:.1%})")
+                        
+                        with col2:
+                            # Dokumenttyp
+                            if enhance_with_llm:
+                                predicted_type = local_analysis.get('document_type', 'UNKNOWN')
+                                type_conf = local_analysis.get('type_confidence', 0)
+                            else:
+                                class_data = ai_result.get('classification', {})
+                                predicted_type = class_data.get('predicted_type', 'UNKNOWN')
+                                type_conf = class_data.get('confidence', 0)
+                            
+                            st.markdown("#### 📊 Dokumenttyp")
+                            st.success(f"**{predicted_type}** ({type_conf:.1%})")
+                        
+                        with col3:
+                            # Qualitätsbewertung
+                            if enhance_with_llm:
+                                quality_score = local_analysis.get('quality_score', 0)
+                            else:
+                                quality_data = ai_result.get('quality', {})
+                                quality_score = quality_data.get('content_score', 0)
+                            
+                            st.markdown("#### 📈 Qualität")
+                            st.metric("Bewertung", f"{quality_score:.1%}")
+                        
+                        # Keywords und Normen
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # Keywords
+                            if enhance_with_llm:
+                                keywords = local_analysis.get('keywords', [])
+                            else:
+                                keywords = ai_result.get('keywords', [])
+                            
+                            st.markdown("#### 🏷️ Keywords")
+                            if keywords:
+                                for kw in keywords[:8]:
+                                    st.button(kw, key=f"kw1_{kw}", disabled=True)
+                            else:
+                                st.info("Keine gefunden")
+                        
+                        with col2:
+                            # Norm-Referenzen
+                            if enhance_with_llm:
+                                norm_refs = local_analysis.get('norm_references', [])
+                            else:
+                                norm_refs = ai_result.get('norm_references', [])
+                            
+                            st.markdown("#### 📋 Norm-Referenzen")
+                            if norm_refs:
+                                for ref in norm_refs[:5]:
+                                    if isinstance(ref, dict):
+                                        st.success(f"**{ref.get('norm_name', 'Unbekannt')}**")
+                                    else:
+                                        st.success(f"**{ref}**")
+                            else:
+                                st.info("Keine gefunden")
+                        
+                        # === LLM-ENHANCEMENT (falls aktiviert) ===
+                        if enhance_with_llm:
+                            llm_enhancement = ai_result.get('llm_enhancement', {})
+                            
+                            if llm_enhancement.get('enabled', False):
+                                st.markdown("### 🤖 LLM-Enhancement")
+                                
+                                # LLM-Informationen
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    cost = llm_enhancement.get('cost_eur', 0)
+                                    st.metric("💰 Kosten", f"{cost:.4f}€")
+                                
+                                with col2:
+                                    confidence = llm_enhancement.get('confidence', 0)
+                                    st.metric("📊 Konfidenz", f"{confidence:.1%}")
+                                
+                                with col3:
+                                    anonymized = llm_enhancement.get('anonymized', False)
+                                    st.metric("🔒 Anonymisiert", "✅" if anonymized else "❌")
+                                
+                                # LLM-Zusammenfassung
+                                llm_summary = llm_enhancement.get('summary')
+                                if llm_summary:
+                                    st.markdown("#### 📋 KI-Zusammenfassung")
+                                    st.info(llm_summary)
+                                
+                                # LLM-Empfehlungen
+                                recommendations = llm_enhancement.get('recommendations', [])
+                                if recommendations:
+                                    st.markdown("#### 💡 Empfehlungen")
+                                    for i, rec in enumerate(recommendations, 1):
+                                        st.write(f"**{i}.** {rec}")
+                                
+                                # Compliance-Lücken
+                                compliance_gaps = llm_enhancement.get('compliance_gaps', [])
+                                if compliance_gaps:
+                                    st.markdown("#### ⚠️ Compliance-Lücken")
+                                    for gap in compliance_gaps:
+                                        severity = gap.get('severity', 'MITTEL')
+                                        color = "🔴" if severity == "HOCH" else "🟡" if severity == "MITTEL" else "🟢"
+                                        st.write(f"{color} **{gap.get('standard', 'Unbekannt')}:** {gap.get('gap', 'Nicht spezifiziert')}")
+                                
+                                # Auto-Metadaten
+                                auto_metadata = llm_enhancement.get('auto_metadata', {})
+                                if auto_metadata:
+                                    st.markdown("#### 🏷️ Auto-Metadaten")
+                                    
+                                    suggested_keywords = auto_metadata.get('suggested_keywords', [])
+                                    if suggested_keywords:
+                                        st.write("**Vorgeschlagene Keywords:**")
+                                        for kw in suggested_keywords:
+                                            st.write(f"• {kw}")
+                                    
+                                    risk_category = auto_metadata.get('risk_category')
+                                    if risk_category:
+                                        color = "🔴" if risk_category == "HOCH" else "🟡" if risk_category == "MITTEL" else "🟢"
+                                        st.write(f"**Risiko-Kategorie:** {color} {risk_category}")
+                                    
+                                    compliance_score = auto_metadata.get('compliance_score')
+                                    if compliance_score:
+                                        st.metric("Compliance-Score", f"{compliance_score:.1%}")
+                            
+                            else:
+                                st.warning("⚠️ LLM-Enhancement war aktiviert, aber nicht erfolgreich. Verwende nur lokale KI-Ergebnisse.")
+                        
+                        # Duplikate (falls aktiviert)
+                        if analyze_duplicates:
+                            duplicates = ai_result.get('duplicates', [])
+                            if duplicates:
+                                st.markdown("### 🔍 Ähnliche Dokumente")
+                                for dup in duplicates[:3]:
+                                    similarity = dup.get('similarity_percentage', 0)
+                                    title = dup.get('title', 'Unbekannt')
+                                    doc_id = dup.get('id', 0)
+                                    st.write(f"📄 **{title}** (ID: {doc_id}) - Ähnlichkeit: {similarity:.1%}")
+                            else:
+                                st.info("🔍 Keine ähnlichen Dokumente gefunden")
+                    
+                    else:
+                        st.error("❌ Hybrid-Analyse fehlgeschlagen!")
+    
+    with tab2:
+        st.markdown("### 📊 Hybrid Dokument-Analyse")
+        st.markdown("Umfassende Analyse existierender Dokumente mit optionaler LLM-Enhancement")
+        
+        documents = get_documents()
+        if documents:
+            doc_options = [f"{doc['id']} - {doc['title']}" for doc in documents]
+            selected_doc = st.selectbox("Dokument auswählen:", doc_options)
+            
+            # Konfiguration für Dokument-Analyse
+            col1, col2 = st.columns(2)
+            with col1:
+                enhance_with_llm = st.checkbox("🤖 LLM-Enhancement", value=False, key="doc_llm", help="Erweiterte Analyse mit LLM")
+            with col2:
+                analyze_duplicates = st.checkbox("🔍 Duplikatsprüfung", value=True, key="doc_dup", help="Suche nach ähnlichen Dokumenten")
+            
+            if selected_doc and st.button("🧠 Hybrid-Dokument-Analyse", type="primary"):
+                doc_id = int(selected_doc.split(' - ')[0])
+                
+                progress_text = "🔍 Lokale Analyse..." if not enhance_with_llm else "🧠 Hybrid-Analyse (Lokale KI + LLM)..."
+                
+                with st.spinner(progress_text):
+                    # Verwende Hybrid-API wenn LLM aktiviert
+                    if enhance_with_llm:
+                        ai_result = analyze_document_with_hybrid_ai(doc_id, enhance_with_llm, analyze_duplicates)
+                    else:
+                        ai_result = analyze_document_with_ai(doc_id, analyze_duplicates)
+                    
+                    if ai_result:
+                        st.success("✅ Dokument-Analyse abgeschlossen!")
+                        
+                        # Performance-Info
+                        if enhance_with_llm:
+                            processing_time = ai_result.get('processing_time_seconds', 0)
+                            st.info(f"⏱️ Verarbeitungszeit: {processing_time:.2f} Sekunden")
+                        
+                        # === LOKALE KI-ERGEBNISSE ===
+                        st.markdown("### 🏠 Lokale KI-Analyse")
+                        
+                        if enhance_with_llm:
+                            # Hybrid-Modus: Strukturierte Daten
+                            local_data = ai_result.get('local_analysis', {})
+                            lang_data = local_data.get('language', {})
+                            class_data = local_data.get('document_classification', {})
+                            quality_data = local_data.get('quality_assessment', {})
+                            
+                            detected_lang = lang_data.get('detected', 'unbekannt')
+                            lang_conf = lang_data.get('confidence', 0)
+                            predicted_type = class_data.get('predicted_type', 'UNKNOWN')
+                            type_conf = class_data.get('confidence', 0)
+                            
+                        else:
+                            # Standard-Modus: Original-Format
+                            lang_data = ai_result.get('language', {})
+                            class_data = ai_result.get('document_classification', {})
+                            quality_data = ai_result.get('quality', {})
+                            
+                            detected_lang = lang_data.get('detected', 'unbekannt')
+                            lang_conf = lang_data.get('confidence', 0)
+                            predicted_type = class_data.get('predicted_type', 'UNKNOWN')
+                            type_conf = class_data.get('confidence', 0)
+                        
+                        # Basis-Informationen anzeigen
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("🌍 Sprache", f"{detected_lang.upper()}", f"{lang_conf:.1%}")
+                        
+                        with col2:
+                            st.metric("📊 Dokumenttyp", predicted_type, f"{type_conf:.1%}")
+                        
+                        with col3:
+                            if enhance_with_llm:
+                                complexity = quality_data.get('complexity_score', 0)
+                                st.metric("🧮 Komplexität", f"{complexity}/10")
+                            else:
+                                content_quality = quality_data.get('content_score', 0)
+                                st.metric("📈 Qualität", f"{content_quality:.1%}")
+                        
+                        with col4:
+                            if enhance_with_llm:
+                                risk_level = quality_data.get('risk_level', 'UNKNOWN')
+                                color = "🔴" if risk_level == "HOCH" else "🟡" if risk_level == "MITTEL" else "🟢"
+                                st.metric("⚠️ Risiko", f"{color} {risk_level}")
+                            else:
+                                st.metric("📄 Format", "Standard")
+                        
+                        # Keywords und Normen
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if enhance_with_llm:
+                                keywords = local_data.get('extracted_keywords', [])
+                            else:
+                                keywords = ai_result.get('keywords', [])
+                            
+                            st.markdown("#### 🏷️ Keywords")
+                            if keywords:
+                                for kw in keywords[:10]:
+                                    st.button(kw, key=f"kw2_{kw}", disabled=True)
+                            else:
+                                st.info("Keine gefunden")
+                        
+                        with col2:
+                            if enhance_with_llm:
+                                norm_refs = local_data.get('norm_references', [])
+                            else:
+                                norm_refs = ai_result.get('norm_references', [])
+                            
+                            st.markdown("#### 📋 Norm-Referenzen")
+                            if norm_refs:
+                                for ref in norm_refs[:5]:
+                                    if isinstance(ref, dict):
+                                        norm_name = ref.get('norm_name', 'Unbekannt')
+                                        confidence = ref.get('confidence', 0)
+                                        st.write(f"• **{norm_name}** ({confidence:.1%})")
+                                    else:
+                                        st.write(f"• **{ref}**")
+                            else:
+                                st.info("Keine gefunden")
+                        
+                        # === LLM-ENHANCEMENT (falls aktiviert) ===
+                        if enhance_with_llm:
+                            llm_enhancement = ai_result.get('llm_enhancement', {})
+                            
+                            if llm_enhancement.get('enabled', False):
+                                st.markdown("### 🤖 LLM-Enhancement")
+                                
+                                # LLM-Status-Info
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    cost = llm_enhancement.get('estimated_cost_eur', 0)
+                                    st.metric("💰 Kosten", f"{cost:.4f}€")
+                                
+                                with col2:
+                                    confidence = llm_enhancement.get('confidence', 0)
+                                    st.metric("📊 Konfidenz", f"{confidence:.1%}")
+                                
+                                with col3:
+                                    anonymized = llm_enhancement.get('anonymization_applied', False)
+                                    st.metric("🔒 Anonymisiert", "✅" if anonymized else "❌")
+                                
+                                # LLM-Insights
+                                llm_summary = llm_enhancement.get('summary')
+                                if llm_summary:
+                                    st.markdown("#### 📋 KI-Zusammenfassung")
+                                    st.info(llm_summary)
+                                
+                                recommendations = llm_enhancement.get('recommendations', [])
+                                if recommendations:
+                                    st.markdown("#### 💡 Verbesserungsempfehlungen")
+                                    for i, rec in enumerate(recommendations, 1):
+                                        st.write(f"**{i}.** {rec}")
+                                
+                                compliance_gaps = llm_enhancement.get('compliance_gaps', [])
+                                if compliance_gaps:
+                                    st.markdown("#### ⚠️ Compliance-Lücken")
+                                    for gap in compliance_gaps:
+                                        severity = gap.get('severity', 'MITTEL')
+                                        color = "🔴" if severity == "HOCH" else "🟡" if severity == "MITTEL" else "🟢"
+                                        standard = gap.get('standard', 'Unbekannt')
+                                        gap_desc = gap.get('gap', 'Nicht spezifiziert')
+                                        st.warning(f"{color} **{standard}:** {gap_desc}")
+                            else:
+                                st.warning("⚠️ LLM-Enhancement fehlgeschlagen - verwende nur lokale Analyse")
+                        
+                        # Duplikate
+                        if analyze_duplicates:
+                            if enhance_with_llm:
+                                duplicates = local_data.get('potential_duplicates', [])
+                            else:
+                                duplicates = ai_result.get('duplicates', [])
+                            
+                            if duplicates:
+                                st.markdown("### 🔍 Ähnliche Dokumente")
+                                for dup in duplicates[:5]:
+                                    if isinstance(dup, dict):
+                                        similarity = dup.get('similarity_percentage', 0)
+                                        title = dup.get('title', 'Unbekannt')
+                                        doc_id_dup = dup.get('id', 0)
+                                        st.write(f"📄 **{title}** (ID: {doc_id_dup}) - Ähnlichkeit: {similarity:.1%}")
+                                    else:
+                                        st.write(f"📄 {dup}")
+                            else:
+                                st.info("🔍 Keine ähnlichen Dokumente gefunden")
+                    else:
+                        st.error("❌ Dokument-Analyse fehlgeschlagen!")
+        else:
+            st.info("Keine Dokumente verfügbar")
+    
+    with tab3:
+        st.markdown("### 🔍 Ähnlichkeits-Vergleich")
+        
+        documents = get_documents()
+        if documents and len(documents) >= 2:
+            doc_options = [f"{doc['id']} - {doc['title']}" for doc in documents]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                doc1 = st.selectbox("Erstes Dokument:", doc_options, key="doc1")
+            with col2:
+                doc2 = st.selectbox("Zweites Dokument:", doc_options, key="doc2")
+            
+            if doc1 != doc2 and st.button("🔍 Ähnlichkeit berechnen"):
+                doc1_id = int(doc1.split(' - ')[0])
+                doc2_id = int(doc2.split(' - ')[0])
+                
+                with st.spinner("🧮 Berechne..."):
+                    try:
+                        response = requests.get(
+                            f"{API_BASE_URL}/api/ai/similarity/{doc1_id}/{doc2_id}",
+                            timeout=REQUEST_TIMEOUT
+                        )
+                        
+                        if response.status_code == 200:
+                            similarity_data = response.json()
+                            analysis = similarity_data.get('similarity_analysis', {})
+                            percentage = analysis.get('percentage', '0%')
+                            level = analysis.get('level', 'NIEDRIG')
+                            
+                            if level == "SEHR_HOCH":
+                                st.error(f"⚠️ **Ähnlichkeit:** {percentage}")
+                            elif level == "HOCH":
+                                st.warning(f"📋 **Ähnlichkeit:** {percentage}")
+                            else:
+                                st.success(f"✅ **Ähnlichkeit:** {percentage}")
+                        else:
+                            st.error("❌ Analyse fehlgeschlagen!")
+                    except Exception as e:
+                        st.error(f"❌ Fehler: {e}")
+        else:
+            st.info("Mindestens 2 Dokumente erforderlich")
+    
+    with tab4:
+        st.markdown("### 💰 Kosten-Übersicht")
+        st.markdown("Transparenz und Kontrolle über LLM-Nutzung und -Kosten")
+        
+        cost_stats = get_hybrid_ai_cost_stats()
+        
+        if cost_stats:
+            cost_summary = cost_stats.get('cost_summary', {})
+            system_info = cost_stats.get('system_info', {})
+            recent_activity = cost_stats.get('recent_activity', [])
+            
+            # Kosten-Metriken
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_cost = cost_summary.get('total_cost_eur', 0)
+                st.metric("💰 Gesamtkosten", f"{total_cost:.4f}€")
+            
+            with col2:
+                total_requests = cost_summary.get('total_requests', 0)
+                st.metric("🔢 Anfragen", total_requests)
+            
+            with col3:
+                avg_cost = cost_summary.get('average_cost_per_request', 0)
+                st.metric("📊 Ø pro Anfrage", f"{avg_cost:.4f}€")
+            
+            with col4:
+                llm_provider = system_info.get('llm_provider', 'none')
+                st.metric("🤖 Provider", llm_provider.upper())
+            
+            # System-Konfiguration
+            st.markdown("#### ⚙️ System-Konfiguration")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                llm_enabled = system_info.get('llm_enabled', False)
+                anonymization = system_info.get('anonymization_enabled', True)
+                
+                st.write(f"**LLM aktiviert:** {'✅' if llm_enabled else '❌'}")
+                st.write(f"**Anonymisierung:** {'✅' if anonymization else '❌'}")
+            
+            with col2:
+                max_cost = system_info.get('max_cost_per_request', 0.5)
+                st.write(f"**Max. Kosten/Anfrage:** {max_cost}€")
+                st.write(f"**Provider:** {llm_provider}")
+            
+            # Letzte Aktivitäten
+            if recent_activity:
+                st.markdown("#### 📜 Letzte Aktivitäten")
+                
+                for activity in recent_activity[:10]:
+                    timestamp = activity.get('timestamp', 0)
+                    filename = activity.get('filename', 'Unbekannt')
+                    cost = activity.get('cost_eur', 0)
+                    provider = activity.get('provider', 'unbekannt')
+                    
+                    # Timestamp formatieren
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromtimestamp(timestamp)
+                        formatted_time = dt.strftime("%d.%m.%Y %H:%M")
+                    except:
+                        formatted_time = "Unbekannt"
+                    
+                    st.write(f"🕒 **{formatted_time}** | 📄 {filename} | 💰 {cost:.4f}€ | 🤖 {provider}")
+            else:
+                st.info("Keine LLM-Aktivitäten vorhanden")
+                
+            # Kosten-Warnung
+            if total_cost > 1.0:
+                st.warning(f"⚠️ **Hohe Kosten:** Bereits {total_cost:.2f}€ verbraucht. Überwachen Sie die LLM-Nutzung!")
+            elif total_cost > 0.1:
+                st.info(f"💡 **Moderate Nutzung:** {total_cost:.4f}€ bisher verbraucht.")
+        else:
+            st.info("Keine Kosten-Daten verfügbar (LLM nicht aktiviert oder noch keine Nutzung)")
+    
+    with tab5:
+        st.markdown("### ⚙️ System-Status")
+        st.markdown("Detaillierte Informationen über die Hybrid-AI-Konfiguration")
+        
+        # Backend-Status
+        backend_ok = check_backend_status()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🖥️ Backend-Status")
+            if backend_ok:
+                st.success("✅ Backend erreichbar")
+            else:
+                st.error("❌ Backend nicht erreichbar")
+        
+        with col2:
+            st.markdown("#### 🤖 Hybrid-AI-Status")
+            hybrid_config = get_hybrid_ai_config()
+            
+            if hybrid_config:
+                hybrid_status = hybrid_config.get("hybrid_ai_status", {})
+                llm_enabled = hybrid_status.get("enabled", False)
+                
+                if llm_enabled:
+                    st.success("✅ Hybrid-Modus aktiv")
+                else:
+                    st.info("🏠 Nur lokale KI aktiv")
+            else:
+                st.warning("⚠️ Konfiguration nicht abrufbar")
+        
+        # Detaillierte Konfiguration
+        if hybrid_config:
+            st.markdown("#### 📋 Detaillierte Konfiguration")
+            
+            hybrid_status = hybrid_config.get("hybrid_ai_status", {})
+            local_status = hybrid_config.get("local_ai_status", {})
+            config_source = hybrid_config.get("configuration_source", {})
+            
+            # Hybrid-AI-Einstellungen
+            st.markdown("**🤖 Hybrid-AI-Einstellungen:**")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"• **Provider:** {hybrid_status.get('provider', 'none')}")
+                st.write(f"• **Modell:** {hybrid_status.get('model', 'N/A')}")
+                st.write(f"• **Anonymisierung:** {hybrid_status.get('anonymization', True)}")
+            
+            with col2:
+                st.write(f"• **Max Tokens:** {hybrid_status.get('max_tokens', 1000)}")
+                st.write(f"• **Temperatur:** {hybrid_status.get('temperature', 0.1)}")
+                st.write(f"• **Max Kosten:** {hybrid_status.get('max_cost_per_request', 0.5)}€")
+            
+            # Lokale KI-Status
+            st.markdown("**🏠 Lokale KI-Status:**")
+            st.write(f"• **Status:** {local_status.get('always_enabled', True)}")
+            st.write(f"• **Beschreibung:** {local_status.get('description', 'N/A')}")
+            
+            # Konfiguration via Umgebungsvariablen
+            st.markdown("**🔧 Konfiguration:**")
+            st.write(f"• **Quelle:** {config_source.get('description', 'N/A')}")
+            
+            env_vars = config_source.get('variables', [])
+            if env_vars:
+                st.markdown("**Umgebungsvariablen:**")
+                for var in env_vars:
+                    st.code(var)
+            
+            # Test-Buttons
+            st.markdown("#### 🧪 System-Tests")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("🏥 Backend-Test"):
+                    with st.spinner("Teste Backend..."):
+                        if check_backend_status():
+                            st.success("✅ Backend erreichbar")
+                        else:
+                            st.error("❌ Backend nicht erreichbar")
+            
+            with col2:
+                if st.button("🤖 Hybrid-AI-Test"):
+                    with st.spinner("Teste Hybrid-AI..."):
+                        test_result = analyze_text_with_hybrid_ai(
+                            "Test-Dokument für ISO 13485 Qualitätsmanagementsystem.",
+                            "test.txt",
+                            enhance_with_llm=False,  # Nur lokale KI testen
+                            analyze_duplicates=False
+                        )
+                        
+                        if test_result:
+                            st.success("✅ Lokale KI funktioniert")
+                        else:
+                            st.error("❌ KI-Test fehlgeschlagen")
+            
+            with col3:
+                if st.button("📊 LLM-Test") and hybrid_status.get("enabled", False):
+                    with st.spinner("Teste LLM..."):
+                        test_result = analyze_text_with_hybrid_ai(
+                            "Test-Dokument für ISO 13485 Qualitätsmanagementsystem.",
+                            "test.txt",
+                            enhance_with_llm=True,  # LLM testen
+                            analyze_duplicates=False
+                        )
+                        
+                        if test_result and test_result.get('llm_enhancement', {}).get('enabled', False):
+                            st.success("✅ LLM funktioniert")
+                        else:
+                            st.warning("⚠️ LLM-Test nicht erfolgreich")
+        
+        # Hilfe-Sektion
+        st.markdown("#### 💡 Hybrid-AI konfigurieren")
+        
+        with st.expander("📚 Umgebungsvariablen für LLM-Integration"):
+            st.markdown("""
+            **Für OpenAI:**
+            ```bash
+            export AI_LLM_PROVIDER=openai
+            export AI_LLM_API_KEY=your_openai_api_key
+            export AI_LLM_MODEL=gpt-4o-mini
+            ```
+            
+            **Für Anthropic Claude:**
+            ```bash
+            export AI_LLM_PROVIDER=anthropic
+            export AI_LLM_API_KEY=your_anthropic_api_key
+            export AI_LLM_MODEL=claude-3-haiku-20240307
+            ```
+            
+            **Für lokales Ollama:**
+            ```bash
+            export AI_LLM_PROVIDER=ollama
+            export AI_LLM_ENDPOINT=http://localhost:11434
+            export AI_LLM_MODEL=llama3.1:8b
+            ```
+            
+            **Optionale Einstellungen:**
+            ```bash
+            export AI_LLM_ANONYMIZE=true
+            export AI_LLM_MAX_TOKENS=1000
+            export AI_LLM_TEMPERATURE=0.1
+            export AI_LLM_MAX_COST=0.50
+            ```
+            """)
+
 def render_settings_page():
     """Rendert die Einstellungen"""
     st.markdown("## ⚙️ Einstellungen")
@@ -2200,6 +3110,843 @@ def render_settings_page():
             else:
                 st.error("❌ Dokumente laden fehlgeschlagen")
 
+def get_ai_provider_status() -> Optional[Dict]:
+    """Holt AI-Provider Status vom Backend"""
+    def _get_status():
+        response = requests.get(f"{API_BASE_URL}/api/ai/free-providers-status", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_get_status)
+    return result
+
+
+def test_ai_provider(provider: str, test_text: Optional[str] = None) -> Optional[Dict]:
+    """Testet einen spezifischen AI-Provider"""
+    if not test_text:
+        test_text = "Dies ist ein Test-Dokument für die QMS-Analyse. Es enthält Informationen über Qualitätsmanagement und Dokumentenverwaltung."
+    
+    def _test_provider():
+        payload = {
+            "provider": provider,
+            "test_text": test_text
+        }
+        response = requests.post(f"{API_BASE_URL}/api/ai/test-provider", json=payload, timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_test_provider)
+    return result
+
+
+def simple_ai_prompt_test(prompt: str, provider: str = "auto") -> Optional[Dict]:
+    """Führt einen einfachen AI Prompt Test durch"""
+    def _test_prompt():
+        params = {
+            "prompt": prompt,
+            "provider": provider
+        }
+        response = requests.post(f"{API_BASE_URL}/api/ai/simple-prompt", params=params, timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_test_prompt)
+    return result
+
+
+def get_ai_provider_status_simple() -> Optional[Dict]:
+    """Lädt den Status aller AI Provider"""
+    def _get_status():
+        response = requests.get(f"{API_BASE_URL}/api/ai/free-providers-status", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_get_status)
+    return result
+
+
+def render_ai_prompt_test_page():
+    """🚀 Neue AI Provider Test Seite"""
+    
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🚀 AI Provider Test Interface</h1>
+        <p>Teste verschiedene AI Provider direkt mit eigenen Prompts</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Provider Status laden
+    provider_status = get_ai_provider_status_simple()
+    
+    if not provider_status:
+        st.error("❌ Kann Provider-Status nicht laden. Backend prüfen!")
+        return
+    
+    # Provider Status anzeigen
+    st.subheader("📊 Provider Status")
+    
+    if "provider_status" in provider_status:
+        providers = provider_status["provider_status"]
+        
+        # Status-Grid
+        cols = st.columns(len(providers))
+        
+        for i, (provider_name, details) in enumerate(providers.items()):
+            with cols[i]:
+                available = details.get("available", False)
+                status_emoji = "✅" if available else "❌"
+                
+                st.markdown(f"""
+                <div class="doc-card">
+                    <h4>{status_emoji} {provider_name.title()}</h4>
+                    <p><strong>Status:</strong> {details.get('status', 'unknown')}</p>
+                    <p><strong>Typ:</strong> {details.get('type', 'unknown')}</p>
+                    <p><strong>Kosten:</strong> {details.get('cost', 'unknown')}</p>
+                    <p><strong>Performance:</strong> {details.get('performance', 'unknown')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # Test Interface
+    st.subheader("🧪 AI Prompt Test")
+    
+    # Provider Auswahl
+    available_providers = ["auto", "ollama", "google_gemini", "huggingface", "rule_based"]
+    
+    if provider_status and "provider_status" in provider_status:
+        # Nur verfügbare Provider anzeigen
+        status_dict = provider_status["provider_status"]
+        available_providers = ["auto"]  # Auto bleibt immer verfügbar
+        
+        for provider, details in status_dict.items():
+            if details.get("available", False):
+                available_providers.append(provider)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Prompt Eingabe
+        prompt = st.text_area(
+            "💬 Dein Prompt an die AI:",
+            value="Erkläre mir ISO 13485 und warum es für Medizinprodukte wichtig ist.",
+            height=120,
+            help="Gib hier deinen Text oder deine Frage ein"
+        )
+    
+    with col2:
+        # Provider Auswahl
+        selected_provider = st.selectbox(
+            "🤖 AI Provider:",
+            available_providers,
+            index=0,
+            help="Wähle den AI Provider für deinen Test"
+        )
+        
+        # Provider Info
+        if provider_status and "provider_status" in provider_status:
+            if selected_provider in provider_status["provider_status"]:
+                provider_info = provider_status["provider_status"][selected_provider]
+                st.info(f"**{selected_provider}:**\n{provider_info.get('description', 'Kein Beschreibung')}")
+        
+        # Test Button
+        test_button = st.button("🚀 AI Test starten", type="primary", use_container_width=True)
+    
+
+    
+    st.divider()
+    
+    # Test ausführen
+    if test_button and prompt.strip():
+        with st.spinner(f"🤖 Teste {selected_provider} mit deinem Prompt..."):
+            
+            # Test durchführen
+            result = simple_ai_prompt_test(prompt, selected_provider)
+            
+            if result:
+                if result.get("success", False):
+                    # Erfolgreiche Antwort
+                    st.success(f"✅ Test erfolgreich mit **{result.get('provider', 'unbekannt')}**")
+                    
+                    # Metriken anzeigen
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("🕐 Verarbeitungszeit", f"{result.get('processing_time_seconds', 0):.2f}s")
+                    with col2:
+                        st.metric("🤖 Provider", result.get('provider', 'unbekannt'))
+                    with col3:
+                        st.metric("📝 Prompt Länge", f"{len(prompt)} Zeichen")
+                    
+                    # AI Antwort anzeigen
+                    st.subheader("💬 AI Antwort:")
+                    response_text = result.get("response", "Keine Antwort erhalten")
+                    
+                    # Schöne Darstellung der Antwort
+                    st.markdown(f"""
+                    <div class="success-box">
+                        <h4>🤖 {selected_provider.title()} Antwort:</h4>
+                        <p>{response_text}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Zusätzliche Details
+                    with st.expander("🔍 Weitere Details"):
+                        st.json(result)
+                        
+                else:
+                    # Fehler
+                    st.error(f"❌ Test fehlgeschlagen mit {selected_provider}")
+                    error_msg = result.get("error", "Unbekannter Fehler")
+                    st.markdown(f"""
+                    <div class="error-box">
+                        <h4>❌ Fehler Details:</h4>
+                        <p>{error_msg}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    with st.expander("🔍 Technische Details"):
+                        st.json(result)
+            else:
+                st.error("❌ Kann keine Verbindung zum Backend herstellen!")
+    
+    elif test_button and not prompt.strip():
+        st.warning("⚠️ Bitte gib einen Prompt ein!")
+    
+    # Performance Tipps entfernt auf Wunsch des Users
+
+
+def render_ai_provider_management_page():
+    """🤖 AI-Provider Management Seite - Entwicklungstool"""
+    
+    st.markdown('<div class="main-header"><h1>🤖 KI-Provider Management</h1><p>Entwicklungs- und Test-Interface für KI-Provider</p></div>', unsafe_allow_html=True)
+    
+    # Warnung für Entwicklungsmodus
+    st.markdown("""
+    <div class="warning-box">
+        ⚠️ <strong>Entwicklungsmodus:</strong> Diese Seite ist für Testing und Entwicklung gedacht.
+        Hier kannst du verschiedene KI-Provider direkt testen und vergleichen.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Provider Status laden
+    with st.spinner("🔄 Lade Provider-Status..."):
+        provider_status = get_ai_provider_status()
+    
+    if not provider_status:
+        st.error("❌ Konnte Provider-Status nicht laden. Backend verfügbar?")
+        return
+    
+    st.subheader("🎯 Provider-Übersicht")
+    
+    # Status-Übersicht
+    provider_info = provider_status.get("provider_status", {})
+    total_available = provider_status.get("total_available", 0)
+    fallback_chain = provider_status.get("current_fallback_chain", "Unbekannt")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("📊 Verfügbare Provider", total_available, f"von {len(provider_info)}")
+    
+    with col2:
+        st.metric("🔗 Aktuelle Fallback-Kette", "", fallback_chain)
+    
+    with col3:
+        recommended = " → ".join(provider_status.get("recommended_order", [])[:2])
+        st.metric("⭐ Empfohlen", "", recommended)
+    
+    # Provider Details-Tabelle
+    st.subheader("📋 Provider-Details")
+    
+    for provider_name, details in provider_info.items():
+        with st.expander(f"{'✅' if details['available'] else '❌'} **{provider_name.upper()}** - {details['description']}", 
+                        expanded=details['available']):
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Status:**", details['status'])
+                st.write("**Modell:**", details['model'])
+                st.write("**Performance:**", details['performance'])
+                st.write("**Kosten:**", details['cost'])
+            
+            with col2:
+                # Test-Button für jeden Provider
+                if st.button(f"🧪 {provider_name} testen", key=f"test_{provider_name}"):
+                    with st.spinner(f"🤖 Teste {provider_name}..."):
+                        test_result = test_ai_provider(provider_name)
+                    
+                    if test_result and test_result.get("success"):
+                        analysis = test_result.get("analysis_result", {})
+                        processing_time = test_result.get("processing_time_seconds", 0)
+                        
+                        st.success(f"✅ Test erfolgreich! ({processing_time:.2f}s)")
+                        
+                        # Ergebnis anzeigen
+                        st.json({
+                            "Dokumenttyp": analysis.get("document_type"),
+                            "Hauptthemen": analysis.get("main_topics"),
+                            "Sprache": analysis.get("language"),
+                            "Qualitätsscore": analysis.get("quality_score"),
+                            "Zusammenfassung": analysis.get("ai_summary"),
+                            "Provider": analysis.get("provider")
+                        })
+                    else:
+                        error_msg = test_result.get("error", "Unbekannter Fehler") if test_result else "Keine Antwort"
+                        st.error(f"❌ Test fehlgeschlagen: {error_msg}")
+    
+    # Vergleichstest
+    st.subheader("⚖️ Provider-Vergleichstest")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        test_text = st.text_area(
+            "Test-Text eingeben:",
+            value="Dies ist eine Standard Operating Procedure (SOP) für die Qualitätskontrolle in der Medizintechnik. Das Verfahren beschreibt die Schritte zur Dokumentenvalidierung nach ISO 13485.",
+            height=100
+        )
+    
+    with col2:
+        available_providers = [name for name, details in provider_info.items() if details['available']]
+        
+        if available_providers:
+            if st.button("🚀 Alle verfügbaren Provider testen", type="primary"):
+                st.write("**📊 Vergleichstest-Ergebnisse:**")
+                
+                results = []
+                
+                for provider in available_providers:
+                    with st.spinner(f"🤖 Teste {provider}..."):
+                        result = test_ai_provider(provider, test_text)
+                    
+                    if result and result.get("success"):
+                        analysis = result.get("analysis_result", {})
+                        results.append({
+                            "Provider": provider,
+                            "Zeit (s)": f"{result.get('processing_time_seconds', 0):.2f}",
+                            "Dokumenttyp": analysis.get("document_type", "N/A"),
+                            "Qualität": analysis.get("quality_score", "N/A"),
+                            "Sprache": analysis.get("language", "N/A"),
+                            "Zusammenfassung": analysis.get("ai_summary", "N/A")[:100] + "..."
+                        })
+                    else:
+                        results.append({
+                            "Provider": provider,
+                            "Zeit (s)": "FEHLER",
+                            "Dokumenttyp": "FEHLER",
+                            "Qualität": "FEHLER", 
+                            "Sprache": "FEHLER",
+                            "Zusammenfassung": result.get("error", "Unbekannt") if result else "Keine Antwort"
+                        })
+                
+                if results:
+                    import pandas as pd
+                    df = pd.DataFrame(results)
+                    st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("⚠️ Keine Provider verfügbar für Tests!")
+    
+    # Konfigurationshilfe
+    st.subheader("⚙️ Konfigurationshilfe")
+    
+    with st.expander("🔧 Provider konfigurieren", expanded=False):
+        st.markdown("""
+        **🤖 Ollama (Lokal):**
+        ```bash
+        # Installieren
+        curl -fsSL https://ollama.ai/install.sh | sh
+        
+        # Mistral 7B Modell laden
+        ollama pull mistral:7b
+        
+        # Server starten (läuft auf localhost:11434)
+        ollama serve
+        ```
+        
+        **🌟 Google Gemini Flash:**
+        ```bash
+        # 1. Google AI Studio: https://aistudio.google.com/
+        # 2. API Key generieren
+        # 3. In .env hinzufügen:
+        GOOGLE_AI_API_KEY=your_api_key_here
+        ```
+        
+        **🤗 Hugging Face:**
+        ```bash
+        # 1. Registrierung: https://huggingface.co/join
+        # 2. Token erstellen: https://huggingface.co/settings/tokens
+        # 3. In .env hinzufügen:
+        HUGGINGFACE_API_KEY=your_token_here
+        ```
+        """)
+    
+    # Aktueller Status
+    st.subheader("📊 Aktueller System-Status")
+    
+    status_data = {
+        "Gesamte Provider": len(provider_info),
+        "Verfügbare Provider": total_available,
+        "Bevorzugte Reihenfolge": fallback_chain,
+        "Backend erreichbar": "✅" if provider_status else "❌",
+        "Letzter Check": datetime.now().strftime("%H:%M:%S")
+    }
+    
+    for key, value in status_data.items():
+        st.write(f"**{key}:** {value}")
+
+
+
+# === RAG-CHAT FUNKTIONEN ===
+
+def get_rag_status() -> Optional[Dict]:
+    """RAG-System Status abrufen"""
+    def _get_status():
+        response = requests.get(f"{API_BASE_URL}/api/rag/status", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_get_status)
+    return result
+
+def chat_with_documents(question: str, token: str = "") -> Optional[Dict]:
+    """Chat mit QMS-Dokumenten"""
+    def _chat():
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        response = requests.post(
+            f"{API_BASE_URL}/api/rag/chat",
+            json={"question": question},
+            headers=headers,
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_chat)
+    return result
+
+def search_documents_semantic(query: str, max_results: int = 5) -> Optional[Dict]:
+    """Semantische Dokumentensuche"""
+    def _search():
+        response = requests.get(
+            f"{API_BASE_URL}/api/rag/search",
+            params={"query": query, "max_results": max_results},
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_search)
+    return result
+
+def index_all_documents() -> Optional[Dict]:
+    """Alle Dokumente für RAG indexieren"""
+    def _index():
+        response = requests.post(f"{API_BASE_URL}/api/rag/index-all", timeout=60)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_index)
+    return result
+
+def render_rag_chat_page():
+    """💬 RAG-Chat Seite"""
+    st.markdown('<div class="main-header"><h1>💬 RAG-Chat</h1><p>Chat mit allen QMS-Dokumenten</p></div>', unsafe_allow_html=True)
+    
+    # RAG-System Status prüfen
+    with st.expander("🧠 RAG-System Status", expanded=False):
+        status_result = get_rag_status()
+        
+        if status_result and status_result.get("success"):
+            rag_stats = status_result.get("rag_system", {})
+            
+            if rag_stats.get("available"):
+                st.success("✅ RAG-System ist verfügbar!")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📚 Dokumente", rag_stats.get("total_documents", 0))
+                with col2:
+                    st.metric("🧩 Text-Chunks", rag_stats.get("total_chunks", 0))
+                with col3:
+                    st.metric("⚡ Chunks/Dokument", rag_stats.get("average_chunks_per_doc", 0))
+                
+                st.info(f"🤖 Model: {rag_stats.get('embeddings_model', 'Unknown')} | 💾 DB: {rag_stats.get('vector_database', 'Unknown')}")
+            else:
+                st.error("❌ RAG-System nicht verfügbar")
+                if st.button("📚 Alle Dokumente indexieren"):
+                    with st.spinner("Indexiere alle Dokumente..."):
+                        result = index_all_documents()
+                        if result and result.get("success"):
+                            st.success(f"✅ {result.get('indexed_documents', 0)} Dokumente indexiert!")
+                        else:
+                            st.error("❌ Indexierung fehlgeschlagen")
+        else:
+            st.error("❌ RAG-System Status nicht abrufbar")
+    
+    # Chat-Interface
+    st.markdown("### 💬 Chat mit QMS-Dokumenten")
+    
+    # Beispiel-Fragen
+    st.markdown("**🔍 Beispiel-Fragen:**")
+    example_questions = [
+        "Welche Schraube muss ich beim Zusammenbau der Antriebseinheit verwenden?",
+        "Was sagt die ISO 13485 zur Dokumentenkontrolle?",
+        "Wie funktioniert der Kalibrierungsprozess für Messgeräte?",
+        "Welche SOPs gibt es für die Produktion?",
+        "Was ist bei Kundenreklamationen zu beachten?"
+    ]
+    
+    cols = st.columns(len(example_questions))
+    for i, question in enumerate(example_questions):
+        with cols[i]:
+            if st.button(f"💡 Frage {i+1}", help=question, key=f"example_{i}"):
+                st.session_state['rag_question'] = question
+    
+    # Chat-Input
+    question = st.text_area(
+        "🤔 Ihre Frage an das QMS:",
+        value=st.session_state.get('rag_question', ''),
+        placeholder="z.B. 'Welche Schrauben verwende ich bei der Montage?' oder 'Was steht in der ISO 13485 über...?'",
+        height=100,
+        key="rag_question_input"
+    )
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        ask_button = st.button("🧠 Frage stellen", type="primary", disabled=not question.strip())
+    with col2:
+        if st.button("🔍 Semantische Suche"):
+            if question.strip():
+                st.session_state['show_semantic_search'] = True
+    
+    # Chat-Antwort
+    if ask_button and question.strip():
+        token = st.session_state.get('auth_token', '')
+        
+        with st.spinner("🧠 Durchsuche QMS-Dokumente und generiere Antwort..."):
+            result = chat_with_documents(question, token)
+            
+            if result and result.get("success"):
+                # Antwort anzeigen
+                st.markdown("### 💡 Antwort")
+                st.markdown(result.get("answer", "Keine Antwort generiert"))
+                
+                # Metriken
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    confidence = result.get("confidence_score", 0)
+                    color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.5 else "🔴"
+                    st.metric("🎯 Konfidenz", f"{color} {confidence:.1%}")
+                
+                with col2:
+                    processing_time = result.get("processing_time", 0)
+                    st.metric("⏱️ Verarbeitung", f"{processing_time:.2f}s")
+                
+                with col3:
+                    chunks = result.get("context_chunks", 0)
+                    st.metric("📄 Verwendete Quellen", chunks)
+                
+                # Quellen anzeigen
+                sources = result.get("sources", [])
+                if sources:
+                    st.markdown("### 📚 Verwendete Quellen")
+                    for i, source in enumerate(sources, 1):
+                        with st.expander(f"📄 Quelle {i}: {source.get('title', 'Unbekannt')}"):
+                            st.write(f"**Typ:** {source.get('type', 'Unbekannt')}")
+                            st.write(f"**Dokument-Nr.:** {source.get('number', 'Unbekannt')}")
+                            st.write(f"**Chunk:** {source.get('chunk_index', 0) + 1}")
+            else:
+                st.error("❌ Fehler beim Chat mit Dokumenten")
+                if result:
+                    st.error(f"Fehler: {result.get('error', 'Unbekannt')}")
+    
+    # Semantische Suche (optional)
+    if st.session_state.get('show_semantic_search') and question.strip():
+        st.markdown("### 🔍 Semantische Suche")
+        
+        search_result = search_documents_semantic(question)
+        
+        if search_result and search_result.get("success"):
+            results = search_result.get("results", [])
+            st.write(f"**{len(results)} relevante Dokument-Abschnitte gefunden:**")
+            
+            for i, result in enumerate(results, 1):
+                with st.expander(f"📄 {i}. {result.get('document_title', 'Unbekannt')}"):
+                    st.write(f"**Typ:** {result.get('document_type', 'Unbekannt')}")
+                    st.write(f"**Nummer:** {result.get('document_number', 'Unbekannt')}")
+                    st.write("**Vorschau:**")
+                    st.write(result.get('content_preview', 'Keine Vorschau verfügbar'))
+        else:
+            st.error("❌ Semantische Suche fehlgeschlagen")
+        
+        st.session_state['show_semantic_search'] = False
+
+# === INTELLIGENTE WORKFLOW-FUNKTIONEN ===
+
+def trigger_workflow_from_message(message: str, token: str = "") -> Optional[Dict]:
+    """Workflow aus Nachricht auslösen"""
+    def _trigger():
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        response = requests.post(
+            f"{API_BASE_URL}/api/workflow/trigger-message",
+            json={"message": message},
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_trigger)
+    return result
+
+def get_active_workflows() -> Optional[Dict]:
+    """Aktive Workflows abrufen"""
+    def _get_workflows():
+        response = requests.get(f"{API_BASE_URL}/api/workflow/active", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_get_workflows)
+    return result
+
+def get_my_tasks(token: str = "", status: Optional[str] = None, priority: Optional[str] = None) -> Optional[Dict]:
+    """Meine Tasks abrufen"""
+    def _get_tasks():
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        params = {}
+        if status:
+            params["status"] = status
+        if priority:
+            params["priority"] = priority
+        
+        response = requests.get(
+            f"{API_BASE_URL}/api/tasks/my-tasks",
+            headers=headers,
+            params=params,
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    
+    result = safe_api_call(_get_tasks)
+    return result
+
+def render_intelligent_workflows_page():
+    """🚀 Intelligente Workflows Seite"""
+    st.markdown('<div class="main-header"><h1>🚀 Intelligente Workflows</h1><p>Automatische Workflow-Auslösung durch KI</p></div>', unsafe_allow_html=True)
+    
+    # Workflow-Trigger
+    st.markdown("### 💬 Workflow auslösen")
+    st.markdown("Beschreiben Sie ein Problem oder eine Situation - die KI löst automatisch den passenden Workflow aus!")
+    
+    # Beispiel-Nachrichten
+    st.markdown("**🔮 Beispiel-Trigger:**")
+    example_triggers = [
+        "Bluetooth Modul nicht mehr lieferbar",
+        "Lötofen ist defekt und muss repariert werden",
+        "Kunde beschwert sich über Produktfehler",
+        "Interne Audit hat Abweichung gefunden",
+        "Neue ISO 13485 Version erfordert Updates"
+    ]
+    
+    cols = st.columns(len(example_triggers))
+    for i, trigger in enumerate(example_triggers):
+        with cols[i]:
+            if st.button(f"⚡ Trigger {i+1}", help=trigger, key=f"trigger_{i}"):
+                st.session_state['workflow_message'] = trigger
+    
+    # Message Input
+    message = st.text_area(
+        "🎯 Problem/Situation beschreiben:",
+        value=st.session_state.get('workflow_message', ''),
+        placeholder="z.B. 'CPU Chip nicht mehr verfügbar' oder 'Kalibrierofen ist ausgefallen'",
+        height=100,
+        key="workflow_message_input"
+    )
+    
+    if st.button("🚀 Intelligenten Workflow auslösen", type="primary", disabled=not message.strip()):
+        token = st.session_state.get('auth_token', '')
+        
+        with st.spinner("🧠 Analysiere Nachricht und löse Workflow aus..."):
+            result = trigger_workflow_from_message(message, token)
+            
+            if result and result.get("success"):
+                if result.get("workflow_triggered"):
+                    st.success("🎉 Workflow erfolgreich ausgelöst!")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("📋 Workflow", result.get("workflow_name", "Unbekannt"))
+                        st.metric("⏱️ Geschätzte Dauer", f"{result.get('estimated_duration', 0)} Tage")
+                    
+                    with col2:
+                        st.metric("📝 Tasks erstellt", result.get("tasks_created", 0))
+                        st.metric("🎯 Konfidenz", f"{result.get('confidence', 0):.1%}")
+                    
+                    st.info(f"🆔 Workflow-ID: {result.get('workflow_id', 'Unbekannt')}")
+                    st.info(result.get("message", "Workflow ausgelöst"))
+                else:
+                    st.warning("🤔 Kein eindeutiger Workflow-Trigger erkannt")
+                    st.info(result.get("message", "Nachricht analysiert, aber kein Workflow ausgelöst"))
+            else:
+                st.error("❌ Fehler bei der Workflow-Auslösung")
+                if result:
+                    st.error(f"Fehler: {result.get('error', 'Unbekannt')}")
+    
+    # Aktive Workflows anzeigen
+    st.markdown("### 📋 Aktive Workflows")
+    
+    workflow_result = get_active_workflows()
+    
+    if workflow_result and workflow_result.get("success"):
+        workflows = workflow_result.get("active_workflows", [])
+        
+        if workflows:
+            for workflow in workflows:
+                with st.expander(f"🔄 {workflow.get('template_name', 'Unbekannt')} - {workflow.get('id', 'N/A')}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Typ:** {workflow.get('trigger_type', 'Unbekannt')}")
+                        st.write(f"**Status:** {workflow.get('status', 'Unbekannt')}")
+                    
+                    with col2:
+                        st.write(f"**Tasks:** {workflow.get('total_tasks', 0)}")
+                        created_at = workflow.get('created_at', '')
+                        if created_at:
+                            st.write(f"**Erstellt:** {created_at[:19].replace('T', ' ')}")
+        else:
+            st.info("📭 Keine aktiven Workflows vorhanden")
+    else:
+        st.error("❌ Fehler beim Laden der aktiven Workflows")
+
+def render_my_tasks_page():
+    """📋 Meine Tasks Seite"""
+    st.markdown('<div class="main-header"><h1>📋 Meine Aufgaben</h1><p>Alle mir zugewiesenen Tasks aus intelligenten Workflows</p></div>', unsafe_allow_html=True)
+    
+    # Filter
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        status_filter = st.selectbox(
+            "Status Filter:",
+            ["Alle", "open", "in_progress", "waiting", "completed", "cancelled"],
+            index=0
+        )
+    
+    with col2:
+        priority_filter = st.selectbox(
+            "Priorität Filter:",
+            ["Alle", "CRITICAL", "HIGH", "MEDIUM", "LOW"],
+            index=0
+        )
+    
+    with col3:
+        if st.button("🔄 Aktualisieren"):
+            st.rerun()
+    
+    # Tasks laden
+    token = st.session_state.get('auth_token', '')
+    status = None if status_filter == "Alle" else status_filter
+    priority = None if priority_filter == "Alle" else priority_filter
+    
+    tasks_result = get_my_tasks(token, status, priority)
+    
+    if tasks_result and tasks_result.get("success"):
+        tasks = tasks_result.get("tasks", [])
+        
+        if tasks:
+            st.markdown(f"### 📝 {len(tasks)} Aufgaben gefunden")
+            
+            # Tasks nach Priorität gruppieren
+            priority_groups = {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}
+            for task in tasks:
+                task_priority = task.get("priority", "MEDIUM")
+                if task_priority in priority_groups:
+                    priority_groups[task_priority].append(task)
+            
+            # Tasks anzeigen
+            for priority, priority_tasks in priority_groups.items():
+                if not priority_tasks:
+                    continue
+                
+                priority_color = {
+                    "CRITICAL": "🔴",
+                    "HIGH": "🟠", 
+                    "MEDIUM": "🟡",
+                    "LOW": "🟢"
+                }
+                
+                st.markdown(f"#### {priority_color.get(priority, '⚪')} {priority} Priorität ({len(priority_tasks)})")
+                
+                for task in priority_tasks:
+                    status_emoji = {
+                        "open": "📋",
+                        "in_progress": "🔄",
+                        "waiting": "⏳",
+                        "completed": "✅",
+                        "cancelled": "❌"
+                    }
+                    
+                    task_status = task.get("status", "open")
+                    emoji = status_emoji.get(task_status, "📋")
+                    
+                    with st.expander(f"{emoji} {task.get('title', 'Unbekannt')} (#{task.get('id', 'N/A')})"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write(f"**Status:** {task_status}")
+                            st.write(f"**Gruppe:** {task.get('assigned_group', 'Unbekannt')}")
+                            if task.get('due_date'):
+                                due = task['due_date'][:19].replace('T', ' ')
+                                st.write(f"**Fällig:** {due}")
+                        
+                        with col2:
+                            st.write(f"**Workflow:** {task.get('workflow_id', 'N/A')}")
+                            if task.get('approval_needed'):
+                                st.write("**🔒 Freigabe erforderlich**")
+                            created = task.get('created_at', '')[:19].replace('T', ' ')
+                            st.write(f"**Erstellt:** {created}")
+                        
+                        if task.get('description'):
+                            st.write("**Beschreibung:**")
+                            st.write(task['description'])
+                        
+                        # Task-Aktionen (vereinfacht)
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if task_status == "open":
+                                if st.button("▶️ Starten", key=f"start_{task['id']}"):
+                                    st.info("Task-Update noch nicht implementiert")
+                        
+                        with col2:
+                            if task_status == "in_progress":
+                                if st.button("✅ Abschließen", key=f"complete_{task['id']}"):
+                                    st.info("Task-Update noch nicht implementiert")
+                        
+                        with col3:
+                            if st.button("💬 Kommentar", key=f"comment_{task['id']}"):
+                                st.info("Kommentar-System noch nicht implementiert")
+        else:
+            st.info("📭 Keine Aufgaben gefunden")
+    else:
+        st.error("❌ Fehler beim Laden der Aufgaben")
+        if tasks_result:
+            st.error(f"Fehler: {tasks_result.get('error', 'Unbekannt')}")
+
 # ===== MAIN APP =====
 def main():
     """Hauptfunktion der App"""
@@ -2216,6 +3963,16 @@ def main():
         render_upload_page()
     elif current_page == "documents":
         render_documents_page()
+    elif current_page == "ai_analysis":
+        render_ai_analysis_page()
+    elif current_page == "ai_prompt_test":
+        render_ai_prompt_test_page()
+    elif current_page == "rag_chat":
+        render_rag_chat_page()
+    elif current_page == "intelligent_workflows":
+        render_intelligent_workflows_page()
+    elif current_page == "my_tasks":
+        render_my_tasks_page()
     elif current_page == "users":
         render_users_page()
     elif current_page == "dashboard":
@@ -2224,6 +3981,8 @@ def main():
         render_profile_page()
     elif current_page == "settings":
         render_settings_page()
+    elif current_page == "ai_provider_management":
+        render_ai_provider_management_page()
     else:
         st.error(f"Unbekannte Seite: {current_page}")
 
