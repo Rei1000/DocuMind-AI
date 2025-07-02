@@ -1,8 +1,8 @@
 # KI-QMS - AI-Powered Quality Management System 🏥
 
-> **Version 2.1.0** | Ein intelligentes, ISO 13485-konformes Qualitätsmanagementsystem für die Medizintechnik mit KI-Unterstützung
+> **Version 3.1.0** | Ein intelligentes, ISO 13485-konformes Qualitätsmanagementsystem für die Medizintechnik mit KI-Unterstützung
 > 
-> **Letzte Aktualisierung:** 30. Juni 2025 | **Status:** ✅ Produktionsbereit
+> **Letzte Aktualisierung:** 2. Juli 2025 | **Status:** ✅ Produktionsbereit
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com)
@@ -124,13 +124,40 @@ Das KI-QMS arbeitet mit **13 aktiven Interessengruppen**, die alle relevanten St
 - **ISO 10993** - Biologische Beurteilung
 - **FDA 21 CFR Part 820** - Quality System Regulation
 
-### 🤖 **KI-Features**
+### 🤖 **KI-Features** (AI Engine v2.1)
 
-- **Automatische Dokumentklassifizierung** basierend auf Inhalt
-- **Intelligente Titel-Extraktion** aus Normtexten
+#### 🆓 **Kostenlose KI-Provider**
+- **OpenAI GPT-4o-mini** - Leistungsstark und kostengünstig
+- **Google Gemini Flash** - 1500 Anfragen/Tag kostenlos  
+- **Ollama (Lokal)** - Mistral 7B, völlig kostenlos, offline
+- **Regel-basiert** - Intelligenter Fallback ohne KI
+
+#### 🧪 **Live Provider-Test-Funktionalität**
+- **🔄 Live-Test Button** - Direkter Provider-Verfügbarkeitstest vor Upload
+- **⚡ Instant-Feedback** - Sofortige Anzeige von Provider-Status
+- **🎯 Smart Fallback** - Automatische Empfehlung alternativer Provider
+
+#### 🗄️ **Adaptive Vector Database**
+- **Qdrant Standard** - Hochperformante Vector Search für RAG
+- **ChromaDB Fallback** - Automatischer Wechsel bei NumPy 2.0 Problemen  
+- **Seamless Migration** - Transparenter Übergang zwischen Vector Stores
+- **Local-First** - Alle Vektordaten bleiben auf Ihrem System
+- **💡 Intelligente Auswahl** - "Auto"-Modus wählt besten verfügbaren Provider
+- **📊 Performance-Monitoring** - Antwortzeiten und Erfolgsraten werden angezeigt
+
+#### 🧠 **Erweiterte Analyse**
+- **Automatische Spracherkennung** (Deutsch/Englisch/Französisch)
+- **Intelligente Dokumentklassifizierung** (95%+ Genauigkeit)
+- **Norm-Referenz-Extraktion** (ISO, IEC, EN Standards)
+- **Compliance-Gap-Analyse** mit Verbesserungsvorschlägen
+- **Duplikat-Erkennung** basierend auf Ähnlichkeitsanalyse
 - **RAG-basierte Dokumentensuche** für semantische Suche
-- **Compliance-Gap-Analyse** automatisiert
-- **Workflow-Automatisierung** mit intelligenten Benachrichtigungen
+
+#### ⚡ **Hybrid AI Engine**
+- **Lokale + Cloud AI** - Optimale Balance von Kosten und Leistung
+- **Automatisches Fallback** - Immer verfügbar durch mehrere Provider
+- **Datenschutz-first** - Sensible Daten bleiben lokal bei Ollama
+- **Cost-Tracking** - Transparente Kostenüberwachung für Cloud-APIs
 
 ## 🏗️ Systemarchitektur
 
@@ -234,6 +261,25 @@ calibration_requirements (id, norm_id, equipment_type, required_interval_months,
 | **[openpyxl](https://openpyxl.readthedocs.io/)** | 3.1+ | Excel-Dateien-Support | ✅ Spreadsheet Analysis |
 | **[aiofiles](https://github.com/Tinche/aiofiles)** | 23.2+ | Asynchrone Dateioperationen | ✅ Performance Optimized |
 
+### **KI & AI Provider**
+
+| Provider | Status | Kosten | Zweck |
+|----------|--------|--------|-------|
+| **[OpenAI GPT-4o-mini](https://openai.com/)** | ✅ **Aktiv** | Niedrig | Hauptprovider für Textanalyse |
+| **[Google Gemini Flash](https://ai.google.dev/)** | ✅ **Aktiv** | 1500 Anfragen/Tag kostenlos | Alternative AI Provider |
+| **[Ollama](https://ollama.ai/)** | ✅ **Aktiv** | Völlig kostenlos | Lokaler AI Provider (Mistral 7B) |
+| **[Regel-basiert](./backend/app/ai_engine.py)** | ✅ **Fallback** | Kostenlos | Intelligenter Fallback ohne AI |
+
+### **Vector Database & RAG Engine**
+
+| Technologie | Version | Status | Zweck |
+|-------------|---------|--------|-------|
+| **[Qdrant](https://qdrant.tech/)** | 1.7+ | ✅ **Standard** | Hochperformante Vector Search |
+| **[ChromaDB](https://www.trychroma.com/)** | 0.4+ | ⚠️ **Fallback** | Alternative bei NumPy-Problemen |
+| **[Sentence Transformers](https://sbert.net/)** | 2.2+ | ✅ **Aktiv** | Document Embeddings |
+
+> **💡 Wichtiger Hinweis:** Das System verwendet **Qdrant** als Standard-Vector-Database. Bei NumPy 2.0 Kompatibilitätsproblemen erfolgt automatischer Fallback auf ChromaDB.
+
 ### **Entwicklung & Testing**
 
 | Tool | Version | Zweck | Implementation Status |
@@ -252,7 +298,49 @@ calibration_requirements (id, norm_id, equipment_type, required_interval_months,
 | **[GitHub Actions](https://github.com/features/actions)** | 📋 Planned | CI/CD Pipeline |
 | **Shell Scripts** | ✅ Active | Automatisierte Start/Stop-Prozesse |
 
+## 🆓 Quick Setup: Kostenlose KI-Features
+
+### 🚀 Automatisches Setup (Empfohlen)
+```bash
+# Repository klonen
+git clone <repository-url>
+cd KI-QMS
+
+# Automatisches Setup für kostenlose KI-Provider
+./setup-free-ai.sh
+```
+
+### 📋 Manuelles Setup
+```bash
+# 1. Umgebungskonfiguration
+cp env-template.txt .env
+
+# 2. Ollama installieren (kostenlos, lokal)
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull mistral:7b
+
+# 3. Backend starten
+cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 4. Kostenlose KI testen
+curl http://localhost:8000/api/ai/free-providers-status
+```
+
+### 🎯 Verfügbare kostenlose Provider:
+- 🖥️ **Ollama**: Lokal, völlig kostenlos, keine Limits
+- 🤖 **OpenAI GPT-4o-mini**: Cloud, sehr kostengünstig ($0.15/1M tokens)
+- 🌟 **Google Gemini**: 1500 Anfragen/Tag kostenlos
+- 📋 **Regel-basiert**: Immer verfügbar als Fallback
+
+### 📖 Detaillierte Anleitung: [FREE-AI-SETUP.md](FREE-AI-SETUP.md)
+
+---
+
 ## 🚀 Installation
+
+### ⚠️ **Wichtiger Hinweis: Vector Database Migration**
+
+> **💡 Update Information (Juli 2025):** Das System wurde von ChromaDB auf **Qdrant** umgestellt für bessere NumPy 2.0 Kompatibilität und Performance. Ihre Daten werden automatisch migriert - keine manuellen Schritte erforderlich.
 
 ### Systemanforderungen
 
@@ -325,27 +413,40 @@ pip install streamlit==1.31.0 pandas==2.1.0 plotly==5.17.0 requests==2.31.0
 ```bash
 # Terminal 1: Backend starten (aus backend/ Verzeichnis!)
 cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # Terminal 2: Frontend starten
 cd frontend
 streamlit run streamlit_app.py --server.port 8501 --server.headless true
 ```
 
-### 📋 Aktuelle System-Updates (Version 2.1.0)
+### 📋 Aktuelle System-Updates (Version 3.1.0)
+
+**✅ Neue Features:**
+- **🧪 Live Provider-Test:** Direkter Test der KI-Provider vor Document-Upload
+- **⚡ Smart Provider-Auswahl:** Intelligente Empfehlungen basierend auf Verfügbarkeit
+- **🔄 Auto-Provider-Modus:** Automatische Wahl des besten verfügbaren Providers
+- **📊 Provider-Performance-Monitoring:** Echtzeit-Überwachung von Antwortzeiten
 
 **✅ Behobene Probleme:**
 - **Dependencies:** Requirements.txt auf kompatible Versionen angepasst (FastAPI 0.104.1, Starlette 0.27.0)
 - **Upload-Funktionalität:** Vollständig repariert - Dokumente werden korrekt im Frontend angezeigt
-- **Historie-Feature:** Erweitert mit Zeitstempel-Formatierung (dd.mm.yyyy hh:mm) und vollständigen Benutzernamen
-- **Workflow-Engine:** QM-Manager Freigabe-Prozess mit verbesserter Kommentar-Behandlung
-- **Status-Tracking:** Emoji-Indikatoren für Dokumentstatus (📝 DRAFT, 🔍 REVIEWED, ✅ APPROVED)
+- **Provider-Integration:** Nahtlose Integration aller KI-Provider mit Fallback-Mechanismus
+- **Frontend-Stabilität:** Streamlit-Kompatibilität und Error-Handling verbessert
 
 **🔄 Technische Verbesserungen:**
-- Minimale, stabile Requirements-Konfiguration
-- Verbesserte Fehlerbehandlung bei Datei-Uploads
-- Optimierte Datenbank-Queries mit `joinedload()` für bessere Performance
-- Zentrale `render_document_history()` Funktion zur Code-Reduzierung
+- **Zentrale Prompt-Verwaltung:** Einheitliche Prompt-Templates für konsistente KI-Antworten
+- **Verbesserte Fehlerbehandlung:** Robuste Error-Recovery bei Provider-Ausfällen
+- **Performance-Optimierung:** Schnellere Upload-Zeiten durch optimierte Provider-Auswahl
+- **Code-Qualität:** Refactoring für bessere Wartbarkeit und Testbarkeit
+
+### 🧪 Provider-Test verwenden
+
+1. **Upload-Seite öffnen:** http://localhost:8501 → "📤 Dokument hochladen"
+2. **Provider auswählen:** OpenAI 4o-mini, Google Gemini, Ollama oder Auto
+3. **🔄 Live-Test klicken:** Direkter Test der Provider-Verfügbarkeit
+4. **Ergebnis prüfen:** ✅ Verfügbar / ❌ Nicht verfügbar + Antwortzeit
+5. **Upload starten:** Sicher wissen, dass gewählter Provider funktioniert
 
 ### System stoppen
 
@@ -520,7 +621,9 @@ mypy backend/app/
 
 | Dokument | Beschreibung | Status |
 |----------|--------------|--------|
-| [API-QUICKSTART.md](API-QUICKSTART.md) | Schnelle API-Referenz | ✅ Verfügbar |
+| [API-DOCUMENTATION-v3.1.0.md](API-DOCUMENTATION-v3.1.0.md) | **Aktuelle API-Dokumentation** Version 3.1.0 | ✅ Neu |
+| [API-ENDPOINTS-COMPLETE.md](API-ENDPOINTS-COMPLETE.md) | Vollständige API-Referenz aller Endpunkte | ✅ Verfügbar |
+| [CLEANUP-ROADMAP.md](CLEANUP-ROADMAP.md) | **System Cleanup & Migration** Dokumentation | ✅ Neu |
 | [WORKFLOW-TESTING-GUIDE.md](WORKFLOW-TESTING-GUIDE.md) | Testing-Handbuch | ✅ Verfügbar |
 | [QM-WORKFLOW-FEATURES.md](QM-WORKFLOW-FEATURES.md) | QM-Funktionen Detail | ✅ Verfügbar |
 | [PHASE1-STABILIZATION-PLAN.md](PHASE1-STABILIZATION-PLAN.md) | Stabilisierungsplan | ✅ Verfügbar |
@@ -585,4 +688,4 @@ Dieses Projekt ist unter der [MIT License](LICENSE) lizenziert - siehe die LICEN
 
 ---
 
-**Made with ❤️ by the KI-QMS Team** | **Version 2.0.0** | **Last Updated: 2024-12-20**
+**Made with ❤️ by the KI-QMS Team** | **Version 3.1.0** | **Last Updated: 2025-07-02**

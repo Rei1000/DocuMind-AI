@@ -1,11 +1,14 @@
 """
 KI-Provider für lokale und kostenlose Modelle
+Enhanced mit OpenAI 4o mini Support
 """
 import requests
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import logging
+import asyncio
+import openai
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ class OllamaProvider:
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
-                timeout=30
+                timeout=120  # Erhöhtes Timeout für lokale Modelle
             )
             
             if response.status_code == 200:
@@ -90,6 +93,43 @@ class OllamaProvider:
             "ai_summary": response[:200]
         }
     
+    async def simple_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Einfacher Prompt für AI Test Interface"""
+        try:
+            payload = {
+                "model": "mistral:7b",
+                "prompt": prompt,
+                "stream": False
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json=payload,
+                timeout=120  # Erhöhtes Timeout für lokale Modelle
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "success": True,
+                    "response": result.get("response", "Keine Antwort erhalten"),
+                    "model": "mistral:7b",
+                    "provider": "ollama"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status_code}",
+                    "provider": "ollama"
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Ollama Verbindungsfehler: {str(e)}",
+                "provider": "ollama"
+            }
+    
     def _fallback_analysis(self, content: str) -> Dict[str, Any]:
         """Einfache Fallback-Analyse ohne KI"""
         return {
@@ -102,48 +142,95 @@ class OllamaProvider:
         }
 
 
-class HuggingFaceProvider:
-    """Kostenloser Hugging Face Provider"""
+class OpenAI4oMiniProvider:
+    """OpenAI 4o-mini Provider - Schnell und günstig für Produktionseinsatz"""
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key
-        self.base_url = "https://api-inference.huggingface.co/models"
-        self.model = "microsoft/DialoGPT-medium"
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
+        if self.api_key:
+            openai.api_key = self.api_key
+        self.model = "gpt-4o-mini"
+        self.embedding_model = "text-embedding-3-small"
     
     async def analyze_document(self, content: str, document_type: str = "unknown") -> Dict[str, Any]:
-        """Analysiert mit Hugging Face Inference API"""
+        """Analysiert Dokument mit OpenAI 4o-mini"""
         try:
-            headers = {}
-            if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
+            if not self.api_key:
+                return self._fallback_analysis(content)
             
-            payload = {
-                "inputs": f"Analysiere dieses Dokument: {content[:500]}..."
-            }
+            prompt = f"""
+            Analysiere dieses QMS-Dokument und gib eine strukturierte Antwort in folgendem JSON-Format:
+
+            {{
+                "document_type": "DETECTED_TYPE",
+                "main_topics": ["topic1", "topic2", "topic3"],
+                "language": "de/en",
+                "quality_score": 8.5,
+                "compliance_relevant": true,
+                "ai_summary": "Detaillierte Zusammenfassung...",
+                "norm_references": ["ISO 13485", "MDR"],
+                "compliance_keywords": ["GMP", "Validation", "Risk Management"]
+            }}
+
+            Dokumenttyp-Optionen: PROCEDURE, WORK_INSTRUCTION, FORM, POLICY, MANUAL, SPECIFICATION, 
+            RISK_ASSESSMENT, AUDIT_REPORT, TRAINING_MATERIAL, CERTIFICATE, NORM_STANDARD, OTHER
+
+            Dokument-Inhalt:
+            {content[:2000]}...
+            """
             
-            response = requests.post(
-                f"{self.base_url}/{self.model}",
-                headers=headers,
-                json=payload,
-                timeout=15
+            response = await openai.ChatCompletion.acreate(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Du bist ein QMS-Experte für ISO 13485 und EU MDR. Analysiere Dokumente präzise und strukturiert."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.1
             )
             
-            if response.status_code == 200:
+            # Parse JSON response
+            import json
+            try:
+                result = json.loads(response.choices[0].message.content)
+                result['provider'] = 'openai_4o_mini'
+                result['cost'] = 'sehr günstig ($0.00015/1K tokens)'
+                return result
+            except json.JSONDecodeError:
+                # Fallback if not valid JSON
                 return {
                     "document_type": document_type,
-                    "main_topics": ["HF-Analyse"],
+                    "main_topics": ["OpenAI Analyse"],
                     "language": "de",
-                    "quality_score": 7,
+                    "quality_score": 8.5,
                     "compliance_relevant": True,
-                    "ai_summary": "Analysiert mit Hugging Face"
+                    "ai_summary": response.choices[0].message.content,
+                    "provider": "openai_4o_mini",
+                    "cost": "sehr günstig"
                 }
-            else:
-                logger.warning(f"HuggingFace API limitiert: {response.status_code}")
-                return self._fallback_analysis(content)
                 
         except Exception as e:
-            logger.error(f"HuggingFace Fehler: {e}")
+            logger.error(f"OpenAI 4o-mini Fehler: {e}")
             return self._fallback_analysis(content)
+    
+    async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generiert OpenAI Embeddings"""
+        try:
+            if not self.api_key:
+                raise ValueError("OpenAI API Key fehlt")
+            
+            response = await openai.Embedding.acreate(
+                model=self.embedding_model,
+                input=texts
+            )
+            
+            embeddings = [item.embedding for item in response.data]
+            logger.info(f"✅ OpenAI Embeddings generiert: {len(embeddings)} Texte")
+            return embeddings
+            
+        except Exception as e:
+            logger.error(f"❌ OpenAI Embedding Fehler: {e}")
+            raise
     
     def _fallback_analysis(self, content: str) -> Dict[str, Any]:
         """Fallback ohne API"""
@@ -151,10 +238,79 @@ class HuggingFaceProvider:
             "document_type": "Standard",
             "main_topics": ["Dokument", "Analyse"],
             "language": "de",
-            "quality_score": 6,
+            "quality_score": 7,
             "compliance_relevant": True,
-            "ai_summary": "Basis-Analyse durchgeführt"
+            "ai_summary": "Basis-Analyse durchgeführt (OpenAI API nicht verfügbar)",
+            "provider": "openai_fallback",
+            "cost": "kostenlos"
         }
+
+
+class OpenAIEmbeddingProvider:
+    """Spezialisierter OpenAI Embedding Provider für RAG"""
+    
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
+        if self.api_key:
+            openai.api_key = self.api_key
+        self.model = "text-embedding-3-small"  # Günstig und sehr gut
+        self.dimension = 1536  # Dimension für text-embedding-3-small
+    
+    async def encode(self, texts: List[str] | str) -> List[List[float]] | List[float]:
+        """Encodes text(s) to embeddings - kompatibel mit SentenceTransformer API"""
+        try:
+            if not self.api_key:
+                raise ValueError("OpenAI API Key fehlt")
+            
+            # Handle single string
+            if isinstance(texts, str):
+                texts = [texts]
+                single_text = True
+            else:
+                single_text = False
+            
+            response = await openai.Embedding.acreate(
+                model=self.model,
+                input=texts
+            )
+            
+            embeddings = [item.embedding for item in response.data]
+            
+            if single_text:
+                return embeddings[0]
+            return embeddings
+            
+        except Exception as e:
+            logger.error(f"❌ OpenAI Embedding encode Fehler: {e}")
+            raise
+    
+    def encode_sync(self, texts: List[str] | str) -> List[List[float]] | List[float]:
+        """Synchrone Version von encode"""
+        try:
+            if not self.api_key:
+                raise ValueError("OpenAI API Key fehlt")
+            
+            # Handle single string
+            if isinstance(texts, str):
+                texts = [texts]
+                single_text = True
+            else:
+                single_text = False
+            
+            response = openai.Embedding.create(
+                model=self.model,
+                input=texts
+            )
+            
+            embeddings = [item.embedding for item in response.data]
+            
+            if single_text:
+                return embeddings[0]
+            return embeddings
+            
+        except Exception as e:
+            logger.error(f"❌ OpenAI Embedding encode_sync Fehler: {e}")
+            raise
 
 
 class GoogleGeminiProvider:
@@ -285,4 +441,16 @@ class GoogleGeminiProvider:
             "ai_summary": "Google Gemini nicht verfügbar - Basis-Analyse",
             "provider": "rule_based",
             "enhanced": False
-        } 
+        }
+
+
+class HuggingFaceProvider:
+    """Deprecated: Ersetze durch OpenAI4oMiniProvider"""
+    
+    def __init__(self, api_key: Optional[str] = None):
+        logger.warning("⚠️ HuggingFaceProvider ist deprecated. Verwende OpenAI4oMiniProvider.")
+        self.fallback_provider = OpenAI4oMiniProvider(api_key)
+    
+    async def analyze_document(self, content: str, document_type: str = "unknown") -> Dict[str, Any]:
+        """Leitet an OpenAI weiter"""
+        return await self.fallback_provider.analyze_document(content, document_type) 

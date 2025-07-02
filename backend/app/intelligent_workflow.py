@@ -33,20 +33,20 @@ import re
 
 from .models import User, InterestGroup, QMSTask, TaskStatus, DocumentType
 from .ai_providers import GoogleGeminiProvider
-# RAG Engine mit robuster Fehlerbehandlung
+# Advanced RAG Engine mit robuster Fehlerbehandlung  
 try:
-    from .rag_engine import rag_engine
+    from .advanced_rag_engine import advanced_rag_engine as rag_engine
     RAG_AVAILABLE = True
-    print("✅ Intelligent Workflow: RAG Engine geladen")
+    print("✅ Intelligent Workflow: Advanced RAG Engine geladen")
 except Exception as e:
-    print(f"⚠️  Intelligent Workflow: RAG Engine nicht verfügbar: {str(e)}")
+    print(f"⚠️  Intelligent Workflow: Advanced RAG Engine nicht verfügbar: {str(e)}")
     RAG_AVAILABLE = False
     
     # Mock RAG Engine für Workflow
     class MockRAGEngine:
-        def search_documents(self, query, max_results=5):
-            return []
-        def index_document(self, *args, **kwargs):
+        async def enhanced_search(self, query, max_results=5):
+            return {"results": [], "answer": "RAG Engine nicht verfügbar"}
+        async def index_document_advanced(self, *args, **kwargs):
             return {"status": "skipped"}
     
     rag_engine = MockRAGEngine()

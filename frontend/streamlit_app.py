@@ -537,10 +537,28 @@ def create_user(user_data: Dict, token: str = "") -> Optional[Dict]:
 def get_all_users() -> List[Dict]:
     """Lädt alle Benutzer für die Verwaltung"""
     def _get_all_users():
-        response = requests.get(f"{API_BASE_URL}/api/users?limit=100", timeout=REQUEST_TIMEOUT)
+        # Token aus Session State holen
+        token = st.session_state.get("auth_token", "")
+        if not token:
+            st.error("❌ Kein gültiger Token - bitte neu anmelden")
+            return []
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(f"{API_BASE_URL}/api/users?limit=100", headers=headers, timeout=REQUEST_TIMEOUT)
+        
         if response.status_code == 200:
             return response.json()
-        return []
+        elif response.status_code == 401:
+            st.error("❌ Token ungültig - bitte neu anmelden")
+            st.session_state.authenticated = False
+            st.session_state.auth_token = ""
+            return []
+        elif response.status_code == 403:
+            st.error("❌ Keine Berechtigung für Benutzerliste")
+            return []
+        else:
+            st.error(f"❌ Fehler beim Laden der Benutzer: {response.status_code}")
+            return []
     
     result = safe_api_call(_get_all_users)
     return result if result else []
@@ -1400,7 +1418,12 @@ def render_workflow_page():
     
     # QM-Workflow Aktionen
     user = st.session_state.current_user
-    is_qm_user = "quality_management" in user.get("groups", [])
+    # ✅ QM-Manager Berechtigung: Prüfe sowohl groups als auch permissions
+    is_qm_user = (
+        "quality_management" in user.get("groups", []) or 
+        "final_approval" in user.get("permissions", []) or
+        "all_rights" in user.get("permissions", [])
+    )
     
     if is_qm_user:
         st.markdown("### 🎯 QM-Manager Aktionen")
@@ -1589,24 +1612,24 @@ def render_users_page():
                 password = st.text_input("Passwort *", type="password", placeholder="Mindestens 8 Zeichen")
             
             with col2:
-                # 13 Interessengruppen als Abteilungsoptionen
+                # Interessengruppen aus der Datenbank laden (live)
                 organizational_unit = st.selectbox(
                     "Abteilung",
                     [
-                        "System Administration",  # Für QMS Admin
-                        "Team/Eingangsmodul", 
-                        "Qualitätsmanagement", 
-                        "Entwicklung", 
-                        "Einkauf", 
-                        "Produktion", 
-                        "HR/Schulung", 
-                        "Dokumentation", 
-                        "Service/Support", 
-                        "Vertrieb", 
-                        "Regulatory Affairs", 
-                        "IT-Abteilung", 
-                        "Externe Auditoren", 
-                        "Lieferanten"
+                        "System Administration",      # Für QMS Admin
+                        "Einkauf",                   # procurement (ID 1)
+                        "Qualitätsmanagement",       # quality_management (ID 2)
+                        "Entwicklung",               # development (ID 3)
+                        "Produktion",                # production (ID 4)
+                        "Service & Support",         # service_support (ID 5)
+                        "Vertrieb",                  # sales (ID 6)
+                        "Regulatorische Angelegenheiten",  # regulatory (ID 7)
+                        "Klinik",                    # clinical (ID 8)
+                        "IT",                        # it (ID 9)
+                        "Geschäftsleitung",          # management (ID 10)
+                        "Externe Auditoren",         # external_auditors (ID 11)
+                        "Lieferanten",               # suppliers (ID 12)
+                        "Kunden"                     # customers (ID 13)
                     ]
                 )
                 
@@ -1666,6 +1689,7 @@ def render_users_page():
             with col1:
                 status_filter = st.selectbox("Status", ["Alle", "Aktiv", "Inaktiv"])
             with col2:
+                # 🔄 DYNAMISCH: Lade verfügbare Abteilungen aus den tatsächlichen Usern
                 dept_filter = st.selectbox(
                     "Abteilung", 
                     ["Alle"] + list(set(u.get("organizational_unit", "Unbekannt") for u in users))
@@ -1820,21 +1844,18 @@ def render_users_page():
                             col_new_dept, col_new_level, col_add_btn = st.columns([3, 2, 1])
                             
                             with col_new_dept:
-                                available_groups = [
-                                    {"id": 1, "name": "Team/Eingangsmodul"},
-                                    {"id": 2, "name": "Qualitätsmanagement"},
-                                    {"id": 3, "name": "Entwicklung"},
-                                    {"id": 4, "name": "Einkauf"},
-                                    {"id": 5, "name": "Produktion"},
-                                    {"id": 6, "name": "HR/Schulung"},
-                                    {"id": 7, "name": "Dokumentation"},
-                                    {"id": 8, "name": "Service/Support"},
-                                    {"id": 9, "name": "Vertrieb"},
-                                    {"id": 10, "name": "Regulatory Affairs"},
-                                    {"id": 11, "name": "IT-Abteilung"},
-                                    {"id": 12, "name": "Externe Auditoren"},
-                                    {"id": 13, "name": "Lieferanten"}
-                                ]
+                                # 🔄 DYNAMISCH: Lade verfügbare Interest Groups von API
+                                available_groups = get_interest_groups()
+                                
+                                if not available_groups:
+                                    st.warning("⚠️ Keine Abteilungen verfügbar oder Verbindungsfehler")
+                                    # Fallback: zeige wenigstens die wichtigsten
+                                    available_groups = [
+                                        {"id": 1, "name": "Einkauf"},
+                                        {"id": 2, "name": "Qualitätsmanagement"},
+                                        {"id": 3, "name": "Entwicklung"},
+                                        {"id": 4, "name": "Produktion"}
+                                    ]
                                 
                                 new_dept_id = st.selectbox(
                                     "Abteilung",
@@ -3068,8 +3089,7 @@ def render_ai_analysis_page():
             export AI_LLM_MAX_TOKENS=1000
             export AI_LLM_TEMPERATURE=0.1
             export AI_LLM_MAX_COST=0.50
-            ```
-            """)
+            ```            """)
 
 def render_settings_page():
     """Rendert die Einstellungen"""
@@ -3217,7 +3237,7 @@ def render_ai_prompt_test_page():
     st.subheader("🧪 AI Prompt Test")
     
     # Provider Auswahl
-    available_providers = ["auto", "ollama", "google_gemini", "huggingface", "rule_based"]
+    available_providers = ["auto", "ollama", "google_gemini", "openai_4o_mini", "rule_based"]
     
     if provider_status and "provider_status" in provider_status:
         # Nur verfügbare Provider anzeigen
@@ -3507,7 +3527,9 @@ def render_ai_provider_management_page():
 def get_rag_status() -> Optional[Dict]:
     """RAG-System Status abrufen"""
     def _get_status():
-        response = requests.get(f"{API_BASE_URL}/api/rag/status", timeout=REQUEST_TIMEOUT)
+        # Verwende neuen AI-Enhanced Endpoint
+        headers = {"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"} if st.session_state.get('auth_token') else {}
+        response = requests.get(f"{API_BASE_URL}/api/rag-stats", headers=headers, timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
             return response.json()
         return None
@@ -3520,7 +3542,7 @@ def chat_with_documents(question: str, token: str = "") -> Optional[Dict]:
     def _chat():
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         response = requests.post(
-            f"{API_BASE_URL}/api/rag/chat",
+            f"{API_BASE_URL}/api/chat-with-documents",
             json={"question": question},
             headers=headers,
             timeout=30
@@ -3532,31 +3554,9 @@ def chat_with_documents(question: str, token: str = "") -> Optional[Dict]:
     result = safe_api_call(_chat)
     return result
 
-def search_documents_semantic(query: str, max_results: int = 5) -> Optional[Dict]:
-    """Semantische Dokumentensuche"""
-    def _search():
-        response = requests.get(
-            f"{API_BASE_URL}/api/rag/search",
-            params={"query": query, "max_results": max_results},
-            timeout=REQUEST_TIMEOUT
-        )
-        if response.status_code == 200:
-            return response.json()
-        return None
-    
-    result = safe_api_call(_search)
-    return result
 
-def index_all_documents() -> Optional[Dict]:
-    """Alle Dokumente für RAG indexieren"""
-    def _index():
-        response = requests.post(f"{API_BASE_URL}/api/rag/index-all", timeout=60)
-        if response.status_code == 200:
-            return response.json()
-        return None
-    
-    result = safe_api_call(_index)
-    return result
+
+
 
 def render_rag_chat_page():
     """💬 RAG-Chat Seite"""
@@ -3567,67 +3567,40 @@ def render_rag_chat_page():
         status_result = get_rag_status()
         
         if status_result and status_result.get("success"):
-            rag_stats = status_result.get("rag_system", {})
+            st.success("✅ Qdrant RAG-System ist verfügbar!")
             
-            if rag_stats.get("available"):
-                st.success("✅ RAG-System ist verfügbar!")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("📚 Dokumente", rag_stats.get("total_documents", 0))
-                with col2:
-                    st.metric("🧩 Text-Chunks", rag_stats.get("total_chunks", 0))
-                with col3:
-                    st.metric("⚡ Chunks/Dokument", rag_stats.get("average_chunks_per_doc", 0))
-                
-                st.info(f"🤖 Model: {rag_stats.get('embeddings_model', 'Unknown')} | 💾 DB: {rag_stats.get('vector_database', 'Unknown')}")
-            else:
-                st.error("❌ RAG-System nicht verfügbar")
-                if st.button("📚 Alle Dokumente indexieren"):
-                    with st.spinner("Indexiere alle Dokumente..."):
-                        result = index_all_documents()
-                        if result and result.get("success"):
-                            st.success(f"✅ {result.get('indexed_documents', 0)} Dokumente indexiert!")
-                        else:
-                            st.error("❌ Indexierung fehlgeschlagen")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📚 Dokumente", status_result.get("total_documents", 0))
+            with col2:
+                st.metric("🧩 Kollektion", status_result.get("collection_name", "qms_documents"))
+            with col3:
+                st.metric("🎯 Status", status_result.get("status", "unknown"))
+            
+            # Engine-Details
+            engine_info = status_result.get("engine_info", {})
+            if engine_info:
+                st.info(f"🤖 Engine: {engine_info.get('type', 'qdrant')} | "
+                       f"📊 Embedding Dimension: {engine_info.get('embedding_dimension', 384)} | "
+                       f"🧠 Model: {engine_info.get('embedding_model', 'all-MiniLM-L6-v2')}")
         else:
             st.error("❌ RAG-System Status nicht abrufbar")
+            st.warning("Stellen Sie sicher, dass die AI-Enhanced Features aktiviert sind.")
     
     # Chat-Interface
     st.markdown("### 💬 Chat mit QMS-Dokumenten")
-    
-    # Beispiel-Fragen
-    st.markdown("**🔍 Beispiel-Fragen:**")
-    example_questions = [
-        "Welche Schraube muss ich beim Zusammenbau der Antriebseinheit verwenden?",
-        "Was sagt die ISO 13485 zur Dokumentenkontrolle?",
-        "Wie funktioniert der Kalibrierungsprozess für Messgeräte?",
-        "Welche SOPs gibt es für die Produktion?",
-        "Was ist bei Kundenreklamationen zu beachten?"
-    ]
-    
-    cols = st.columns(len(example_questions))
-    for i, question in enumerate(example_questions):
-        with cols[i]:
-            if st.button(f"💡 Frage {i+1}", help=question, key=f"example_{i}"):
-                st.session_state['rag_question'] = question
     
     # Chat-Input
     question = st.text_area(
         "🤔 Ihre Frage an das QMS:",
         value=st.session_state.get('rag_question', ''),
-        placeholder="z.B. 'Welche Schrauben verwende ich bei der Montage?' oder 'Was steht in der ISO 13485 über...?'",
+        placeholder="z.B. 'Was steht in der ISO 13485 über Dokumentenlenkung?' oder 'Wie funktioniert die SOP-001?'",
         height=100,
         key="rag_question_input"
     )
     
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        ask_button = st.button("🧠 Frage stellen", type="primary", disabled=not question.strip())
-    with col2:
-        if st.button("🔍 Semantische Suche"):
-            if question.strip():
-                st.session_state['show_semantic_search'] = True
+    # Nur ein Button für Chat
+    ask_button = st.button("🧠 Frage stellen", type="primary", disabled=not question.strip())
     
     # Chat-Antwort
     if ask_button and question.strip():
@@ -3644,7 +3617,7 @@ def render_rag_chat_page():
                 # Metriken
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    confidence = result.get("confidence_score", 0)
+                    confidence = result.get("confidence", 0.0)
                     color = "🟢" if confidence > 0.8 else "🟡" if confidence > 0.5 else "🔴"
                     st.metric("🎯 Konfidenz", f"{color} {confidence:.1%}")
                 
@@ -3653,43 +3626,27 @@ def render_rag_chat_page():
                     st.metric("⏱️ Verarbeitung", f"{processing_time:.2f}s")
                 
                 with col3:
-                    chunks = result.get("context_chunks", 0)
-                    st.metric("📄 Verwendete Quellen", chunks)
+                    sources_used = len(result.get("sources", []))
+                    st.metric("📄 Verwendete Quellen", sources_used)
                 
                 # Quellen anzeigen
                 sources = result.get("sources", [])
                 if sources:
                     st.markdown("### 📚 Verwendete Quellen")
                     for i, source in enumerate(sources, 1):
-                        with st.expander(f"📄 Quelle {i}: {source.get('title', 'Unbekannt')}"):
-                            st.write(f"**Typ:** {source.get('type', 'Unbekannt')}")
-                            st.write(f"**Dokument-Nr.:** {source.get('number', 'Unbekannt')}")
-                            st.write(f"**Chunk:** {source.get('chunk_index', 0) + 1}")
+                        metadata = source.get("metadata", {})
+                        with st.expander(f"📄 Quelle {i}: {metadata.get('title', 'Unbekannt')}"):
+                            st.write(f"**Typ:** {metadata.get('document_type', 'Unbekannt')}")
+                            st.write(f"**Datei:** {metadata.get('filename', 'Unbekannt')}")
+                            st.write(f"**Relevanz:** {source.get('score', 0):.3f}")
+                            if source.get("content"):
+                                st.write("**Inhalt:**")
+                                content_preview = source["content"][:300] + "..." if len(source["content"]) > 300 else source["content"]
+                                st.code(content_preview)
             else:
                 st.error("❌ Fehler beim Chat mit Dokumenten")
                 if result:
                     st.error(f"Fehler: {result.get('error', 'Unbekannt')}")
-    
-    # Semantische Suche (optional)
-    if st.session_state.get('show_semantic_search') and question.strip():
-        st.markdown("### 🔍 Semantische Suche")
-        
-        search_result = search_documents_semantic(question)
-        
-        if search_result and search_result.get("success"):
-            results = search_result.get("results", [])
-            st.write(f"**{len(results)} relevante Dokument-Abschnitte gefunden:**")
-            
-            for i, result in enumerate(results, 1):
-                with st.expander(f"📄 {i}. {result.get('document_title', 'Unbekannt')}"):
-                    st.write(f"**Typ:** {result.get('document_type', 'Unbekannt')}")
-                    st.write(f"**Nummer:** {result.get('document_number', 'Unbekannt')}")
-                    st.write("**Vorschau:**")
-                    st.write(result.get('content_preview', 'Keine Vorschau verfügbar'))
-        else:
-            st.error("❌ Semantische Suche fehlgeschlagen")
-        
-        st.session_state['show_semantic_search'] = False
 
 # === INTELLIGENTE WORKFLOW-FUNKTIONEN ===
 
@@ -3947,6 +3904,30 @@ def render_my_tasks_page():
         if tasks_result:
             st.error(f"Fehler: {tasks_result.get('error', 'Unbekannt')}")
 
+# === NEUE DYNAMISCHE FUNKTION FÜR INTEREST GROUPS ===
+def get_interest_groups() -> List[Dict]:
+    """Lädt alle verfügbaren Interest Groups dynamisch von der API"""
+    try:
+        token = st.session_state.get("auth_token", "")
+        if not token:
+            print("❌ Kein Auth-Token verfügbar für Interest Groups")
+            return []
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get("http://localhost:8000/api/interest-groups", headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            groups = response.json()
+            print(f"✅ {len(groups)} Interest Groups geladen")
+            return groups
+        else:
+            print(f"❌ Interest Groups API Fehler: {response.status_code}")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Interest Groups Fehler: {e}")
+        return []
+
 # ===== MAIN APP =====
 def main():
     """Hauptfunktion der App"""
@@ -3988,3 +3969,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

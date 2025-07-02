@@ -162,9 +162,63 @@ async def get_current_active_user(
 
 # === AUTHORIZATION (RBAC) ===
 
+def is_qms_admin(user: UserModel) -> bool:
+    """
+    Prüft ob ein Benutzer der QMS System Administrator ist.
+    
+    QMS Admin-Kriterien:
+    - Email: qms.admin@company.com
+    - Approval Level: 4
+    - Employee ID: QMS001
+    - Organizational Unit: QMS System
+    
+    Args:
+        user: UserModel-Instanz
+        
+    Returns:
+        bool: True wenn QMS Admin, False sonst
+    """
+    return (
+        user.email == "qms.admin@company.com" and 
+        user.approval_level == 4 and
+        user.employee_id == "QMS001"
+    )
+
+def is_system_admin(user: UserModel) -> bool:
+    """
+    Prüft ob ein Benutzer System-Admin-Rechte hat.
+    
+    System Admins:
+    - QMS Admin (qms.admin@company.com)
+    - Weitere System Admins (Level 4 + is_department_head)
+    
+    Args:
+        user: UserModel-Instanz
+        
+    Returns:
+        bool: True wenn System Admin, False sonst
+    """
+    return (
+        is_qms_admin(user) or 
+        (user.approval_level == 4 and user.is_department_head and user.organizational_unit == "System Administration")
+    )
+
 def get_user_permissions(db: Session, user: UserModel) -> List[str]:
     """Alle Berechtigungen eines Benutzers sammeln"""
     permissions = set()
+    
+    # ✅ SPEZIAL: QMS Admin bekommt automatisch alle Admin-Rechte
+    if is_qms_admin(user):
+        permissions.update([
+            "system_administration",
+            "user_management", 
+            "all_rights",
+            "final_approval",
+            "document_management",
+            "equipment_management",
+            "norm_management"
+        ])
+        return list(permissions)
     
     # Individuelle Berechtigungen
     if user.individual_permissions:
@@ -267,7 +321,7 @@ def require_permissions(permissions: List[str]):
     return PermissionChecker(permissions)
 
 def require_groups(groups: List[str]):
-    """Decorator-ähnliche Funktion für Gruppenzugehörigkeits-Prüfungen"""
+    """Erstellt einen Dependency-Checker für erforderliche Interessensgruppen"""
     return GroupChecker(groups)
 
 # Häufig verwendete Berechtigungsprüfungen
@@ -312,3 +366,78 @@ class UserInfo(BaseModel):
     
     class Config:
         from_attributes = True 
+
+# === ADMIN REQUIREMENT FUNCTIONS ===
+
+async def require_qms_admin(
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> UserModel:
+    """
+    Dependency-Funktion: Erfordert QMS Admin-Rechte.
+    
+    Nur qms.admin@company.com darf diese Endpoints nutzen.
+    
+    Returns:
+        UserModel: Authentifizierter QMS Admin
+        
+    Raises:
+        HTTPException: 403 wenn nicht QMS Admin
+    """
+    if not is_qms_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur QMS System Administrator (qms.admin@company.com) hat Zugriff auf diese Funktion"
+        )
+    return current_user
+
+async def require_system_admin(
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> UserModel:
+    """
+    Dependency-Funktion: Erfordert System Admin-Rechte.
+    
+    QMS Admin und andere Level-4-Department-Heads haben Zugriff.
+    
+    Returns:
+        UserModel: Authentifizierter System Admin
+        
+    Raises:
+        HTTPException: 403 wenn nicht System Admin
+    """
+    if not is_system_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System Administrator-Rechte erforderlich (Level 4 Department Head oder QMS Admin)"
+        )
+    return current_user
+
+async def require_admin_or_qm(
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> UserModel:
+    """
+    Dependency-Funktion: Erfordert Admin-Rechte oder QM-Gruppe.
+    
+    Für Benutzer-Management, das QMs und Admins erlaubt ist.
+    
+    Returns:
+        UserModel: Authentifizierter Admin oder QM-User
+        
+    Raises:
+        HTTPException: 403 wenn keine Berechtigung
+    """
+    # System Admin hat immer Zugriff
+    if is_system_admin(current_user):
+        return current_user
+    
+    # QM-Gruppe prüfen
+    user_groups = get_user_groups(db, current_user)
+    if "quality_management" in user_groups and current_user.approval_level >= 3:
+        return current_user
+    
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Berechtigung erforderlich: System Admin oder QM-Gruppe (Level 3+)"
+    ) 
