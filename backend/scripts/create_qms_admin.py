@@ -50,8 +50,7 @@ def create_qms_admin():
                 organizational_unit="QMS System",
                 approval_level=4,
                 is_department_head=True,
-                is_active=True,
-                role="QMS_SYSTEM_ADMIN"
+                is_active=True
             )
             
             db.add(admin_user)

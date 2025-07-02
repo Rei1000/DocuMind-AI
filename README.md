@@ -45,9 +45,10 @@
 
 ### 🎪 Hauptmerkmale
 
-- **🏢 13 Stakeholder-orientierte Interessensgruppen** für granulare Berechtigungen
+- **🏢 13 Stakeholder-orientierte Interessengruppen** für granulare Berechtigungen
 - **📋 25+ QMS-spezifische Dokumenttypen** (SOPs, Risikoanalysen, Validierungsprotokolle)
 - **🤖 Intelligente Dokumentenerkennung** mit automatischer Klassifizierung
+- **🎯 Zentrale Prompt-Verwaltung** mit hierarchischen Templates und JSON-Strukturierung
 - **✅ ISO 13485 & MDR-konforme** Workflows und Freigabeprozesse
 - **🔍 KI-powered Text-Extraktion** für RAG-ready Dokumentenindexierung
 - **⚙️ Equipment-Management** mit automatischer Kalibrierungsüberwachung
@@ -137,12 +138,11 @@ Das KI-QMS arbeitet mit **13 aktiven Interessengruppen**, die alle relevanten St
 - **⚡ Instant-Feedback** - Sofortige Anzeige von Provider-Status
 - **🎯 Smart Fallback** - Automatische Empfehlung alternativer Provider
 
-#### 🗄️ **Adaptive Vector Database**
-- **Qdrant Standard** - Hochperformante Vector Search für RAG
-- **ChromaDB Fallback** - Automatischer Wechsel bei NumPy 2.0 Problemen  
-- **Seamless Migration** - Transparenter Übergang zwischen Vector Stores
+#### 🗄️ **Vector Database**
+- **Qdrant Engine** - Hochperformante Vector Search für RAG
+- **Advanced Chunking** - Hierarchische Dokumentenaufteilung mit Metadaten
+- **Semantic Embeddings** - KI-basierte Ähnlichkeitssuche
 - **Local-First** - Alle Vektordaten bleiben auf Ihrem System
-- **💡 Intelligente Auswahl** - "Auto"-Modus wählt besten verfügbaren Provider
 - **📊 Performance-Monitoring** - Antwortzeiten und Erfolgsraten werden angezeigt
 
 #### 🧠 **Erweiterte Analyse**
@@ -152,6 +152,14 @@ Das KI-QMS arbeitet mit **13 aktiven Interessengruppen**, die alle relevanten St
 - **Compliance-Gap-Analyse** mit Verbesserungsvorschlägen
 - **Duplikat-Erkennung** basierend auf Ähnlichkeitsanalyse
 - **RAG-basierte Dokumentensuche** für semantische Suche
+
+#### 🎯 **Zentrale Prompt-Verwaltung** (Neu in v3.1.0)
+- **Hierarchische Prompt-Struktur** - Multi-Level-Templates für komplexe Analysen
+- **Strukturierte JSON-Antworten** - Standardisierte, maschinenlesbare Outputs
+- **Multi-Language Support** - Prompts in Deutsch, Englisch, Französisch
+- **Template-Validierung** - Automatische Überprüfung der Prompt-Konsistenz
+- **Metadata-Extraction** - Erweiterte Datenextraktion mit Schema-Validation
+- **RAG-Chat-Integration** - Spezialisierte Prompts für Dokumentensuche
 
 #### ⚡ **Hybrid AI Engine**
 - **Lokale + Cloud AI** - Optimale Balance von Kosten und Leistung
@@ -270,15 +278,24 @@ calibration_requirements (id, norm_id, equipment_type, required_interval_months,
 | **[Ollama](https://ollama.ai/)** | ✅ **Aktiv** | Völlig kostenlos | Lokaler AI Provider (Mistral 7B) |
 | **[Regel-basiert](./backend/app/ai_engine.py)** | ✅ **Fallback** | Kostenlos | Intelligenter Fallback ohne AI |
 
+### **Prompt Management & Templates**
+
+| Komponente | Features | Status |
+|------------|----------|--------|
+| **[Zentrale Prompt-Verwaltung](./backend/app/prompts.py)** | Hierarchische Templates, JSON Schema | ✅ **v3.1.0** |
+| **[Metadata-Extraction](./backend/app/ai_metadata_extractor.py)** | Strukturierte Datenextraktion | ✅ **Enterprise** |
+| **[Multi-Language Support](./backend/app/prompts.py)** | DE/EN/FR Templates | ✅ **i18n Ready** |
+| **[Template-Validierung](./backend/app/prompts.py)** | Konsistenz-Checks, Schema-Validation | ✅ **Auto-QA** |
+
 ### **Vector Database & RAG Engine**
 
 | Technologie | Version | Status | Zweck |
 |-------------|---------|--------|-------|
-| **[Qdrant](https://qdrant.tech/)** | 1.7+ | ✅ **Standard** | Hochperformante Vector Search |
-| **[ChromaDB](https://www.trychroma.com/)** | 0.4+ | ⚠️ **Fallback** | Alternative bei NumPy-Problemen |
-| **[Sentence Transformers](https://sbert.net/)** | 2.2+ | ✅ **Aktiv** | Document Embeddings |
+| **[Qdrant](https://qdrant.tech/)** | 1.7+ | ✅ **Standard** | Hochperformante Vector Search für Enterprise |
+| **[Sentence Transformers](https://sbert.net/)** | 2.2+ | ✅ **Aktiv** | Document Embeddings (all-MiniLM-L6-v2) |
+| **[LangChain](https://langchain.com/)** | 0.1+ | ✅ **Advanced** | Hierarchical Document Chunking |
 
-> **💡 Wichtiger Hinweis:** Das System verwendet **Qdrant** als Standard-Vector-Database. Bei NumPy 2.0 Kompatibilitätsproblemen erfolgt automatischer Fallback auf ChromaDB.
+> **💡 Migration:** Das System wurde erfolgreich von ChromaDB auf Qdrant migriert um NumPy 2.0 Kompatibilitätsprobleme zu lösen und Enterprise-Grade Performance zu erreichen.
 
 ### **Entwicklung & Testing**
 
