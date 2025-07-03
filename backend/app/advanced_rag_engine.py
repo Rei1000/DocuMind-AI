@@ -28,6 +28,25 @@ from .ai_providers import OpenAIEmbeddingProvider
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
+# Enhanced Schemas Integration
+from .schemas_enhanced import (
+    EnhancedChunkMetadata,
+    EnhancedDocumentMetadata,
+    EnhancedDocumentType,
+    EnhancedKeyword,
+    normalize_document_type
+)
+
+# Enhanced Metadata Extractor Integration
+try:
+    from .enhanced_metadata_extractor import (
+        extract_enhanced_metadata,
+        get_enhanced_extractor
+    )
+    ENHANCED_METADATA_AVAILABLE = True
+except ImportError:
+    ENHANCED_METADATA_AVAILABLE = False
+
 logger = logging.getLogger("KI-QMS.AdvancedRAG")
 
 @dataclass
@@ -301,10 +320,10 @@ class AdvancedRAGEngine:
         metadata: Optional[Dict] = None
     ) -> Dict:
         """
-        🔧 Erweiterte Dokumenten-Indexierung mit OpenAI Embeddings
+        🔧 Erweiterte Dokumenten-Indexierung mit Enhanced Metadata Extraction
         
         Returns:
-            Dict mit Indexierungs-Statistiken
+            Dict mit Indexierungs-Statistiken und Enhanced Metadata
         """
         start_time = time.time()
         
@@ -315,17 +334,62 @@ class AdvancedRAGEngine:
             if not self.client or not self.embedding_model or not self.chunker:
                 raise RuntimeError("Engine nicht vollständig initialisiert")
             
-            # 1. Advanced Chunking
-            chunks = self.chunker.hierarchical_chunk(content, title)
-            logger.info(f"📝 {len(chunks)} erweiterte Chunks erstellt für Dokument {document_id}")
+            # 1. Enhanced Metadata Extraction (falls verfügbar)
+            enhanced_metadata = None
+            enhanced_response = None
+            if ENHANCED_METADATA_AVAILABLE:
+                try:
+                    logger.info(f"🎯 Starte Enhanced Metadata Extraction für '{title}'")
+                    enhanced_response = await extract_enhanced_metadata(
+                        content=content,
+                        document_title=title,
+                        document_type_hint=document_type
+                    )
+                    enhanced_metadata = enhanced_response.metadata
+                    logger.info(f"✅ Enhanced Metadata extrahiert mit Konfidenz: {enhanced_metadata.ai_confidence}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Enhanced Metadata Extraction fehlgeschlagen: {e}")
             
-            # 2. OpenAI Embeddings und Indexierung
+            # 2. Advanced Chunking (mit Enhanced Metadata falls verfügbar)
+            if enhanced_metadata and enhanced_response and enhanced_response.chunks_metadata:
+                # Verwende Enhanced Chunks
+                enhanced_chunks = enhanced_response.chunks_metadata
+                chunks = []
+                for i, enhanced_chunk in enumerate(enhanced_chunks):
+                    chunk_data = {
+                        "content": content[i*800:(i+1)*800],  # Approximation
+                        "chunk_index": enhanced_chunk.chunk_index,
+                        "section": enhanced_chunk.section_title or "",
+                        "keywords": [kw.term for kw in enhanced_chunk.keywords],
+                        "importance_score": enhanced_chunk.importance_score,
+                        "context_before": "",
+                        "context_after": "",
+                        "full_paragraph": content[i*800:(i+1)*800],
+                        "page_estimate": enhanced_chunk.page_number or 1,
+                        "enhanced_metadata": enhanced_chunk
+                    }
+                    chunks.append(chunk_data)
+                logger.info(f"📝 {len(chunks)} Enhanced Chunks verwendet")
+            else:
+                # Fallback zu Standard Chunking
+                chunks = self.chunker.hierarchical_chunk(content, title)
+                logger.info(f"📝 {len(chunks)} Standard Chunks erstellt für Dokument {document_id}")
+            
+            # 3. OpenAI Embeddings und Indexierung
             points = []
             chunk_texts = [chunk_data["content"] for chunk_data in chunks]
             embeddings = await self.embedding_model.encode(chunk_texts)
             
+            # Handle both single embedding and batch embeddings
+            if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
+                # Batch embeddings
+                embedding_list = embeddings
+            else:
+                # Single embedding - wrap in list
+                embedding_list = [embeddings] if not isinstance(embeddings, list) else embeddings
+            
             for i, chunk_data in enumerate(chunks):
-                # Erweiterte Metadaten
+                # Enhanced Payload mit allen verfügbaren Metadaten
                 payload = {
                     "document_id": document_id,
                     "title": title,
@@ -335,20 +399,56 @@ class AdvancedRAGEngine:
                     "section": chunk_data["section"],
                     "keywords": chunk_data["keywords"],
                     "importance_score": chunk_data["importance_score"],
-                    "context_before": chunk_data["context_before"],
-                    "context_after": chunk_data["context_after"],
-                    "full_paragraph": chunk_data["full_paragraph"],
-                    "page_number": chunk_data["page_estimate"],
+                    "context_before": chunk_data.get("context_before", ""),
+                    "context_after": chunk_data.get("context_after", ""),
+                    "full_paragraph": chunk_data.get("full_paragraph", chunk_data["content"]),
+                    "page_number": chunk_data.get("page_estimate", 1),
                     **(metadata or {})
                 }
                 
+                # Enhanced Metadata hinzufügen falls verfügbar
+                if enhanced_metadata:
+                    payload.update({
+                        "enhanced_document_type": enhanced_metadata.document_type.value,
+                        "main_category": enhanced_metadata.main_category,
+                        "sub_category": enhanced_metadata.sub_category,
+                        "process_area": enhanced_metadata.process_area,
+                        "compliance_level": enhanced_metadata.compliance_level.value,
+                        "quality_score": enhanced_metadata.quality_scores.overall,
+                        "ai_confidence": enhanced_metadata.ai_confidence,
+                        "interest_groups": enhanced_metadata.interest_groups,
+                        "iso_standards": enhanced_metadata.iso_standards_referenced,
+                        "compliance_areas": enhanced_metadata.compliance_areas,
+                        "metadata_version": enhanced_metadata.metadata_version
+                    })
+                
+                # Enhanced Chunk Metadata falls verfügbar
+                if "enhanced_metadata" in chunk_data:
+                    enhanced_chunk = chunk_data["enhanced_metadata"]
+                    payload.update({
+                        "chunk_section_title": enhanced_chunk.section_title,
+                        "chunk_paragraph_number": enhanced_chunk.paragraph_number,
+                        "chunk_word_count": enhanced_chunk.word_count,
+                        "chunk_interest_groups": enhanced_chunk.interest_groups,
+                        "chunk_importance_score": enhanced_chunk.importance_score
+                    })
+                
                 # Qdrant Point - Use integer ID instead of UUID
                 point_id = document_id * 1000 + chunk_data['chunk_index']
-                points.append(PointStruct(
-                    id=point_id,
-                    vector=embeddings[i],
-                    payload=payload
-                ))
+                
+                # Ensure we have a valid embedding
+                if i < len(embedding_list):
+                    embedding = embedding_list[i]
+                    if isinstance(embedding, list) and len(embedding) > 0:
+                        points.append(PointStruct(
+                            id=point_id,
+                            vector=embedding,
+                            payload=payload
+                        ))
+                    else:
+                        logger.warning(f"⚠️ Ungültiges Embedding für Chunk {i}")
+                else:
+                    logger.warning(f"⚠️ Kein Embedding für Chunk {i}")
                 
                 # Document Store für Fallback
                 self.document_store.append({
@@ -357,21 +457,28 @@ class AdvancedRAGEngine:
                     "metadata": payload
                 })
             
-            # 3. Upsert zu Qdrant
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
+            # 4. Upsert zu Qdrant
+            if points:
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=points
+                )
+                logger.info(f"✅ {len(points)} Punkte zu Qdrant indexiert")
+            else:
+                logger.warning("⚠️ Keine gültigen Punkte für Indexierung")
             
             processing_time = time.time() - start_time
             
-            return {
+            # 5. Enhanced Response
+            response = {
                 "success": True,
                 "document_id": document_id,
                 "chunks_created": len(chunks),
+                "points_indexed": len(points),
                 "processing_time": processing_time,
-                "methodology": "hierarchical_chunking_with_openai_embeddings",
+                "methodology": "enhanced_hierarchical_chunking_with_openai_embeddings",
                 "features_applied": [
+                    "enhanced_metadata_extraction", 
                     "hierarchical_chunking", 
                     "keyword_extraction", 
                     "importance_scoring", 
@@ -381,13 +488,30 @@ class AdvancedRAGEngine:
                 ]
             }
             
+            # Enhanced Metadata zur Response hinzufügen
+            if enhanced_metadata:
+                response.update({
+                    "enhanced_metadata": {
+                        "document_type": enhanced_metadata.document_type.value,
+                        "main_category": enhanced_metadata.main_category,
+                        "quality_score": enhanced_metadata.quality_scores.overall,
+                        "ai_confidence": enhanced_metadata.ai_confidence,
+                        "compliance_level": enhanced_metadata.compliance_level.value,
+                        "keywords_count": len(enhanced_metadata.primary_keywords),
+                        "metadata_version": enhanced_metadata.metadata_version
+                    }
+                })
+            
+            return response
+            
         except Exception as e:
             processing_time = time.time() - start_time
-            logger.error(f"❌ Indexierung fehlgeschlagen: {e}")
+            logger.error(f"❌ Enhanced Indexierung fehlgeschlagen: {e}")
             return {
                 "success": False,
                 "error": str(e),
-                "processing_time": processing_time
+                "processing_time": processing_time,
+                "methodology": "enhanced_indexing_with_fallback"
             }
     
     async def enhanced_search(

@@ -222,6 +222,27 @@ except Exception as e:
     print(f"⚠️  AI-Enhanced Features nicht verfügbar: {str(e)}")
     AI_FEATURES_AVAILABLE = False
 
+# Enhanced AI Features (Enterprise Grade v3.1.0)
+try:
+    from .enhanced_metadata_extractor import (
+        extract_enhanced_metadata,
+        get_enhanced_extractor,
+        validate_enhanced_metadata
+    )
+    from .schemas_enhanced import (
+        EnhancedDocumentMetadata,
+        EnhancedMetadataResponse,
+        normalize_document_type
+    )
+    from .json_parser import EnhancedJSONParser
+    from .prompts_enhanced import get_prompt_config
+    ENHANCED_AI_AVAILABLE = True
+    print("✅ Enhanced AI System (Enterprise Grade v3.1.0) geladen")
+    print("🎯 Features: Enhanced Schemas, JSON Parser, Temperature=0 Prompts")
+except Exception as e:
+    print(f"⚠️ Enhanced AI System nicht verfügbar: {e}")
+    ENHANCED_AI_AVAILABLE = False
+
 # Advanced AI Features (Enterprise Grade 2024)
 try:
     from .advanced_rag_engine import (
@@ -234,6 +255,8 @@ try:
     ADVANCED_AI_AVAILABLE = True
     print("✅ Advanced AI System (Enterprise Grade) geladen")
     print("🚀 Features: Hierarchical Chunking, Multi-Layer Analysis, Query Enhancement")
+    if ENHANCED_AI_AVAILABLE:
+        print("🎯 Enhanced Integration: Advanced RAG + Enhanced Metadata")
 except Exception as e:
     print(f"⚠️ Advanced AI System nicht verfügbar: {e}")
     ADVANCED_AI_AVAILABLE = False
