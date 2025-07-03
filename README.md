@@ -188,6 +188,253 @@ Das KI-QMS arbeitet mit **13 aktiven Interessengruppen**, die alle relevanten St
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
+## 🧠 **ENGINE-ARCHITEKTUR (Enterprise Grade)**
+
+Das KI-QMS nutzt eine modulare, vielschichtige Engine-Architektur mit klarer Trennung der Verantwortlichkeiten:
+
+### **🔍 RAG-ENGINES (Retrieval-Augmented Generation)**
+
+#### **✅ `advanced_rag_engine.py` - HAUPT-RAG-SYSTEM (Enterprise Grade)**
+```
+🎯 **Status**: ✅ AKTIV - Primary RAG Engine
+🚀 **Features**: 
+  - Hierarchical + Semantic Chunking (800 chars + 200 overlap)
+  - OpenAI text-embedding-3-small (1536d) Embeddings
+  - Enhanced Query Processing mit Re-ranking
+  - Multi-Layer Analysis mit LangChain
+  - Structured Response Formats mit Quellenangaben
+  - Context-Preservation und Intelligent Text Splitting
+  - Automatic Citations & Follow-up Question Generation
+
+🔧 **Technologie**: 
+  - Qdrant Vector Database (persistent)
+  - OpenAI Embeddings API
+  - LangChain Document Loaders
+  - Enhanced Metadata Integration
+
+💡 **Verwendung**: Standard für alle neuen RAG-Operationen
+📊 **Performance**: ~2-4s pro Indexierung, 0.8s pro Suche
+```
+
+#### **🔄 `qdrant_rag_engine.py` - BASIC RAG ENGINE (Fallback)**
+```
+🎯 **Status**: ✅ VERFÜGBAR - Fallback/Compatibility Engine
+🚀 **Features**: 
+  - OpenAI text-embedding-3-small (1536d)
+  - Basic Text-Chunking (500 chars)
+  - Persistenter Qdrant Storage
+  - Chat-Interface mit Debug-Tracking
+  - Cost-Optimized (sehr günstig: $0.00002/1K tokens)
+
+🔧 **Technologie**: 
+  - Qdrant Vector Database
+  - OpenAI Embeddings API
+  - Simple Text Splitting
+
+💡 **Verwendung**: Fallback wenn Advanced RAG nicht verfügbar
+📊 **Performance**: ~1-2s pro Indexierung, 0.5s pro Suche
+```
+
+#### **❌ `rag_engine.py` - OBSOLETE**
+```
+🎯 **Status**: ❌ ENTFERNT - Deprecated ChromaDB Engine
+⚠️ **Grund**: NumPy 2.0 Kompatibilitätsprobleme
+🔄 **Migration**: Ersetzt durch advanced_rag_engine.py
+```
+
+### **🤖 AI-ENDPOINTS (Modular Design)**
+
+#### **✅ `ai_endpoints.py` - BASIC AI FUNCTIONS**
+```
+🎯 **Zweck**: Grundlegende AI-Features für Standard-Operationen
+🚀 **Features**: 
+  - extract_metadata_endpoint() - Basis-Metadaten-Extraktion
+  - upload_document_with_ai() - Standard AI-Upload
+  - chat_with_documents_endpoint() - Basic RAG-Chat
+  - get_rag_stats() - System-Statistiken
+
+🔧 **Provider**: Qdrant RAG Engine (Basic)
+💡 **Verwendung**: Standard-AI-Operationen, bewährte Funktionen
+```
+
+#### **🚀 `advanced_ai_endpoints.py` - ENTERPRISE AI SYSTEM**
+```
+🎯 **Zweck**: Enterprise-Grade AI mit erweiterten Features
+🚀 **Features**: 
+  - Advanced Metadata Extraction (5-Layer AI Analysis)
+  - Hierarchical Document Indexing
+  - Enhanced RAG Search (Hybrid + Re-ranking)
+  - Conversational Document Chat
+  - Comprehensive Request/Response Models
+  - Enterprise-Grade Error Handling
+
+🔧 **Provider**: Advanced RAG Engine
+💡 **Verwendung**: Neue, erweiterte AI-Features
+📍 **API**: /api/ai-advanced/* Endpoints
+```
+
+### **🧠 AI-ENGINES (Multi-Provider Architecture)**
+
+#### **⚡ `ai_engine.py` - CORE AI ENGINE**
+```
+🎯 **Zweck**: Kern-AI-Engine mit Multi-Provider Support
+🚀 **Features**: 
+  - Multi-Provider-Architektur (OpenAI, Ollama, Gemini)
+  - Enhanced Upload Analysis mit zentralen Prompts
+  - Structured JSON Response Validation
+  - Confidence Scoring & Performance Tracking
+  - QM-Domain Expertise Integration
+  - Automatic Provider Fallback
+
+🔧 **Provider-Priorität**: 
+  1. OpenAI 4o-mini (sehr günstig, sehr gut)
+  2. Ollama (lokal, kostenlos) 
+  3. Google Gemini (kostenlos mit Limits)
+  4. Rule-based Fallback
+
+💡 **Verwendung**: Standard für alle AI-Analysen
+```
+
+#### **🌐 `hybrid_ai.py` - HYBRID AI ENGINE**
+```
+🎯 **Zweck**: Erweitert lokale AI um optionale LLM-Funktionen
+🚀 **Features**: 
+  - Lokale KI als Standard (DSGVO-konform, schnell, kostenlos)
+  - Optionale LLM-Integration (OpenAI, Anthropic, Ollama, Azure)
+  - Automatische Daten-Anonymisierung für LLM
+  - Kosten-Tracking und -Optimierung
+  - Performance-Monitoring
+  - Graceful Degradation bei LLM-Ausfällen
+
+🔧 **Arbeitsweise**: 
+  1. Nutzt immer lokale AI Engine als Basis
+  2. Erweitert optional um LLM-basierte Analysen
+  3. Behält alle bestehenden Funktionen bei
+
+💡 **Verwendung**: Optionale LLM-Enhancement für Premium-Features
+💰 **Kosten**: Transparent mit Limits (Standard: 0.50€ per Request)
+```
+
+### **⚙️ WORKFLOW-ENGINES (Automation)**
+
+#### **🧠 `intelligent_workflow.py` - AI-POWERED WORKFLOWS**
+```
+🎯 **Zweck**: Intelligente, AI-gesteuerte Workflow-Automatisierung
+🚀 **Features**: 
+  - KI-basierte Intent-Erkennung
+  - Automatische Task-Generierung
+  - Intelligente Rollenverteilung
+  - SOP-basierte Entscheidungen
+  - Compliance-Monitoring
+  - Vollautomatisches Routing
+
+🤖 **Auto-Magic Beispiel**: 
+  "Bluetooth Modul nicht lieferbar" → Automatisch:
+  - 📋 Entwicklung: Ersatzmodul Task
+  - 🛒 Einkauf: Lieferant Task + Audit
+  - 🏭 Produktion: Arbeitsanweisung Update
+  - 🔧 Service: Serviceanleitung Update
+  - 📖 Dokumentation: Bedienungsanleitung
+  - 👥 HR: Schulung organisieren
+
+🔧 **Provider**: Google Gemini + Advanced RAG Engine
+💡 **Verwendung**: Game-Changer für automatisierte QMS-Prozesse
+```
+
+#### **📋 `workflow_engine.py` - BASIC WORKFLOW ENGINE**
+```
+🎯 **Zweck**: Standard-Workflow-Engine für definierte Prozesse
+🚀 **Features**: 
+  - Regelbasierte Workflow-Definitionen
+  - Standard QMS-Prozesse (Document Review, Equipment Calibration)
+  - Task-Management und -Verfolgung
+  - Approval-Workflows
+  - Deadline-Monitoring
+
+🔧 **Technologie**: Python-basierte Regel-Engine
+💡 **Verwendung**: Bewährte, strukturierte Workflows
+```
+
+### **🔄 ENGINE-INTERAKTION & FALLBACK-STRATEGIE**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🎯 SMART ENGINE ROUTING                                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│ Standard AI Request                                         │
+│        ▼                                                    │
+│ ┌─────────────┐    ✅ Available?                           │
+│ │ ai_engine   │ ──────────────────► Advanced Analysis      │
+│ │ (Primary)   │                                             │
+│ └─────────────┘    ❌ Failed?                              │
+│        ▼                ▼                                   │
+│ ┌─────────────┐    ┌─────────────┐                        │
+│ │ hybrid_ai   │    │ Rule-based  │                        │
+│ │ (Enhanced)  │    │ (Fallback)  │                        │
+│ └─────────────┘    └─────────────┘                        │
+│                                                             │
+│ RAG Operations                                              │
+│        ▼                                                    │
+│ ┌─────────────┐    ✅ Available?                           │
+│ │advanced_rag │ ──────────────────► Enterprise RAG        │
+│ │ (Primary)   │                                             │
+│ └─────────────┘    ❌ Failed?                              │
+│        ▼                ▼                                   │
+│ ┌─────────────┐    ┌─────────────┐                        │
+│ │qdrant_rag   │    │ No RAG      │                        │
+│ │ (Fallback)  │    │ (Graceful)  │                        │
+│ └─────────────┘    └─────────────┘                        │
+│                                                             │
+│ Workflow Triggers                                           │
+│        ▼                                                    │
+│ ┌─────────────┐    ✅ AI Available?                        │
+│ │intelligent_ │ ──────────────────► Smart Workflows       │
+│ │ workflow    │                                             │
+│ └─────────────┘    ❌ AI Failed?                           │
+│        ▼                ▼                                   │
+│ ┌─────────────┐    ┌─────────────┐                        │
+│ │workflow_    │    │ Manual      │                        │
+│ │ engine      │    │ Process     │                        │
+│ └─────────────┘    └─────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **📊 ENGINE-STATUS & VERFÜGBARKEIT**
+
+| Engine | Status | Zweck | Fallback | Performance |
+|--------|--------|-------|----------|-------------|
+| `advanced_rag_engine` | ✅ **AKTIV** | Enterprise RAG | `qdrant_rag_engine` | Exzellent |
+| `qdrant_rag_engine` | ✅ **VERFÜGBAR** | Basic RAG | Keine RAG | Gut |
+| `ai_engine` | ✅ **AKTIV** | Core AI | Rule-based | Exzellent |
+| `hybrid_ai` | ✅ **VERFÜGBAR** | LLM Enhancement | `ai_engine` | Variable |
+| `intelligent_workflow` | ✅ **AKTIV** | Smart Workflows | `workflow_engine` | Sehr gut |
+| `workflow_engine` | ✅ **VERFÜGBAR** | Basic Workflows | Manuell | Gut |
+| `advanced_ai_endpoints` | ✅ **AKTIV** | Enterprise API | `ai_endpoints` | Exzellent |
+| `ai_endpoints` | ✅ **VERFÜGBAR** | Basic AI API | Keine | Gut |
+
+### **🎯 EMPFOHLENE NUTZUNG**
+
+```
+🚀 **FÜR NEUE IMPLEMENTIERUNGEN:**
+   - RAG: advanced_rag_engine
+   - AI: ai_engine (mit multi-provider)
+   - Workflows: intelligent_workflow
+   - API: advanced_ai_endpoints
+
+🔄 **FÜR KOMPATIBILITÄT:**
+   - RAG: qdrant_rag_engine (Fallback)
+   - AI: hybrid_ai (Optional Enhancement)
+   - Workflows: workflow_engine (Standard)
+   - API: ai_endpoints (Basic)
+
+⚡ **FÜR OPTIMALE PERFORMANCE:**
+   - OpenAI 4o-mini als Primary AI Provider
+   - Advanced RAG für alle Dokumenten-Operationen
+   - Intelligent Workflows für Automatisierung
+   - Cost-Tracking für LLM-Nutzung aktivieren
+```
+
 ### Datenbank-Schema (ERD)
 
 ```sql
