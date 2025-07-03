@@ -33,7 +33,7 @@ import re
 
 from .models import User, InterestGroup, QMSTask, TaskStatus, DocumentType
 from .ai_providers import GoogleGeminiProvider
-# Advanced RAG Engine mit robuster Fehlerbehandlung  
+# Advanced RAG Engine - direkt verwenden
 try:
     from .advanced_rag_engine import advanced_rag_engine as rag_engine
     RAG_AVAILABLE = True

@@ -1,0 +1,23 @@
+ISO 13485:2016 - Medical devices - Quality management systems - Requirements for regulatory purposes
+
+4.2 Documentation requirements
+
+4.2.1 General
+The quality management system documentation shall include:
+a) documented statements of a quality policy and quality objectives;
+b) a quality manual;
+c) documented procedures and records required by this International Standard;
+d) documents, including records, determined by the organization to be necessary to ensure the effective planning, operation and control of its processes;
+e) documents specified by applicable regulatory requirements.
+
+4.2.3 Control of documents
+Documents required by the quality management system shall be controlled. Records are a special type of document and shall be controlled according to the requirements given in 4.2.4.
+
+A documented procedure shall be established to define the controls needed:
+a) to approve documents for adequacy prior to issue;
+b) to review and update as necessary and re-approve documents;
+c) to ensure that changes and the current revision status of documents are identified;
+d) to ensure that relevant versions of applicable documents are available at points of use;
+e) to ensure that documents remain legible and readily identifiable;
+f) to ensure that documents of external origin determined by the organization to be necessary for the planning and operation of the quality management system are identified and their distribution controlled;
+g) to prevent the unintended use of obsolete documents, and to apply suitable identification to them if they are retained for any purpose.

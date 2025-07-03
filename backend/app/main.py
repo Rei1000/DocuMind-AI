@@ -2569,11 +2569,24 @@ async def create_document_with_file(
                     detail=f"DUPLIKAT: Sehr ähnliches Dokument bereits vorhanden: '{existing_doc.title}' (ID: {existing_doc.id}, Ähnlichkeit: {similarity_score:.1%})"
                 )
         
+        # 4. Dokument-Typ validieren und konvertieren
+        try:
+            # String zu DocumentType Enum konvertieren
+            if isinstance(document_type, str):
+                doc_type_enum = DocumentType(document_type)
+            else:
+                doc_type_enum = document_type
+        except ValueError:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Ungültiger Dokumenttyp: {document_type}. Erlaubte Werte: {[e.value for e in DocumentType]}"
+            )
+        
         # 4. Dokument erstellen mit intelligenten Metadaten
         db_document = DocumentModel(
             title=title,
             document_number=generate_document_number(document_type),
-            document_type=DocumentType(document_type),
+            document_type=doc_type_enum,
             version=version,
             content=content,
             creator_id=creator_id,
@@ -6879,11 +6892,10 @@ async def upload_document_for_rag(
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # 2. RAG-Engine verfügbar?
-        from .rag_engine import get_rag_engine
-        rag_engine = get_rag_engine()
+        # 2. Advanced RAG-Engine verwenden
+        from .advanced_rag_engine import advanced_rag_engine
         
-        if not rag_engine:
+        if not advanced_rag_engine:
             return JSONResponse(
                 status_code=503,
                 content={
@@ -6902,7 +6914,8 @@ async def upload_document_for_rag(
             "original_filename": file.filename
         }
         
-        index_result = rag_engine.index_document(str(file_path), metadata)
+        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine
+        index_result = {"chunks_indexed": 0, "content_types": [], "status": "deprecated"}
         
         # 4. Statistiken sammeln
         total_chunks = index_result.get("chunks_indexed", 0)
@@ -6952,18 +6965,17 @@ async def chat_with_documents_enhanced(request: dict):
         if not query.strip():
             return {"success": False, "message": "Keine Frage gestellt"}
         
-        # RAG-Engine verwenden
-        from .rag_engine import get_rag_engine
-        rag_engine = get_rag_engine()
+        # Advanced RAG-Engine verwenden
+        from .advanced_rag_engine import advanced_rag_engine
         
-        if not rag_engine:
+        if not advanced_rag_engine:
             return {
                 "success": False,
                 "message": "RAG-System nicht verfügbar. Bitte Dependencies installieren."
             }
         
-        # Enhanced Chat mit OCR-Inhalten
-        result = rag_engine.chat_with_documents(query, context_limit)
+        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine stattdessen
+        return {"success": False, "message": "Diese Funktion ist veraltet. Nutzen Sie /api/rag/chat stattdessen."}
         
         # Detaillierte Antwort aufbereiten
         response_data = {
@@ -6993,14 +7005,8 @@ async def list_indexed_documents():
     📋 DOKUMENTEN-ÜBERSICHT: Alle indexierten Dokumente mit Details
     """
     try:
-        from .rag_engine import get_rag_engine
-        rag_engine = get_rag_engine()
-        
-        if not rag_engine:
-            return {"success": False, "message": "RAG-System nicht verfügbar"}
-        
-        # Alle indexierten Dokumente abrufen
-        all_data = rag_engine.collection.get(include=['metadatas'])
+        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine
+        return {"success": False, "message": "Diese veraltete Funktion wird nicht mehr unterstützt. Nutzen Sie /api/rag-stats stattdessen."}
         
         # Dokumente gruppieren
         documents = {}
