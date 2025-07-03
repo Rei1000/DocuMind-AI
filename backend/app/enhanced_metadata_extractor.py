@@ -61,7 +61,7 @@ from prompts_enhanced import (
 )
 
 # AI Provider Import
-from ai_providers import OpenAIProvider, GoogleGeminiProvider
+from ai_providers import OpenAI4oMiniProvider, GoogleGeminiProvider
 
 # Setup Logging
 logger = logging.getLogger(__name__)
@@ -98,12 +98,12 @@ class EnhancedMetadataExtractor:
         """Initialisiert AI Provider"""
         try:
             if self.ai_provider_name == "openai":
-                self.ai_provider = OpenAIProvider()
+                self.ai_provider = OpenAI4oMiniProvider()
             elif self.ai_provider_name == "gemini":
                 self.ai_provider = GoogleGeminiProvider()
             else:
                 logger.warning(f"Unbekannter AI Provider: {self.ai_provider_name}, verwende OpenAI")
-                self.ai_provider = OpenAIProvider()
+                self.ai_provider = OpenAI4oMiniProvider()
                 
             logger.info(f"✅ AI Provider initialisiert: {self.ai_provider_name}")
             

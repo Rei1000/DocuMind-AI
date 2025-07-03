@@ -35,47 +35,78 @@ Version: 2.0.0 (Enhanced für RAG-Integration)
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union, Dict, Any
 import logging
+import tempfile
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-def extract_text_from_file(file_path: Path, mime_type: str) -> str:
+# Enhanced OCR Import
+try:
+    from .enhanced_ocr_engine import extract_enhanced_text
+    ENHANCED_OCR_AVAILABLE = True
+except ImportError as e:
+    ENHANCED_OCR_AVAILABLE = False
+    logger.warning(f"⚠️ Enhanced OCR nicht verfügbar: {e}")
+
+def extract_text_from_file(file_path: Union[str, Path], mime_type: str) -> str:
     """
-    Extrahiert Text aus verschiedenen Dateiformaten.
+    Extrahiert Text aus verschiedenen Dateiformaten mit Enhanced OCR Fallback
+    """
+    file_path = Path(file_path) if isinstance(file_path, str) else file_path
     
-    Args:
-        file_path: Pfad zur Datei
-        mime_type: MIME-Type der Datei
-        
-    Returns:
-        str: Extrahierter Text oder Fehlermeldung
-    """
     try:
-        if mime_type in ["text/plain", "text/markdown"]:
-            return _extract_text_file(file_path)
+        logger.info(f"🔍 Textextraktion gestartet für: {file_path.name} ({mime_type})")
         
-        elif mime_type == "application/pdf":
-            return _extract_pdf_text(file_path)
+        # Standard-Textextraktion versuchen
+        extracted_text = ""
         
-        elif mime_type in [
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ]:
-            return _extract_word_text(file_path)
-        
-        elif mime_type in [
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ]:
-            return _extract_excel_text(file_path)
-        
+        if mime_type == 'application/pdf':
+            extracted_text = _extract_pdf_text(file_path)
+        elif mime_type in ['application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+            extracted_text = _extract_word_text(file_path)
+        elif mime_type in ['application/msword']:
+            extracted_text = "[DOC-Format nicht unterstützt - bitte zu DOCX konvertieren]"
+        elif mime_type == 'text/plain':
+            extracted_text = _extract_text_file(file_path)
         else:
-            return f"[Text-Extraktion für {mime_type} noch nicht implementiert]"
+            logger.warning(f"⚠️ Unbekannter MIME-Type: {mime_type}")
+            extracted_text = "[Unbekanntes Dateiformat]"
+        
+        # Enhanced OCR Fallback für problematische Dokumente
+        if len(extracted_text.strip()) < 50 and ENHANCED_OCR_AVAILABLE:
+            logger.info("🔄 Standard-Extraktion ergab wenig Text - versuche Enhanced OCR")
+            try:
+                # Async call in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                enhanced_result = loop.run_until_complete(
+                    extract_enhanced_text(file_path, mime_type)
+                )
+                loop.close()
+                
+                if enhanced_result['success'] and len(enhanced_result['text']) > len(extracted_text):
+                    logger.info(f"✅ Enhanced OCR erfolgreich: {len(enhanced_result['text'])} Zeichen, "
+                              f"{enhanced_result['images_processed']} Bilder verarbeitet")
+                    extracted_text = enhanced_result['text']
+                    
+                    # Metadaten in Log ausgeben
+                    logger.info(f"📊 OCR-Methode: {enhanced_result['ocr_method']}")
+                
+            except Exception as e:
+                logger.error(f"❌ Enhanced OCR Fallback fehlgeschlagen: {e}")
+        
+        # Ergebnis validieren
+        if not extracted_text or extracted_text.strip() == "":
+            extracted_text = "[Kein Text gefunden]"
+        
+        logger.info(f"✅ Textextraktion abgeschlossen: {len(extracted_text)} Zeichen")
+        return extracted_text
         
     except Exception as e:
-        logger.error(f"Fehler bei Text-Extraktion für {file_path}: {str(e)}")
-        return f"[Fehler bei Text-Extraktion: {str(e)}]"
+        logger.error(f"❌ Textextraktion fehlgeschlagen für {file_path.name}: {e}")
+        return f"[Textextraktion fehlgeschlagen: {str(e)}]"
 
 def _extract_text_file(file_path: Path) -> str:
     """Extrahiert Text aus TXT/MD Dateien."""
@@ -117,7 +148,7 @@ def _extract_word_text(file_path: Path) -> str:
     try:
         from docx import Document
         
-        doc = Document(file_path)
+        doc = Document(str(file_path))
         text_parts = []
         
         # Absätze extrahieren

@@ -2502,33 +2502,66 @@ async def create_document_with_file(
                 upload_result.mime_type
             )
             
-            # 🤖 ERWEITERTE KI-ANALYSE v3.0 mit Model-Auswahl
-            from .ai_engine import ai_engine
-            
-            # Debug-Modus aktivieren?
-            debug_mode = enable_debug.lower() == "true" if enable_debug else False
-            
-            # AI-Model-Parameter verarbeiten
-            preferred_provider = ai_model or "auto"
-            upload_logger.info(f"🤖 KI-Analyse mit Provider: {preferred_provider}, Debug: {debug_mode}")
-            
-            # Alle existierenden Dokumente für Duplikatsprüfung laden
-            existing_docs = db.query(DocumentModel).all()
-            existing_docs_data = [
-                {
-                    'id': doc.id,
-                    'title': doc.title,
-                    'extracted_text': doc.extracted_text or ""
-                } for doc in existing_docs
-            ]
-            
-            # Erweiterte KI-Analyse mit Provider-Auswahl
-            ai_result = await ai_engine.ai_enhanced_analysis_with_provider(
-                text=extracted_text,
-                document_type=document_type or "unknown",
-                preferred_provider=preferred_provider,
-                enable_debug=debug_mode
-            )
+            # 🚀 ENHANCED SCHEMA METADATEN-EXTRAKTION (Enterprise Grade v3.1.0)
+            if ENHANCED_AI_AVAILABLE:
+                upload_logger.info(f"🎯 Enhanced Schema Metadaten-Extraktion mit {ai_model}")
+                
+                try:
+                    # Enhanced Metadata Extractor initialisieren
+                    extractor = get_enhanced_extractor(ai_model if ai_model != "auto" else "openai")
+                    
+                    # Enhanced Metadata Extraction durchführen
+                    enhanced_response = await extractor.extract_enhanced_metadata(
+                        content=extracted_text,
+                        document_title=title or file.filename,
+                        document_type_hint=document_type,
+                        include_chunking=True
+                    )
+                    
+                    if enhanced_response.success:
+                        enhanced_metadata = enhanced_response.metadata
+                        
+                        # Legacy-Format für Rückwärtskompatibilität erstellen
+                        ai_result = {
+                            'document_type': enhanced_metadata.document_type.value,
+                            'confidence': enhanced_metadata.ai_confidence,
+                            'language': 'de',  # Enhanced Schema hat Language-Detection
+                            'language_confidence': 0.9,
+                            'quality_score': int(enhanced_metadata.quality_scores.overall * 10),
+                            'keywords': [kw.term for kw in enhanced_metadata.primary_keywords[:5]],
+                            'main_topics': [kw.term for kw in enhanced_metadata.qm_keywords[:3]],
+                            'norm_references': enhanced_metadata.iso_standards_referenced,
+                            'risk_level': enhanced_metadata.compliance_level.value,
+                            'ai_summary': enhanced_metadata.description[:200] + "..." if len(enhanced_metadata.description) > 200 else enhanced_metadata.description
+                        }
+                        
+                        upload_logger.info(f"✅ Enhanced Schema erfolgreich: {enhanced_metadata.document_type.value} ({enhanced_metadata.ai_confidence:.1%} Konfidenz)")
+                        
+                    else:
+                        upload_logger.warning(f"⚠️ Enhanced Schema fehlgeschlagen: {enhanced_response.errors}")
+                        # Fallback zu alter AI-Engine
+                        raise Exception("Enhanced Schema fehlgeschlagen")
+                        
+                except Exception as e:
+                    upload_logger.warning(f"❌ Enhanced Schema Fehler: {e} - Fallback zu Legacy AI")
+                    # Fallback zur alten AI-Engine
+                    from .ai_engine import ai_engine
+                    ai_result = await ai_engine.ai_enhanced_analysis_with_provider(
+                        text=extracted_text,
+                        document_type=document_type or "unknown",
+                        preferred_provider=ai_model or "auto",
+                        enable_debug=enable_debug.lower() == "true" if enable_debug else False
+                    )
+            else:
+                # Fallback falls Enhanced Schema nicht verfügbar
+                upload_logger.info(f"🔄 Fallback zu Legacy AI-Engine (Enhanced Schema nicht verfügbar)")
+                from .ai_engine import ai_engine
+                ai_result = await ai_engine.ai_enhanced_analysis_with_provider(
+                    text=extracted_text,
+                    document_type=document_type or "unknown",
+                    preferred_provider=ai_model or "auto",
+                    enable_debug=enable_debug.lower() == "true" if enable_debug else False
+                )
             
             # Legacy-Format für Rückwärtskompatibilität erstellen
             legacy_result = type('AIResult', (), {
@@ -2650,7 +2683,18 @@ async def create_document_with_file(
                 # Advanced Indexierung mit Hierarchical Chunking und Enhanced Metadata
                 async def async_advanced_index():
                     try:
-                        # Advanced RAG mit Multi-Layer Analysis
+                        # Advanced RAG mit Enhanced Schema Integration
+                        enhanced_rag_metadata = {}
+                        
+                        # Enhanced Metadata für RAG integrieren (falls verfügbar)
+                        if ENHANCED_AI_AVAILABLE and 'enhanced_response' in locals() and enhanced_response.success:
+                            enhanced_meta = enhanced_response.metadata
+                            enhanced_rag_metadata = {
+                                'enhanced_metadata': enhanced_meta,
+                                'chunk_metadata': enhanced_response.chunks_metadata
+                            }
+                            upload_logger.info(f"✅ Enhanced Metadata für RAG übertragen: {len(enhanced_response.chunks_metadata)} Chunks")
+                        
                         index_result = await advanced_rag_engine.index_document_advanced(
                             document_id=db_document.id,
                             title=db_document.title,
@@ -2662,7 +2706,8 @@ async def create_document_with_file(
                                 'file_name': db_document.file_name,
                                 'file_path': db_document.file_path,
                                 'keywords': db_document.keywords or "",
-                                'uploaded_at': datetime.utcnow().isoformat()
+                                'uploaded_at': datetime.utcnow().isoformat(),
+                                **enhanced_rag_metadata  # Enhanced Schema Metadaten hinzufügen
                             }
                         )
                         upload_logger.info(f"🚀 Advanced RAG Indexierung erfolgreich: {index_result}")

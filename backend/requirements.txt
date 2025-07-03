@@ -44,4 +44,13 @@ qdrant-client==1.7.0
 pydantic==2.9.2
 
 # Added for OpenAI Embeddings
-tiktoken==0.8.0 
+tiktoken==0.8.0
+
+# Enhanced OCR Dependencies
+pytesseract>=3.10.1
+easyocr>=1.7.1
+Pillow>=10.0.0
+PyMuPDF>=1.23.0
+
+# Advanced Image Processing (optional, falls OpenCV verfügbar)
+# opencv-python>=4.8.0.74  # Auskommentiert wegen NumPy 2.0 Kompatibilität 
