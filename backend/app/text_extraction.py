@@ -50,6 +50,22 @@ except ImportError as e:
     ENHANCED_OCR_AVAILABLE = False
     logger.warning(f"⚠️ Enhanced OCR nicht verfügbar: {e}")
 
+# Vision OCR Import  
+try:
+    from .vision_ocr_engine import extract_text_with_vision
+    VISION_OCR_AVAILABLE = True
+except ImportError as e:
+    VISION_OCR_AVAILABLE = False
+    logger.warning(f"⚠️ Vision OCR nicht verfügbar: {e}")
+
+# Document Vision Engine Import (NEW)
+try:
+    from .document_vision_engine import extract_text_with_document_vision
+    DOCUMENT_VISION_AVAILABLE = True
+except ImportError as e:
+    DOCUMENT_VISION_AVAILABLE = False
+    logger.warning(f"⚠️ Document Vision Engine nicht verfügbar: {e}")
+
 def extract_text_from_file(file_path: Union[str, Path], mime_type: str) -> str:
     """
     Extrahiert Text aus verschiedenen Dateiformaten mit Enhanced OCR Fallback
@@ -74,9 +90,67 @@ def extract_text_from_file(file_path: Union[str, Path], mime_type: str) -> str:
             logger.warning(f"⚠️ Unbekannter MIME-Type: {mime_type}")
             extracted_text = "[Unbekanntes Dateiformat]"
         
-        # Enhanced OCR Fallback für problematische Dokumente
+        # 🎯 PREMIUM: Document-to-Image Vision OCR für komplexe Dokumente
+        if len(extracted_text.strip()) < 100 and DOCUMENT_VISION_AVAILABLE:
+            logger.info("🎯 PREMIUM: Wenig Text → Document-to-Image Vision OCR")
+            try:
+                # Async call in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                vision_result = loop.run_until_complete(
+                    extract_text_with_document_vision(str(file_path))
+                )
+                loop.close()
+                
+                if vision_result['success'] and len(vision_result['extracted_text']) > len(extracted_text):
+                    chars = len(vision_result['extracted_text'])
+                    logger.info(f"🎉 Document Vision OCR erfolgreich: {chars} Zeichen")
+                    extracted_text = vision_result['extracted_text']
+                    
+                    # Success Metrics loggen
+                    if 'success_metrics' in vision_result:
+                        metrics = vision_result['success_metrics']
+                        logger.info(f"📊 Erfolgsrate: {metrics['success_rate']:.1f}%, Qualität: {metrics['quality_score']:.1f}/100")
+                    
+                    # Compliance-Warnungen protokollieren
+                    if vision_result.get('process_references'):
+                        logger.info(f"📎 Prozess-Referenzen gefunden: {vision_result['process_references']}")
+                    
+                    return extracted_text
+                
+            except Exception as e:
+                logger.error(f"❌ Document Vision OCR fehlgeschlagen: {e}")
+        
+        # Fallback: Standard Vision OCR für komplexe Dokumente mit Diagrammen
+        if len(extracted_text.strip()) < 100 and VISION_OCR_AVAILABLE:
+            logger.info("🔍 Wenig Text gefunden - versuche Standard Vision OCR für Diagramm-Analyse")
+            try:
+                # Async call in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                vision_result = loop.run_until_complete(
+                    extract_text_with_vision(file_path, mime_type)
+                )
+                loop.close()
+                
+                if vision_result['success'] and len(vision_result['text']) > len(extracted_text):
+                    logger.info(f"✅ Standard Vision OCR erfolgreich: {len(vision_result['text'])} Zeichen")
+                    extracted_text = vision_result['text']
+                    
+                    # Compliance-Warnungen protokollieren
+                    if vision_result.get('compliance_warnings'):
+                        logger.warning(f"⚠️ Compliance-Warnungen gefunden: {len(vision_result['compliance_warnings'])}")
+                    
+                    # Prozess-Referenzen protokollieren
+                    if vision_result.get('process_references'):
+                        logger.info(f"📎 Prozess-Referenzen gefunden: {vision_result['process_references']}")
+                
+            except Exception as e:
+                logger.error(f"❌ Standard Vision OCR fehlgeschlagen: {e}")
+
+        # Enhanced OCR für komplexe Dokumente (wenn noch wenig Text)
         if len(extracted_text.strip()) < 50 and ENHANCED_OCR_AVAILABLE:
-            logger.info("🔄 Standard-Extraktion ergab wenig Text - versuche Enhanced OCR")
+            logger.info("🔍 Sehr wenig Text gefunden - versuche Enhanced OCR")
             try:
                 # Async call in sync context
                 loop = asyncio.new_event_loop()
@@ -87,26 +161,24 @@ def extract_text_from_file(file_path: Union[str, Path], mime_type: str) -> str:
                 loop.close()
                 
                 if enhanced_result['success'] and len(enhanced_result['text']) > len(extracted_text):
-                    logger.info(f"✅ Enhanced OCR erfolgreich: {len(enhanced_result['text'])} Zeichen, "
-                              f"{enhanced_result['images_processed']} Bilder verarbeitet")
+                    logger.info(f"✅ Enhanced OCR erfolgreich: {len(enhanced_result['text'])} Zeichen")
                     extracted_text = enhanced_result['text']
-                    
-                    # Metadaten in Log ausgeben
-                    logger.info(f"📊 OCR-Methode: {enhanced_result['ocr_method']}")
                 
             except Exception as e:
-                logger.error(f"❌ Enhanced OCR Fallback fehlgeschlagen: {e}")
+                logger.error(f"❌ Enhanced OCR fehlgeschlagen: {e}")
         
-        # Ergebnis validieren
-        if not extracted_text or extracted_text.strip() == "":
+        # Final Check
+        if len(extracted_text.strip()) < 20:
             extracted_text = "[Kein Text gefunden]"
+            logger.warning(f"⚠️ Minimaler Text extrahiert für {file_path.name}")
+        else:
+            logger.info(f"✅ Textextraktion abgeschlossen: {len(extracted_text)} Zeichen")
         
-        logger.info(f"✅ Textextraktion abgeschlossen: {len(extracted_text)} Zeichen")
         return extracted_text
         
     except Exception as e:
-        logger.error(f"❌ Textextraktion fehlgeschlagen für {file_path.name}: {e}")
-        return f"[Textextraktion fehlgeschlagen: {str(e)}]"
+        logger.error(f"❌ Textextraktion fehlgeschlagen für {file_path}: {e}")
+        return f"[Extraktionsfehler: {str(e)}]"
 
 def _extract_text_file(file_path: Path) -> str:
     """Extrahiert Text aus TXT/MD Dateien."""
