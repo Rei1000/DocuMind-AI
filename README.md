@@ -287,6 +287,62 @@ calibration_requirements (id, norm_id, equipment_type, required_interval_months,
 | **[Multi-Language Support](./backend/app/prompts.py)** | DE/EN/FR Templates | ✅ **i18n Ready** |
 | **[Template-Validierung](./backend/app/prompts.py)** | Konsistenz-Checks, Schema-Validation | ✅ **Auto-QA** |
 
+## 🔄 **LangChain Pipeline-Workflow**
+
+Das KI-QMS System verwendet eine fortschrittliche LangChain-Pipeline mit zentraler Prompt-Verwaltung für die intelligente Dokumentenverarbeitung:
+
+```mermaid
+graph TD
+    A["📁 Dokument Upload<br/>PA 8.2.1 - Reklamationen.pdf"] --> B["🔍 Multi-Format Text-Extraktion<br/>PyPDF2, python-docx, python-pptx"]
+    
+    B --> B1["🖼️ OCR Bilderkennung<br/>OpenCV + Tesseract"]
+    B1 --> B2["📊 Flussdiagramm-Analyse<br/>Computer Vision + OCR"]
+    B2 --> C["🧠 KI-Pipeline Start<br/>LangChain Orchestrierung"]
+    
+    C --> D["📋 Zentrale Prompt-Verwaltung<br/>prompts.py lädt hierarchische Templates"]
+    
+    D --> E["🌍 Sprach-Erkennung<br/>Prompt: detect_language_de<br/>Technik: NLP Pattern Matching"]
+    D --> F["📊 Dokumenttyp-Analyse<br/>Prompt: analyze_document_type_de<br/>Technik: Multi-Label Classification"]
+    D --> G["⚖️ Compliance-Check<br/>Prompt: extract_compliance_keywords_de<br/>Technik: Named Entity Recognition"]
+    D --> H["📖 Norm-Referenzen<br/>Prompt: extract_norm_references_de<br/>Technik: Regex + Semantic Search"]
+    D --> I["🏷️ Metadata-Extraktion<br/>Prompt: extract_metadata_complete_de<br/>Technik: Structured JSON Extraction"]
+    
+    E --> J["🤖 OpenAI GPT-4o-mini<br/>Antwort: 'de' (27.3%)"]
+    F --> K["🤖 OpenAI GPT-4o-mini<br/>Antwort: 'RISK_ASSESSMENT' (100%)"]
+    G --> L["🤖 OpenAI GPT-4o-mini<br/>Liste: ['Reklamation', 'Qualität', ...]"]
+    H --> M["🤖 OpenAI GPT-4o-mini<br/>Liste: ['ISO 13485:8.2.1', ...]"]
+    I --> N["🤖 OpenAI GPT-4o-mini<br/>JSON: {title, version, department, ...}"]
+    
+    J --> O["💾 SQL Datenbank<br/>PostgreSQL/SQLite"]
+    K --> O
+    L --> O
+    M --> O
+    N --> O
+    
+    O --> P["🔄 Advanced RAG Processing<br/>Enhanced Chunking Algorithm"]
+    P --> Q["📝 Hierarchisches Chunking<br/>Document Structure Analysis"]
+    Q --> R["🎯 Keyword Enhancement<br/>Domain-Specific Terms"]
+    R --> S["📊 Importance Scoring<br/>Content Relevance Weighting"]
+    S --> T["🧠 Sentence Transformers<br/>all-MiniLM-L6-v2 Embeddings"]
+    T --> U["🗄️ Qdrant Vector Database<br/>Enterprise-Grade Storage"]
+    
+    U --> V["✅ Upload Erfolgreich<br/>SQL + Qdrant synchronisiert"]
+    
+    style A fill:#e1f5fe
+    style V fill:#c8e6c9
+    style D fill:#fff3e0
+    style U fill:#f3e5f5
+```
+
+**💡 Pipeline-Features:**
+- **OCR-Integration**: Automatische Erkennung von Bildern, Flussdiagrammen und gescannten Dokumenten
+- **Zentrale Prompt-Verwaltung**: Hierarchische Templates für konsistente KI-Ergebnisse  
+- **Multi-Format Support**: PDF, Word, Excel, PowerPoint, Bilder
+- **Enterprise-Grade**: Qdrant Vector Database für performante Semantic Search
+- **Intelligente Fallbacks**: Regel-basierte Verarbeitung wenn KI nicht verfügbar
+
+📖 **Detaillierte Dokumentation**: [LANGCHAIN-PIPELINE-WORKFLOW-v3.1.0.md](LANGCHAIN-PIPELINE-WORKFLOW-v3.1.0.md)
+
 ### **Vector Database & RAG Engine**
 
 | Technologie | Version | Status | Zweck |
