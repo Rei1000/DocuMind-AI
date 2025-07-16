@@ -1,6 +1,8 @@
 # =====================================================
-# KI-QMS Backend - Minimal Compatible Requirements
+# KI-QMS Backend - Konsolidierte Requirements
 # =====================================================
+# Basierend auf Import-Analyse der aktiven Module
+# Erstellt: 2024-12-20
 
 # Core Web Framework
 fastapi==0.115.5
@@ -10,49 +12,43 @@ python-multipart==0.0.12
 # Database & ORM
 sqlalchemy==2.0.36
 
-# Frontend
-streamlit==1.40.2
-
-# Data Processing
-pandas==2.2.3
-numpy==2.0.2
-
-# Visualization
-plotly==5.24.1
-
-# Utilities
-requests==2.32.3
-python-dotenv==1.0.1
-aiofiles==24.1.0
+# Data Validation
+pydantic==2.9.2
 email-validator==2.2.0
-passlib==1.7.4
+
+# Authentication & Security
 python-jose==3.3.0
+passlib==1.7.4
+cryptography==41.0.7
 
-# AI/ML Dependencies - OpenAI focused
-openai==1.55.3
-chromadb==0.4.24
-torch==2.5.1
-google-generativeai==0.8.3
+# Environment & Configuration
+python-dotenv==1.0.1
 
-# OCR and Document Processing
-pytesseract
-Pillow
-opencv-python==4.8.1.78
+# File Handling
+aiofiles==24.1.0
 PyPDF2==3.0.1
 python-docx==1.1.0
 openpyxl==3.1.2
-pdf2image==1.17.0
 
-# QMS specific dependencies
+# HTTP Client
+requests==2.32.3
+
+# AI/ML Dependencies - Nur tatsächlich verwendete
+openai==1.55.3
 qdrant-client==1.7.0
-pydantic==2.9.2
-
-# Added for OpenAI Embeddings
 tiktoken==0.8.0
 
-# Enhanced OCR Dependencies
-easyocr>=1.7.1
+# OCR and Document Processing - Nur tatsächlich verwendete
+pytesseract
+Pillow
 PyMuPDF>=1.23.0
 
-# Advanced Image Processing (optional, falls OpenCV verfügbar)
-# opencv-python>=4.8.0.74  # Auskommentiert wegen NumPy 2.0 Kompatibilität 
+# Data Processing - Nur tatsächlich verwendete
+pandas==2.2.3
+numpy==2.0.2
+
+# Visualization - Nur tatsächlich verwendete
+plotly==5.24.1
+
+# Frontend
+streamlit==1.40.2
