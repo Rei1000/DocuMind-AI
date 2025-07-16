@@ -261,7 +261,6 @@ class VisionOCREngine:
                         OptimizeFor=0,    # Print
                         BitmapMissingFonts=True,
                         DocStructureTags=False,
-                        BitmapMissingFonts=True,
                         UseDocumentImageQuality=False,
                         Resolution=dpi
                     )
