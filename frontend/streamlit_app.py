@@ -152,7 +152,8 @@ def upload_document_with_file(
     version: str = "1.0",
     content: Optional[str] = None,
     remarks: Optional[str] = None,
-    chapter_numbers: Optional[str] = None
+    chapter_numbers: Optional[str] = None,
+    upload_method: str = "ocr"  # NEU: Upload-Methode Parameter
 ) -> Optional[Dict]:
     """
     Lädt ein Dokument mit Datei hoch - ZUVERLÄSSIG!
@@ -168,7 +169,8 @@ def upload_document_with_file(
         # Form-Daten vorbereiten
         form_data = {
             "creator_id": str(creator_id),
-            "version": version
+            "version": version,
+            "upload_method": upload_method  # NEU: Upload-Methode hinzufügen
         }
         
         # document_type NUR setzen wenn nicht leer (Backend hat Default "OTHER")
@@ -1064,16 +1066,161 @@ def render_upload_page():
             <p><strong>Typ:</strong> {success_data.get('document_type', 'N/A')}</p>
             <p><strong>Version:</strong> {success_data.get('version', 'N/A')}</p>
             <p><strong>Dokumentnummer:</strong> {success_data.get('document_number', 'N/A')}</p>
+            <p><strong>Upload-Methode:</strong> {success_data.get('upload_method', 'N/A')}</p>
         </div>
         """, unsafe_allow_html=True)
         
         # Reset after showing
         if st.button("🔄 Neuen Upload starten"):
             st.session_state.upload_success = None
+            st.session_state.upload_preview = None
             st.rerun()
         return
     
-    # Upload Form
+    # Vorschau anzeigen (wenn vorhanden)
+    if st.session_state.get("upload_preview"):
+        preview_data = st.session_state.upload_preview
+        st.markdown("### 👁️ Dokument-Vorschau")
+        
+        if preview_data.get("upload_method") == "ocr":
+            # OCR-Vorschau
+            st.info(f"📄 **OCR-Verarbeitung**: {preview_data.get('message', '')}")
+            
+            metadata = preview_data.get("metadata", {})
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Textlänge", f"{metadata.get('text_length', 0):,} Zeichen")
+            with col2:
+                st.metric("Geschätzte Seiten", metadata.get('estimated_pages', 0))
+            with col3:
+                st.metric("Inhalt erkannt", "✅ Ja" if metadata.get('has_content') else "❌ Nein")
+            
+            # Erkannte Kapitel anzeigen
+            if metadata.get("detected_chapters"):
+                with st.expander("🔍 Erkannte Kapitel"):
+                    for chapter in metadata["detected_chapters"]:
+                        st.write(f"• {chapter}")
+            
+            # Text-Vorschau
+            with st.expander("📝 Text-Vorschau", expanded=True):
+                st.text_area(
+                    "Extrahierter Text", 
+                    value=metadata.get("preview_text", ""),
+                    height=400,
+                    disabled=True
+                )
+        
+        else:  # visio
+            # Visio-Vorschau
+            validation = preview_data.get("validation", {})
+            status = validation.get("status", "UNKNOWN")
+            coverage = validation.get("coverage", 0)
+            
+            # Status-Anzeige
+            if status == "VERIFIED":
+                st.success(f"✅ **Visio-Verarbeitung erfolgreich**: {coverage:.1f}% Wortabdeckung")
+            else:
+                st.warning(f"⚠️ **Überprüfung erforderlich**: Nur {coverage:.1f}% Wortabdeckung")
+            
+            # Metriken
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Seiten", preview_data.get('page_count', 0))
+            with col2:
+                st.metric("Erkannte Wörter", preview_data.get('word_count', 0))
+            with col3:
+                st.metric("Fehlende Wörter", validation.get('total_missing', 0))
+            
+            # Tabs für verschiedene Ansichten
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📸 Vorschaubild", "📝 Wortliste", "🔍 Strukturierte Analyse", "⚠️ Validierung", "💬 Prompts"])
+            
+            with tab1:
+                if preview_data.get("preview_image"):
+                    st.image(
+                        f"data:image/png;base64,{preview_data['preview_image']}", 
+                        caption="Erste Seite des Dokuments",
+                        use_column_width=True
+                    )
+                else:
+                    st.warning("Kein Vorschaubild verfügbar")
+            
+            with tab2:
+                word_list = preview_data.get("word_list", [])
+                if word_list:
+                    st.write(f"**Erste {len(word_list)} von {preview_data.get('word_count', 0)} Wörtern:**")
+                    # Wörter in Spalten anzeigen
+                    words_per_col = 25
+                    cols = st.columns(4)
+                    for i, word in enumerate(word_list):
+                        col_idx = i // words_per_col
+                        if col_idx < 4:
+                            cols[col_idx].write(word)
+            
+            with tab3:
+                analysis = preview_data.get("structured_analysis", {})
+                if "error" in analysis:
+                    st.error(f"❌ {analysis.get('error')}")
+                    if "raw" in analysis:
+                        st.text_area("Rohdaten", analysis["raw"], height=300)
+                else:
+                    st.json(analysis)
+            
+            with tab4:
+                if validation.get("missing_words"):
+                    st.warning(f"**{validation['total_missing']} fehlende Wörter gefunden:**")
+                    st.write(", ".join(validation["missing_words"]))
+                    if validation['total_missing'] > len(validation["missing_words"]):
+                        st.write(f"... und {validation['total_missing'] - len(validation['missing_words'])} weitere")
+                else:
+                    st.success("✅ Alle Wörter aus der Analyse wurden in der Wortliste gefunden!")
+            
+            with tab5:
+                prompts = preview_data.get("prompts", {})
+                if prompts.get("word_extraction"):
+                    st.text_area("Prompt 1: Wortextraktion", prompts["word_extraction"], height=100)
+                if prompts.get("analysis"):
+                    st.text_area("Prompt 2: Strukturanalyse", prompts["analysis"], height=100)
+        
+        # Freigabe-Buttons
+        st.markdown("---")
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col2:
+            if st.button("❌ Abbrechen", use_container_width=True):
+                st.session_state.upload_preview = None
+                st.session_state.upload_form_data = None
+                st.rerun()
+        
+        with col3:
+            if st.button("✅ Freigeben & Speichern", type="primary", use_container_width=True):
+                # Finale Speicherung mit den gespeicherten Form-Daten
+                form_data = st.session_state.get("upload_form_data", {})
+                if form_data:
+                    with st.spinner("💾 Speichere Dokument..."):
+                        try:
+                            result = upload_document_with_file(
+                                file_data=form_data["file"],
+                                document_type=form_data["document_type"],
+                                creator_id=st.session_state.current_user["id"],
+                                title=form_data["title"],
+                                version=form_data["version"],
+                                content=form_data["content"],
+                                remarks=form_data["remarks"],
+                                chapter_numbers=form_data["chapter_numbers"],
+                                upload_method=form_data["upload_method"]
+                            )
+                            
+                            if result:
+                                st.session_state.upload_success = result
+                                st.session_state.upload_preview = None
+                                st.session_state.upload_form_data = None
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Fehler beim Speichern: {str(e)}")
+        
+        return  # Verhindere das Anzeigen des Upload-Formulars
+    
+    # Upload Form (nur anzeigen, wenn keine Vorschau aktiv ist)
     with st.form("upload_form", clear_on_submit=False):
         st.markdown("### 📁 Datei auswählen")
         
@@ -1097,6 +1244,17 @@ def render_upload_page():
         col1, col2 = st.columns(2)
         
         with col1:
+            # NEU: Upload-Methode Auswahl
+            upload_method = st.selectbox(
+                "Upload-Methode",
+                options=["ocr", "visio"],
+                format_func=lambda x: {
+                    "ocr": "📄 OCR - Für textbasierte Dokumente (Normen, Richtlinien)",
+                    "visio": "🖼️ Visio - Für grafische Dokumente (Flussdiagramme, SOPs)"
+                }[x],
+                help="Wählen Sie die passende Verarbeitungsmethode für Ihr Dokument"
+            )
+            
             # Dokumenttyp - verfügbare Typen laden
             doc_types = get_document_types()
             doc_type_options = {
@@ -1117,37 +1275,45 @@ def render_upload_page():
                 available_options = {"OTHER": "🗂️ Sonstige"}
             
             document_type = st.selectbox(
-                "Dokumenttyp",
+                "Dokumenttyp *",
                 options=list(available_options.keys()),
                 format_func=lambda x: available_options[x],
                 index=0,
-                help="Der Dokumenttyp wird automatisch gesetzt falls nicht ausgewählt"
+                help="Pflichtfeld: Der Dokumenttyp bestimmt die Verarbeitungslogik"
             )
             
             version = st.text_input("Version", value="1.0", help="Standardwert: 1.0")
         
         with col2:
             title = st.text_input(
-                "Titel (optional)", 
-                help="Wird automatisch aus dem Dokumentinhalt extrahiert falls leer"
+                "Titel *", 
+                help="Pflichtfeld: Dokumententitel"
             )
             
             content = st.text_area(
                 "Beschreibung (optional)", 
                 help="Wird automatisch aus dem Dokumentinhalt extrahiert falls leer"
             )
+            
+            # NEU: Kapitel-Nummern als Pflichtfeld bei bestimmten Dokumenttypen
+            if document_type in ["STANDARD_NORM", "REGULATION", "GUIDANCE_DOCUMENT"]:
+                chapter_numbers = st.text_input(
+                    "Relevante Kapitel *", 
+                    help="Pflichtfeld für Normen: z.B. 4.2.3, 7.5.1"
+                )
+            else:
+                chapter_numbers = st.text_input(
+                    "Relevante Kapitel (optional)", 
+                    help="z.B. 4.2.3, 7.5.1"
+                )
         
         # Erweiterte Optionen
         with st.expander("🔧 Erweiterte Optionen"):
             remarks = st.text_area("Bemerkungen (optional)")
-            chapter_numbers = st.text_input(
-                "Relevante Kapitel (optional)", 
-                help="z.B. 4.2.3, 7.5.1"
-            )
         
         # Submit Button
         submit_button = st.form_submit_button(
-            "🚀 Dokument hochladen", 
+            "🔍 Vorschau generieren",  # Geändert von "Dokument hochladen"
             use_container_width=True,
             type="primary"
         )
@@ -1157,50 +1323,52 @@ def render_upload_page():
                 st.error("❌ Bitte wählen Sie eine Datei aus!")
                 return
             
-            with st.spinner("📤 Upload läuft..."):
+            if not title or title.strip() == "":
+                st.error("❌ Titel ist ein Pflichtfeld!")
+                return
+                
+            if document_type in ["STANDARD_NORM", "REGULATION", "GUIDANCE_DOCUMENT"] and (not chapter_numbers or chapter_numbers.strip() == ""):
+                st.error("❌ Kapitel-Nummern sind für Normen ein Pflichtfeld!")
+                return
+            
+            with st.spinner("🔄 Generiere Vorschau..."):
                 try:
-                    # Upload durchführen
-                    result = upload_document_with_file(
-                        file_data=uploaded_file,
-                        document_type=document_type,
-                        creator_id=st.session_state.current_user["id"],
-                        title=title,
-                        version=version,
-                        content=content,
-                        remarks=remarks,
-                        chapter_numbers=chapter_numbers
+                    # Form-Daten für späteren Upload speichern
+                    st.session_state.upload_form_data = {
+                        "file": uploaded_file,
+                        "document_type": document_type,
+                        "title": title,
+                        "version": version,
+                        "content": content,
+                        "remarks": remarks,
+                        "chapter_numbers": chapter_numbers,
+                        "upload_method": upload_method
+                    }
+                    
+                    # Vorschau generieren
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    form_data = {
+                        "upload_method": upload_method,
+                        "document_type": document_type
+                    }
+                    
+                    response = requests.post(
+                        f"{API_BASE_URL}/api/documents/preview",
+                        files=files,
+                        data=form_data,
+                        timeout=60  # Längeres Timeout für Visio-Verarbeitung
                     )
                     
-                    if result:
-                        st.session_state.upload_success = result
-                        st.success("✅ Upload erfolgreich!")
-                        time.sleep(1)
+                    if response.status_code == 200:
+                        preview_data = response.json()
+                        st.session_state.upload_preview = preview_data
                         st.rerun()
                     else:
-                        st.error("❌ Upload fehlgeschlagen!")
-                        
-                except ValueError as e:
-                    # Duplikat-Fehler speziell behandeln
-                    if "DUPLIKAT" in str(e):
-                        error_msg = str(e).replace("DUPLIKAT:", "").strip()
-                        st.markdown(f"""
-                        <div class="warning-box">
-                            <h4>⚠️ Dokument-Duplikat erkannt!</h4>
-                            <p>{error_msg}</p>
-                            <p><strong>Lösungsvorschläge:</strong></p>
-                            <ul>
-                                <li>Verwenden Sie einen anderen Titel</li>
-                                <li>Laden Sie eine andere Datei hoch</li>
-                                <li>Prüfen Sie die bestehenden Dokumente in der Dokumentenverwaltung</li>
-                            </ul>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.error(f"❌ Validierungsfehler: {e}")
+                        error_detail = response.json().get('detail', response.text)
+                        st.error(f"❌ Vorschau-Fehler: {error_detail}")
                         
                 except Exception as e:
-                    st.error(f"❌ Upload-Fehler: {e}")
-                    logger.error(f"Upload Exception: {e}")
+                    st.error(f"❌ Fehler bei der Vorschau-Generierung: {str(e)}")
 
 def render_documents_page():
     """Rendert die Dokumentenverwaltung"""
