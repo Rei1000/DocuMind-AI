@@ -3993,8 +3993,34 @@ def render_visio_processing_inline(document_id: int):
                                 st.rerun()
                             else:
                                 st.error(f"❌ PNG-Generierung fehlgeschlagen: {result.get('error')}")
+                                
+                                # Zeige detaillierte Fehlerinformationen
+                                with st.expander("🔍 Fehler-Details", expanded=True):
+                                    st.write("**Fehler:**", result.get('error', 'Unbekannter Fehler'))
+                                    
+                                    # Prüfe auf spezifische Fehler
+                                    error_msg = result.get('error', '').lower()
+                                    if 'libreoffice' in error_msg:
+                                        st.warning("⚠️ **LibreOffice nicht gefunden**")
+                                        st.info("""
+                                        Das System konnte LibreOffice nicht finden. Mögliche Lösungen:
+                                        1. Installieren Sie LibreOffice: `sudo apt-get install libreoffice`
+                                        2. Das System verwendet automatisch eine Fallback-Methode
+                                        3. PDF-Dateien funktionieren ohne LibreOffice
+                                        """)
+                                    elif 'datei nicht gefunden' in error_msg:
+                                        st.error("📁 **Datei nicht gefunden**")
+                                        st.info("Die hochgeladene Datei konnte nicht gefunden werden. Bitte laden Sie die Datei erneut hoch.")
+                                    elif 'keine bilder generiert' in error_msg:
+                                        st.error("🖼️ **Keine Bilder generiert**")
+                                        st.info("Die Konvertierung war nicht erfolgreich. Prüfen Sie das Dateiformat.")
                         else:
                             st.error(f"❌ API-Fehler: {response.status_code}")
+                            try:
+                                error_detail = response.json()
+                                st.error(f"Details: {error_detail.get('detail', 'Unbekannter Fehler')}")
+                            except:
+                                st.error(f"Response: {response.text}")
         else:
             st.success("✅ PNG-Generierung abgeschlossen")
             

@@ -171,11 +171,38 @@ class VisionOCREngine:
         try:
             import subprocess
             import tempfile
+            import shutil
+            
+            # Mögliche LibreOffice-Befehle
+            libreoffice_commands = [
+                'libreoffice',
+                'soffice',
+                '/usr/bin/libreoffice',
+                '/usr/bin/soffice',
+                '/opt/libreoffice/program/soffice',
+                '/usr/local/bin/libreoffice',
+                '/Applications/LibreOffice.app/Contents/MacOS/soffice'  # macOS
+            ]
+            
+            # Finde verfügbaren LibreOffice-Befehl
+            libreoffice_cmd = None
+            for cmd in libreoffice_commands:
+                if shutil.which(cmd):
+                    libreoffice_cmd = cmd
+                    logger.info(f"✅ LibreOffice gefunden: {cmd}")
+                    break
+            
+            if not libreoffice_cmd:
+                logger.warning("⚠️ LibreOffice nicht gefunden in PATH")
+                logger.warning(f"   Geprüfte Befehle: {', '.join(libreoffice_commands)}")
+                logger.warning("   Tipp: Installieren Sie LibreOffice mit:")
+                logger.warning("   sudo apt-get install libreoffice")
+                return []
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 # LibreOffice headless PDF export
                 cmd = [
-                    'libreoffice',
+                    libreoffice_cmd,
                     '--headless',
                     '--convert-to', 'pdf',
                     '--outdir', temp_dir,
@@ -184,11 +211,16 @@ class VisionOCREngine:
                 
                 logger.info(f"🔄 LibreOffice Konvertierung: {' '.join(cmd)}")
                 
+                # Umgebungsvariablen für LibreOffice
+                env = os.environ.copy()
+                env['HOME'] = temp_dir  # Temporäres Home für LibreOffice-Profile
+                
                 result = subprocess.run(
                     cmd, 
                     capture_output=True, 
                     text=True, 
-                    timeout=60
+                    timeout=60,
+                    env=env
                 )
                 
                 if result.returncode == 0:
@@ -197,14 +229,25 @@ class VisionOCREngine:
                     if pdf_files:
                         pdf_path = pdf_files[0]
                         logger.info(f"✅ LibreOffice PDF erstellt: {pdf_path}")
+                        logger.info(f"   PDF-Größe: {pdf_path.stat().st_size} bytes")
                         return await self._convert_pdf_to_images(pdf_path, dpi)
+                    else:
+                        logger.error("❌ Keine PDF-Datei von LibreOffice erstellt")
+                        logger.error(f"   Temp-Verzeichnis: {temp_dir}")
+                        logger.error(f"   Dateien im Verzeichnis: {list(Path(temp_dir).glob('*'))}")
                 else:
-                    logger.warning(f"⚠️ LibreOffice Fehler: {result.stderr}")
+                    logger.error(f"❌ LibreOffice Fehler (Code {result.returncode})")
+                    logger.error(f"   STDOUT: {result.stdout}")
+                    logger.error(f"   STDERR: {result.stderr}")
                     
-        except FileNotFoundError:
-            logger.warning("⚠️ LibreOffice nicht gefunden")
+        except subprocess.TimeoutExpired:
+            logger.error("❌ LibreOffice Timeout (>60s)")
+        except FileNotFoundError as e:
+            logger.warning(f"⚠️ LibreOffice nicht gefunden: {e}")
         except Exception as e:
             logger.error(f"❌ LibreOffice Konvertierung fehlgeschlagen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return []
 
