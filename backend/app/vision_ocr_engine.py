@@ -29,7 +29,6 @@ import re
 import os
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
-import openai
 from PIL import Image
 import io
 import mimetypes
@@ -126,7 +125,8 @@ class VisionOCREngine:
             return []
         
         try:
-            doc = fitz.open(file_path)
+            import fitz  # PyMuPDF
+            doc = fitz.open(str(file_path))
             images = []
             
             logger.info(f"📄 PDF hat {len(doc)} Seiten")
@@ -136,58 +136,34 @@ class VisionOCREngine:
                 
                 # High-Quality Rendering
                 mat = fitz.Matrix(dpi/72, dpi/72)  # DPI scaling
-                pix = page.get_pixmap(matrix=mat)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
                 
-                # PNG Bytes
+                # PNG Bytes erstellen
                 img_bytes = pix.tobytes("png")
-                images.append(img_bytes)
                 
-                logger.info(f"✅ Seite {page_num + 1} konvertiert: {len(img_bytes)} bytes")
+                # Validiere, dass wir tatsächlich Bilddaten haben
+                if img_bytes and len(img_bytes) > 0:
+                    images.append(img_bytes)
+                    logger.info(f"✅ Seite {page_num + 1} konvertiert: {len(img_bytes)} bytes")
+                else:
+                    logger.warning(f"⚠️ Seite {page_num + 1} konnte nicht konvertiert werden")
                 
                 pix = None  # Memory cleanup
             
             doc.close()
-            logger.info(f"🎉 PDF-Konvertierung abgeschlossen: {len(images)} Bilder")
+            
+            if images:
+                logger.info(f"🎉 PDF-Konvertierung abgeschlossen: {len(images)} Bilder")
+            else:
+                logger.error("❌ Keine Bilder aus PDF generiert")
+                
             return images
             
         except Exception as e:
             logger.error(f"❌ PDF-Konvertierung fehlgeschlagen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
-
-    async def _convert_word_to_images(self, file_path: Path, dpi: int = 300) -> List[bytes]:
-        """
-        Word → PNG Konvertierung
-        
-        Verschiedene Ansätze:
-        1. LibreOffice Headless (cross-platform)
-        2. Win32 COM (Windows only)
-        3. Fallback: Erst PDF, dann Bilder
-        """
-        
-        # Ansatz 1: LibreOffice Headless (empfohlen)
-        libreoffice_result = await self._convert_word_via_libreoffice(file_path, dpi)
-        if libreoffice_result:
-            return libreoffice_result
-        
-        # Ansatz 2: Win32 COM (Windows only)
-        if self.win32_available:
-            win32_result = await self._convert_word_via_win32(file_path, dpi)
-            if win32_result:
-                return win32_result
-        
-        # Ansatz 3: Word → PDF → Images
-        logger.info("🔄 Fallback: Word → PDF → Images")
-        pdf_path = await self._convert_word_to_pdf(file_path)
-        if pdf_path and pdf_path.exists():
-            try:
-                images = await self._convert_pdf_to_images(pdf_path, dpi)
-                pdf_path.unlink()  # Temporäre PDF löschen
-                return images
-            except Exception as e:
-                logger.error(f"❌ PDF-Fallback fehlgeschlagen: {e}")
-        
-        logger.error("❌ Alle Word-Konvertierungsmethoden fehlgeschlagen")
-        return []
 
     async def _convert_word_via_libreoffice(self, file_path: Path, dpi: int = 300) -> List[bytes]:
         """Word → PDF → Images via LibreOffice Headless"""
@@ -293,6 +269,116 @@ class VisionOCREngine:
         # Für jetzt nicht implementiert
         logger.warning("📄 Word → PDF Direktkonvertierung nicht implementiert")
         return None
+
+    async def _convert_docx_to_pdf_fallback(self, file_path: Path) -> Optional[Path]:
+        """
+        DOCX → PDF Konvertierung als Fallback ohne LibreOffice
+        
+        Verwendet python-docx und reportlab für einfache Konvertierung
+        """
+        try:
+            from docx import Document
+            from reportlab.lib.pagesizes import A4
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            import tempfile
+            import html
+            
+            logger.info("🔄 Fallback: DOCX → PDF mit python-docx/reportlab")
+            
+            # DOCX laden
+            doc = Document(file_path)
+            
+            # Temporäre PDF erstellen
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                pdf_path = Path(tmp.name)
+            
+            # PDF erstellen
+            pdf = SimpleDocTemplate(str(pdf_path), pagesize=A4)
+            story = []
+            styles = getSampleStyleSheet()
+            
+            # Text aus DOCX extrahieren und zu PDF konvertieren
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    # HTML-Escape für Reportlab
+                    escaped_text = html.escape(paragraph.text)
+                    try:
+                        p = Paragraph(escaped_text, styles['Normal'])
+                        story.append(p)
+                        story.append(Spacer(1, 0.2*inch))
+                    except Exception as e:
+                        logger.warning(f"⚠️ Konnte Paragraph nicht konvertieren: {e}")
+                        # Fallback: Als einfacher Text
+                        story.append(Paragraph(f"<pre>{escaped_text}</pre>", styles['Normal']))
+                        story.append(Spacer(1, 0.2*inch))
+            
+            # Tabellen konvertieren
+            for table in doc.tables:
+                table_text = []
+                for row in table.rows:
+                    row_text = ' | '.join([html.escape(cell.text) for cell in row.cells])
+                    if row_text.strip():
+                        try:
+                            p = Paragraph(row_text, styles['Normal'])
+                            story.append(p)
+                            story.append(Spacer(1, 0.1*inch))
+                        except Exception as e:
+                            logger.warning(f"⚠️ Konnte Tabellenzeile nicht konvertieren: {e}")
+                story.append(Spacer(1, 0.3*inch))
+            
+            if story:
+                pdf.build(story)
+                logger.info(f"✅ Fallback PDF erstellt: {pdf_path}")
+                return pdf_path
+            else:
+                logger.warning("⚠️ Kein Text im DOCX gefunden")
+                return None
+                
+        except ImportError:
+            logger.warning("⚠️ python-docx oder reportlab nicht verfügbar")
+        except Exception as e:
+            logger.error(f"❌ DOCX → PDF Fallback fehlgeschlagen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        
+        return None
+
+    async def _convert_word_to_images(self, file_path: Path, dpi: int = 300) -> List[bytes]:
+        """
+        Word → PNG Konvertierung
+        
+        Verschiedene Ansätze:
+        1. LibreOffice Headless (cross-platform)
+        2. Win32 COM (Windows only)
+        3. Fallback: Erst PDF, dann Bilder
+        """
+        
+        # Ansatz 1: LibreOffice Headless (empfohlen)
+        libreoffice_result = await self._convert_word_via_libreoffice(file_path, dpi)
+        if libreoffice_result:
+            return libreoffice_result
+        
+        # Ansatz 2: Win32 COM (Windows only)
+        if self.win32_available:
+            win32_result = await self._convert_word_via_win32(file_path, dpi)
+            if win32_result:
+                return win32_result
+        
+        # Ansatz 3: Word → PDF → Images mit python-docx Fallback
+        logger.info("🔄 Fallback: Word → PDF → Images")
+        pdf_path = await self._convert_docx_to_pdf_fallback(file_path)
+        if pdf_path and pdf_path.exists():
+            try:
+                images = await self._convert_pdf_to_images(pdf_path, dpi)
+                pdf_path.unlink()  # Temporäre PDF löschen
+                return images
+            except Exception as e:
+                logger.error(f"❌ PDF-Fallback fehlgeschlagen: {e}")
+        
+        logger.error("❌ Alle Word-Konvertierungsmethoden fehlgeschlagen")
+        return []
 
     async def analyze_document_with_vision(self, file_path: Path, extracted_images: List[bytes]) -> Dict[str, Any]:
         """

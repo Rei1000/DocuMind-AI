@@ -136,10 +136,24 @@ class VisioProcessingEngine:
         try:
             logger.info(f"📸 Generiere PNG für Dokument {document.id}")
             
-            # Datei-Pfad
+            # Datei-Pfad - korrigiere relative Pfade
             file_path = Path(document.file_path)
+            
+            # Wenn der Pfad nicht absolut ist, füge das backend-Verzeichnis hinzu
+            if not file_path.is_absolute():
+                # Wir sind im backend/app Verzeichnis, also gehe eine Ebene hoch
+                backend_dir = Path(__file__).parent.parent
+                file_path = backend_dir / file_path
+            
             if not file_path.exists():
+                logger.error(f"❌ Datei nicht gefunden: {file_path}")
+                logger.error(f"   Absoluter Pfad: {file_path.absolute()}")
+                logger.error(f"   Original Pfad: {document.file_path}")
                 raise FileNotFoundError(f"Datei nicht gefunden: {file_path}")
+            
+            logger.info(f"📄 Datei gefunden: {file_path}")
+            logger.info(f"   Größe: {file_path.stat().st_size} bytes")
+            logger.info(f"   Typ: {file_path.suffix}")
             
             # Konvertiere zu PNG (300 DPI)
             images = await self.vision_engine.convert_document_to_images(file_path, dpi=300)
@@ -174,6 +188,8 @@ class VisioProcessingEngine:
             
         except Exception as e:
             logger.error(f"❌ PNG-Generierung fehlgeschlagen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "success": False,
                 "error": f"PNG-Generierung fehlgeschlagen: {str(e)}",
