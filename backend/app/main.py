@@ -2682,29 +2682,17 @@ async def create_document_with_file(
         
         # 4.5 🎯 **VISIO-VERARBEITUNG** für bildbasierte Dokumente
         if upload_method == "visio" and file_data:
-            upload_logger.info(f"🎯 Starte Visio-Verarbeitung für Dokument {db_document.id}")
+            upload_logger.info(f"🎯 Visio-Upload erkannt für Dokument {db_document.id}")
             
-            # Importiere Visio Processing Engine
-            from .visio_processing import visio_processing_engine
+            # Setze korrekten initialen State
+            db_document.processing_state = "UPLOADED"
+            db_document.validation_status = "PENDING"
+            db_document.vision_results = "{}"
+            db.commit()
             
-            # Starte asynchrone Visio-Verarbeitung
-            async def async_visio_processing():
-                try:
-                    result = await visio_processing_engine.process_visio_upload(db_document.id, db)
-                    if result.get("success"):
-                        upload_logger.info(f"✅ Visio-Verarbeitung gestartet: {result.get('state')}")
-                    else:
-                        upload_logger.error(f"❌ Visio-Verarbeitung fehlgeschlagen: {result.get('error')}")
-                except Exception as e:
-                    upload_logger.error(f"❌ Visio-Verarbeitung Exception: {e}")
-            
-            # Starte Verarbeitung im Hintergrund
-            import asyncio
-            asyncio.create_task(async_visio_processing())
-            
-            # Bei Visio-Uploads KEINE sofortige RAG-Indexierung
-            # Die erfolgt erst nach QM-Freigabe
-            upload_logger.info("ℹ️ RAG-Indexierung wird nach QM-Freigabe durchgeführt")
+            # Bei Visio-Uploads KEINE automatische Verarbeitung
+            # Die erfolgt schrittweise über das Frontend
+            upload_logger.info("ℹ️ Visio-Dokument bereit für schrittweise Verarbeitung")
             return db_document
         
         # 5. 🚀 **ERWEITERTE RAG-INDEXIERUNG** mit Advanced AI (nur für OCR-Uploads)
@@ -7524,7 +7512,128 @@ async def test_document_analysis_with_provider(
             "fallback_used": True
         }
 
-# === VISIO PROCESSING API ===
+# === VISIO PROCESSING API - SCHRITTWEISE VERARBEITUNG ===
+
+@app.post("/api/documents/{document_id}/visio-step/generate-png", tags=["Documents", "Visio"])
+async def visio_step_generate_png(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Schritt 1: PNG-Generierung aus dem Dokument
+    """
+    from .visio_processing import visio_processing_engine
+    
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    if document.upload_method != "visio":
+        raise HTTPException(status_code=400, detail="Dokument ist kein Visio-Upload")
+    
+    # Führe PNG-Generierung aus
+    result = await visio_processing_engine._generate_png(document, db)
+    
+    return {
+        "success": result.get("success", False),
+        "png_count": result.get("png_count", 0),
+        "preview_available": result.get("success", False),
+        "error": result.get("error"),
+        "state": document.processing_state
+    }
+
+@app.post("/api/documents/{document_id}/visio-step/extract-words", tags=["Documents", "Visio"])
+async def visio_step_extract_words(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Schritt 2: Wort-Extraktion mit visio_words Prompt
+    """
+    from .visio_processing import visio_processing_engine
+    
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Führe Wort-Extraktion aus
+    result = await visio_processing_engine._extract_words(document, db)
+    
+    # Hole verwendeten Prompt
+    used_prompts = json.loads(document.used_prompts or "{}")
+    
+    return {
+        "success": result.get("success", False),
+        "word_count": result.get("word_count", 0),
+        "sample_words": result.get("sample_words", []),
+        "used_prompt": used_prompts.get("visio_words", ""),
+        "error": result.get("error"),
+        "state": document.processing_state
+    }
+
+@app.post("/api/documents/{document_id}/visio-step/analyze-structure", tags=["Documents", "Visio"])
+async def visio_step_analyze_structure(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Schritt 3: Strukturierte Analyse mit visio_analysis Prompt
+    """
+    from .visio_processing import visio_processing_engine
+    
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Führe Analyse aus
+    result = await visio_processing_engine._analyze_structure(document, db)
+    
+    # Hole Analyse und Prompt
+    analysis = json.loads(document.structured_analysis or "{}")
+    used_prompts = json.loads(document.used_prompts or "{}")
+    
+    return {
+        "success": result.get("success", False),
+        "analysis_preview": analysis,
+        "used_prompt": used_prompts.get("visio_analysis", ""),
+        "error": result.get("error"),
+        "state": document.processing_state
+    }
+
+@app.post("/api/documents/{document_id}/visio-step/validate", tags=["Documents", "Visio"])
+async def visio_step_validate(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Schritt 4: Validierung der Extraktion
+    """
+    from .visio_processing import visio_processing_engine
+    
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Führe Validierung aus
+    result = await visio_processing_engine._validate_extraction(document, db)
+    
+    # Hole Details
+    vision_results = json.loads(document.vision_results or "{}")
+    
+    return {
+        "success": result.get("success", False),
+        "validation_status": result.get("validation_status", "PENDING"),
+        "coverage": result.get("coverage", 0),
+        "missing_words": vision_results.get("missing_words", []),
+        "error": result.get("error"),
+        "state": document.processing_state
+    }
+
+# === Ende VISIO PROCESSING API - SCHRITTWEISE VERARBEITUNG ===
 
 @app.get("/api/documents/{document_id}/visio-status", tags=["Documents", "Visio"])
 async def get_visio_processing_status(

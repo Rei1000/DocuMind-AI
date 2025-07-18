@@ -1,4 +1,13 @@
-# Visio-Upload-Implementierung für KI-QMS
+# Visio-Upload-Implementierung für KI-QMS (v2.0)
+
+## 🔄 Änderungsprotokoll
+
+### Version 2.0 - Inline-Verarbeitung
+- ✅ Visio-Verarbeitung direkt im Upload-Formular (inline)
+- ✅ Schrittweise Verarbeitung mit "Akzeptieren"-Buttons
+- ✅ Keine separate Visio-Seite mehr
+- ✅ Synchrone API-Endpunkte für jeden Schritt
+- ✅ Vollständige Transparenz mit Prompt-Anzeige
 
 ## Übersicht
 
@@ -95,10 +104,14 @@ python add_visio_fields.py
 ```
 
 ### 3. Frontend verwenden
-- Dokument mit "Visio" Upload-Methode hochladen
-- Zur "🖼️ Visio-Verarbeitung" Seite navigieren
-- Verarbeitungsfortschritt überwachen
-- QM-Freigabe erteilen
+- Dokument mit "🖼️ Bild-basiert (Visio)" Upload-Methode hochladen
+- Nach dem Upload erscheinen die Verarbeitungsschritte direkt unterhalb
+- Jeden Schritt einzeln ausführen und mit "✅ Schritt akzeptieren" bestätigen:
+  1. PNG-Generierung
+  2. Wort-Extraktion
+  3. Strukturierte Analyse
+  4. Validierung
+  5. QM-Freigabe
 
 ## Konfiguration
 

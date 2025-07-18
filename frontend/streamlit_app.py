@@ -949,7 +949,6 @@ def render_sidebar():
         "📋 QM-Workflow": "workflow",
         "📤 Upload": "upload",
         "📚 Dokumente": "documents",
-        "🖼️ Visio-Verarbeitung": "visio_processing",
         "🤖 KI-Analyse": "ai_analysis",
         "🚀 AI Test": "ai_prompt_test",
         "💬 RAG-Chat": "rag_chat",
@@ -1070,10 +1069,20 @@ def render_upload_page():
         </div>
         """, unsafe_allow_html=True)
         
-        # Reset after showing
-        if st.button("🔄 Neuen Upload starten"):
-            st.session_state.upload_success = None
-            st.rerun()
+        # Prüfe ob es ein Visio-Upload ist
+        if success_data.get('upload_method') == 'visio':
+            st.markdown("---")
+            st.markdown("### 🖼️ Visio-Verarbeitung")
+            st.info("Die folgenden Schritte werden nacheinander ausgeführt. Bitte akzeptieren Sie jeden Schritt.")
+            
+            # Render Visio-Verarbeitungsschritte inline
+            render_visio_processing_inline(success_data['id'])
+            
+        else:
+            # Normaler OCR-Upload - Neuer Upload Button
+            if st.button("🔄 Neuen Upload starten"):
+                st.session_state.upload_success = None
+                st.rerun()
         return
     
     # Upload Form
@@ -1186,6 +1195,8 @@ def render_upload_page():
                     )
                     
                     if result:
+                        # Füge upload_method zum Ergebnis hinzu
+                        result['upload_method'] = upload_method
                         st.session_state.upload_success = result
                         st.success("✅ Upload erfolgreich!")
                         time.sleep(1)
@@ -3942,6 +3953,244 @@ def get_interest_groups() -> List[Dict]:
         print(f"❌ Interest Groups Fehler: {e}")
         return []
 
+def render_visio_processing_inline(document_id: int):
+    """Rendert die Visio-Verarbeitung inline im Upload-Formular"""
+    
+    # State für Visio-Verarbeitung initialisieren
+    if f"visio_state_{document_id}" not in st.session_state:
+        st.session_state[f"visio_state_{document_id}"] = {
+            "current_step": 1,
+            "png_generated": False,
+            "words_extracted": False,
+            "analysis_complete": False,
+            "validated": False,
+            "qm_approved": False
+        }
+    
+    visio_state = st.session_state[f"visio_state_{document_id}"]
+    
+    # Schritt 1: PNG-Generierung
+    with st.expander(f"📸 Schritt 1: PNG-Generierung", expanded=(visio_state["current_step"] == 1)):
+        if not visio_state["png_generated"]:
+            st.write("Konvertiere Dokument zu PNG-Bildern für die Analyse...")
+            
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("▶️ PNG generieren", key=f"gen_png_{document_id}"):
+                    with st.spinner("Generiere PNG..."):
+                        response = requests.post(
+                            f"{API_BASE_URL}/api/documents/{document_id}/visio-step/generate-png",
+                            headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                            timeout=REQUEST_TIMEOUT
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            if result.get("success"):
+                                st.success(f"✅ {result.get('png_count', 1)} Seite(n) konvertiert")
+                                visio_state["png_generated"] = True
+                                visio_state["current_step"] = 2
+                                st.rerun()
+                            else:
+                                st.error(f"❌ PNG-Generierung fehlgeschlagen: {result.get('error')}")
+                        else:
+                            st.error(f"❌ API-Fehler: {response.status_code}")
+        else:
+            st.success("✅ PNG-Generierung abgeschlossen")
+            
+            # Zeige PNG-Vorschau
+            preview_response = requests.get(
+                f"{API_BASE_URL}/api/documents/{document_id}/visio-preview",
+                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if preview_response.status_code == 200:
+                st.image(preview_response.content, caption="Erste Seite des Dokuments", use_column_width=True)
+    
+    # Schritt 2: Wort-Extraktion
+    if visio_state["png_generated"]:
+        with st.expander(f"📝 Schritt 2: Wort-Extraktion", expanded=(visio_state["current_step"] == 2)):
+            if not visio_state["words_extracted"]:
+                st.write("Extrahiere alle sichtbaren Wörter aus dem Bild...")
+                
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("▶️ Wörter extrahieren", key=f"extract_words_{document_id}"):
+                        with st.spinner("Extrahiere Wörter..."):
+                            response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{document_id}/visio-step/extract-words",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT * 2
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                if result.get("success"):
+                                    st.success(f"✅ {result.get('word_count', 0)} Wörter extrahiert")
+                                    
+                                    # Zeige verwendeten Prompt
+                                    with st.expander("🤖 Verwendeter Prompt", expanded=False):
+                                        st.code(result.get("used_prompt", "")[:500] + "...", language="text")
+                                    
+                                    # Zeige Beispiel-Wörter
+                                    st.write("**Beispiel-Wörter:**")
+                                    st.write(" | ".join(result.get("sample_words", [])))
+                                    
+                                    visio_state["words_extracted"] = True
+                                    visio_state["current_step"] = 3
+                                    
+                                    # Akzeptieren-Button
+                                    if st.button("✅ Schritt akzeptieren", key=f"accept_words_{document_id}", type="primary"):
+                                        st.rerun()
+                                else:
+                                    st.error(f"❌ Wort-Extraktion fehlgeschlagen: {result.get('error')}")
+                            else:
+                                st.error(f"❌ API-Fehler: {response.status_code}")
+            else:
+                st.success("✅ Wort-Extraktion abgeschlossen")
+    
+    # Schritt 3: Strukturierte Analyse
+    if visio_state["words_extracted"]:
+        with st.expander(f"🔍 Schritt 3: Strukturierte Analyse", expanded=(visio_state["current_step"] == 3)):
+            if not visio_state["analysis_complete"]:
+                st.write("Analysiere Dokumentstruktur und erstelle JSON-Analyse...")
+                
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("▶️ Struktur analysieren", key=f"analyze_{document_id}"):
+                        with st.spinner("Analysiere Struktur..."):
+                            response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{document_id}/visio-step/analyze-structure",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT * 2
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                if result.get("success"):
+                                    st.success("✅ Strukturanalyse abgeschlossen")
+                                    
+                                    # Zeige verwendeten Prompt
+                                    with st.expander("🤖 Verwendeter Prompt", expanded=False):
+                                        st.code(result.get("used_prompt", "")[:500] + "...", language="text")
+                                    
+                                    # Zeige JSON-Analyse
+                                    st.write("**Analyse-Ergebnis:**")
+                                    st.json(result.get("analysis_preview", {}))
+                                    
+                                    visio_state["analysis_complete"] = True
+                                    visio_state["current_step"] = 4
+                                    
+                                    # Akzeptieren-Button
+                                    if st.button("✅ Schritt akzeptieren", key=f"accept_analysis_{document_id}", type="primary"):
+                                        st.rerun()
+                                else:
+                                    st.error(f"❌ Strukturanalyse fehlgeschlagen: {result.get('error')}")
+                            else:
+                                st.error(f"❌ API-Fehler: {response.status_code}")
+            else:
+                st.success("✅ Strukturanalyse abgeschlossen")
+    
+    # Schritt 4: Validierung
+    if visio_state["analysis_complete"]:
+        with st.expander(f"✔️ Schritt 4: Validierung", expanded=(visio_state["current_step"] == 4)):
+            if not visio_state["validated"]:
+                st.write("Validiere extrahierte Wörter gegen strukturierte Analyse...")
+                
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("▶️ Validieren", key=f"validate_{document_id}"):
+                        with st.spinner("Validiere..."):
+                            response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{document_id}/visio-step/validate",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                if result.get("success"):
+                                    coverage = result.get("coverage", 0)
+                                    validation_status = result.get("validation_status")
+                                    
+                                    if coverage >= 0.95:
+                                        st.success(f"✅ Validierung erfolgreich: {coverage:.1%} Abdeckung")
+                                    else:
+                                        st.warning(f"⚠️ Review erforderlich: {coverage:.1%} Abdeckung")
+                                    
+                                    # Zeige fehlende Wörter
+                                    missing_words = result.get("missing_words", [])
+                                    if missing_words:
+                                        st.write("**Fehlende Wörter:**")
+                                        st.write(", ".join(missing_words[:20]))
+                                        if len(missing_words) > 20:
+                                            st.write(f"... und {len(missing_words) - 20} weitere")
+                                    
+                                    visio_state["validated"] = True
+                                    visio_state["current_step"] = 5
+                                    
+                                    # Akzeptieren-Button
+                                    if st.button("✅ Schritt akzeptieren", key=f"accept_validation_{document_id}", type="primary"):
+                                        st.rerun()
+                                else:
+                                    st.error(f"❌ Validierung fehlgeschlagen: {result.get('error')}")
+                            else:
+                                st.error(f"❌ API-Fehler: {response.status_code}")
+            else:
+                st.success("✅ Validierung abgeschlossen")
+    
+    # Schritt 5: QM-Freigabe
+    if visio_state["validated"]:
+        with st.expander(f"🎯 Schritt 5: QM-Freigabe", expanded=(visio_state["current_step"] == 5)):
+            if not visio_state["qm_approved"]:
+                st.write("Abschließende Prüfung und Freigabe für RAG-Indexierung...")
+                
+                # Zeige Zusammenfassung
+                st.info("""
+                **Zusammenfassung der Verarbeitung:**
+                - ✅ PNG generiert
+                - ✅ Wörter extrahiert
+                - ✅ Struktur analysiert
+                - ✅ Validierung durchgeführt
+                
+                Nach der Freigabe wird das Dokument in die RAG-Datenbank indexiert.
+                """)
+                
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("🎯 QM-Freigabe erteilen", key=f"qm_release_{document_id}", type="primary"):
+                        with st.spinner("Erteile Freigabe..."):
+                            response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{document_id}/visio-qm-release",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                if result.get("success"):
+                                    st.success("✅ QM-Freigabe erteilt! RAG-Indexierung wurde gestartet.")
+                                    visio_state["qm_approved"] = True
+                                    
+                                    # Neuer Upload Button
+                                    if st.button("🔄 Neuen Upload starten", key=f"new_upload_{document_id}"):
+                                        st.session_state.upload_success = None
+                                        del st.session_state[f"visio_state_{document_id}"]
+                                        st.rerun()
+                                else:
+                                    st.error(f"❌ QM-Freigabe fehlgeschlagen")
+                            else:
+                                st.error(f"❌ API-Fehler: {response.status_code}")
+            else:
+                st.success("✅ QM-Freigabe erteilt - Dokument wurde indexiert!")
+                
+                # Neuer Upload Button
+                if st.button("🔄 Neuen Upload starten", key=f"final_new_upload_{document_id}"):
+                    st.session_state.upload_success = None
+                    del st.session_state[f"visio_state_{document_id}"]
+                    st.rerun()
+
 def render_visio_processing_page():
     """Rendert die Visio-Verarbeitungsseite mit schrittweiser Vorschau"""
     st.markdown("## 🖼️ Visio-Dokument Verarbeitung")
@@ -4118,8 +4367,6 @@ def main():
         render_upload_page()
     elif current_page == "documents":
         render_documents_page()
-    elif current_page == "visio_processing":
-        render_visio_processing_page()
     elif current_page == "ai_analysis":
         render_ai_analysis_page()
     elif current_page == "ai_prompt_test":
