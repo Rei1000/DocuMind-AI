@@ -35,7 +35,7 @@ requests==2.32.3
 
 # AI/ML Dependencies - Nur tatsächlich verwendete
 openai==1.55.3
-qdrant-client==1.7.0
+qdrant-client==1.11.3
 tiktoken==0.8.0
 
 # OCR and Document Processing - Nur tatsächlich verwendete
