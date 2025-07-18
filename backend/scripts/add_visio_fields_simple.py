@@ -13,6 +13,7 @@ from datetime import datetime
 def find_database():
     # Mögliche Pfade für die SQLite-Datei
     possible_paths = [
+        "../qms_mvp.db",  # Gefundene Datenbank
         "../ki_qms.db",
         "../app/ki_qms.db",
         "../../ki_qms.db",
