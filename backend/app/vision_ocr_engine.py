@@ -161,28 +161,45 @@ class VisionOCREngine:
         Verschiedene Ansätze:
         1. LibreOffice Headless (cross-platform)
         2. Win32 COM (Windows only)
-        3. Fallback: Erst PDF, dann Bilder
+        3. Python-basierte Konvertierung (Fallback)
+        4. Fehlerbehandlung mit detaillierten Logs
         """
         
+        logger.info(f"🔄 Word-Konvertierung gestartet: {file_path.name}")
+        
         # Ansatz 1: LibreOffice Headless (empfohlen)
+        logger.info("📄 Versuche LibreOffice Konvertierung...")
         libreoffice_result = await self._convert_word_via_libreoffice(file_path, dpi)
         if libreoffice_result:
+            logger.info("✅ LibreOffice Konvertierung erfolgreich")
             return libreoffice_result
         
         # Ansatz 2: Win32 COM (Windows only)
         if self.win32_available:
+            logger.info("💻 Versuche Win32 COM Konvertierung...")
             win32_result = await self._convert_word_via_win32(file_path, dpi)
             if win32_result:
+                logger.info("✅ Win32 Konvertierung erfolgreich")
                 return win32_result
         
-        # Ansatz 3: Word → PDF → Images
+        # Ansatz 3: Python-basierte Konvertierung (Fallback)
+        logger.info("🐍 Versuche Python-basierte Konvertierung...")
+        # python_result = await self._convert_word_via_python(file_path, dpi)  # Temporarily disabled
+        python_result = []
+        if python_result:
+            logger.info("✅ Python-Konvertierung erfolgreich")
+            return python_result
+        
+        # Ansatz 4: Word → PDF → Images
         logger.info("🔄 Fallback: Word → PDF → Images")
         pdf_path = await self._convert_word_to_pdf(file_path)
         if pdf_path and pdf_path.exists():
             try:
                 images = await self._convert_pdf_to_images(pdf_path, dpi)
                 pdf_path.unlink()  # Temporäre PDF löschen
-                return images
+                if images:
+                    logger.info("✅ PDF-Fallback erfolgreich")
+                    return images
             except Exception as e:
                 logger.error(f"❌ PDF-Fallback fehlgeschlagen: {e}")
         
@@ -199,7 +216,7 @@ class VisionOCREngine:
             with tempfile.TemporaryDirectory() as temp_dir:
                 # LibreOffice headless PDF export
                 cmd = [
-                    'libreoffice',
+                    'soffice',  # macOS LibreOffice command
                     '--headless',
                     '--convert-to', 'pdf',
                     '--outdir', temp_dir,
@@ -293,6 +310,52 @@ class VisionOCREngine:
         # Für jetzt nicht implementiert
         logger.warning("📄 Word → PDF Direktkonvertierung nicht implementiert")
         return None
+
+    async def _convert_word_via_python(self, file_path: Path, dpi: int = 300) -> List[bytes]:
+        """
+        Konvertiert Word-Dokumente zu Bildern mit Python-Bibliotheken.
+        Fallback-Methode wenn LibreOffice/win32 nicht verfügbar sind.
+        """
+        try:
+            logger.info(f"🔄 Konvertiere Word-Dokument via Python: {file_path.name}")
+            
+            # Versuche python-docx für DOCX-Dateien
+            if file_path.suffix.lower() == '.docx':
+                from docx import Document
+                from docx.shared import Inches
+                
+                doc = Document(str(file_path))
+                images = []
+                
+                # Für DOCX verwenden wir einen einfachen Ansatz
+                # Da python-docx keine direkte Bild-Konvertierung unterstützt,
+                # konvertieren wir zuerst zu PDF und dann zu Bildern
+                pdf_path = await self._convert_word_to_pdf(file_path)
+                if pdf_path and pdf_path.exists():
+                    images = await self._convert_pdf_to_images(pdf_path, dpi)
+                    # PDF-Temp-Datei löschen
+                    pdf_path.unlink(missing_ok=True)
+                
+                return images
+            
+            # Für .doc-Dateien verwenden wir PyMuPDF als Fallback
+            elif file_path.suffix.lower() == '.doc':
+                logger.warning("⚠️ .doc-Dateien werden über PDF-Konvertierung verarbeitet")
+                pdf_path = await self._convert_word_to_pdf(file_path)
+                if pdf_path and pdf_path.exists():
+                    images = await self._convert_pdf_to_images(pdf_path, dpi)
+                    pdf_path.unlink(missing_ok=True)
+                    return images
+            
+            logger.warning(f"⚠️ Nicht unterstütztes Word-Format: {file_path.suffix}")
+            return []
+            
+        except ImportError as e:
+            logger.error(f"❌ Python-Bibliothek nicht verfügbar: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"❌ Python-Konvertierung fehlgeschlagen: {e}")
+            return []
 
     async def analyze_document_with_vision(self, file_path: Path, extracted_images: List[bytes]) -> Dict[str, Any]:
         """
@@ -566,6 +629,109 @@ Kontext: {context}
         
         return base_prompt.strip()
 
+    async def analyze_images_with_vision(self, images: List[bytes], prompt: str) -> Dict[str, Any]:
+        """
+        Analysiert eine Liste von Bildern mit GPT-4 Vision und einem spezifischen Prompt.
+        
+        Args:
+            images: Liste von Bildern als bytes
+            prompt: Spezifischer Prompt für die Analyse
+            
+        Returns:
+            Dict mit Analyse-Ergebnissen
+        """
+        try:
+            logger.info(f"🔍 Analysiere {len(images)} Bilder mit Vision API")
+            
+            if not self.api_key:
+                return {
+                    'success': False,
+                    'error': 'OpenAI API Key nicht konfiguriert'
+                }
+            
+            results = []
+            total_tokens = 0
+            
+            for i, image_bytes in enumerate(images):
+                logger.info(f"📸 Verarbeite Bild {i+1}/{len(images)}")
+                
+                # Bild zu Base64 konvertieren
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                
+                # Vision-Analyse durchführen
+                result = await self._analyze_image_with_gpt4_vision(image_b64, prompt)
+                
+                if result['success']:
+                    results.append(result)
+                    total_tokens += result.get('tokens_used', 0)
+                else:
+                    logger.warning(f"⚠️ Bild {i+1} Analyse fehlgeschlagen: {result.get('error')}")
+            
+            if not results:
+                return {
+                    'success': False,
+                    'error': 'Keine Bilder erfolgreich analysiert'
+                }
+            
+            # Ergebnisse kombinieren
+            combined_analysis = self._combine_vision_results(results)
+            
+            return {
+                'success': True,
+                'analysis': combined_analysis,
+                'images_processed': len(images),
+                'tokens_used': total_tokens,
+                'individual_results': results
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Vision-Analyse fehlgeschlagen: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _combine_vision_results(self, results: List[Dict]) -> Dict:
+        """
+        Kombiniert mehrere Vision-Analyse-Ergebnisse zu einem konsistenten Format.
+        """
+        combined = {
+            'text': '',
+            'words': [],
+            'process_references': [],
+            'structured_analysis': {}
+        }
+        
+        for result in results:
+            # Text kombinieren
+            if result.get('extracted_text'):
+                combined['text'] += result['extracted_text'] + '\n\n'
+            elif result.get('description'):
+                combined['text'] += result['description'] + '\n\n'
+            
+            # Wörter aus Text extrahieren
+            import re
+            text_content = result.get('extracted_text', '') + ' ' + result.get('description', '')
+            if text_content:
+                words = re.findall(r'\b\w+\b', text_content)
+                combined['words'].extend(words)
+            
+            # Prozess-Referenzen sammeln
+            if result.get('process_references'):
+                combined['process_references'].extend(result['process_references'])
+            
+            # Strukturierte Analyse kombinieren
+            if result.get('process_flow'):
+                combined['structured_analysis']['process_flow'] = result.get('process_flow', [])
+            if result.get('document_title'):
+                combined['structured_analysis']['document_title'] = result.get('document_title', '')
+        
+        # Duplikate entfernen
+        combined['words'] = list(set(combined['words']))
+        combined['process_references'] = list(set(combined['process_references']))
+        
+        return combined
+
 
 async def extract_text_with_vision(file_path: str) -> Dict[str, Any]:
     """
@@ -592,12 +758,12 @@ async def extract_text_with_vision(file_path: str) -> Dict[str, Any]:
     
     # Erst Enhanced OCR für Bildextraktion
     try:
-        from .enhanced_ocr_engine import extract_enhanced_text
+        # from .enhanced_ocr_engine import extract_enhanced_text  # Temporarily disabled
         
         logger.info(f"🔍 Starte kombinierte Vision + Enhanced OCR für {file_path_obj.name}")
         
         # Enhanced OCR für Grundextraktion
-        enhanced_result = await extract_enhanced_text(file_path_obj, mime_type)
+        # enhanced_result = await extract_enhanced_text(file_path_obj, mime_type)  # Temporarily disabled
         
         if enhanced_result['success'] and enhanced_result.get('images_processed', 0) > 0:
             # Vision-Analyse der gefundenen Bilder

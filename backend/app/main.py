@@ -114,6 +114,7 @@ from dotenv import load_dotenv
 import os
 import hashlib
 import aiofiles
+import base64
 from pathlib import Path
 import mimetypes
 from datetime import datetime, timedelta
@@ -412,7 +413,6 @@ async def save_uploaded_file(file: UploadFile, document_type: str) -> FileUpload
         mime_type=mime_type,
         uploaded_at=datetime.utcnow()
     )
-
 def extract_smart_title_and_description(text: str, filename: str) -> tuple[str, str]:
     """
     Extrahiert intelligenten Titel und Beschreibung aus Dokumenttext mit KI-Logik.
@@ -894,7 +894,6 @@ async def get_current_user_info(
         groups=user_groups,
         permissions=user_permissions
     )
-
 @app.post("/api/auth/logout", response_model=dict, tags=["Authentication"])
 async def logout():
     """
@@ -1367,7 +1366,6 @@ async def get_users(
                 user.individual_permissions = []
     
     return users
-
 @app.get("/api/users/{user_id}", response_model=User, tags=["Users"])
 async def get_user(user_id: int, db: Session = Depends(get_db)):
     """
@@ -2394,6 +2392,224 @@ async def get_document(document_id: int, db: Session = Depends(get_db)):
         )
     return document
 
+# === DOKUMENT-VORSCHAU ENDPOINT ===
+
+@app.post("/api/documents/preview", tags=["Documents"])
+async def preview_document_processing(
+    upload_method: str = Form("ocr"),
+    document_type: str = Form("OTHER"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Vorschau der Dokumentverarbeitung ohne finale Speicherung.
+    
+    Zeigt die Ergebnisse der OCR- oder Visio-Verarbeitung zur Überprüfung
+    vor der finalen Freigabe und Indexierung.
+    
+    Args:
+        upload_method: Verarbeitungsmethode - "ocr" oder "visio"
+        document_type: Dokumenttyp für kontextspezifische Verarbeitung
+        file: Upload-Datei
+        
+    Returns:
+        Vorschau-Daten je nach Methode:
+        - OCR: Extrahierter Text, erkannte Metadaten
+        - Visio: Bilder, Wortliste, strukturierte Analyse, Validierung
+    """
+    try:
+        upload_logger.info(f"👁️ Dokument-Vorschau: method={upload_method}, type={document_type}, file={file.filename}")
+        
+        # Validiere Upload-Methode
+        if upload_method not in ['ocr', 'visio']:
+            raise HTTPException(status_code=400, detail=f"Ungültige Upload-Methode: {upload_method}")
+        
+        # Temporäre Datei speichern
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_path = Path(tmp_file.name)
+        
+        try:
+            if upload_method == "ocr":
+                # === OCR-VORSCHAU ===
+                # Text extrahieren
+                mime_type = file.content_type or "application/octet-stream"
+                extracted_text = extract_text_from_file(tmp_path, mime_type)
+                
+                # Bei wenig Text: Vision OCR Fallback
+                if len(extracted_text.strip()) < 100:
+                    try:
+                        from .vision_ocr_engine import VisionOCREngine
+                        vision_engine = VisionOCREngine()
+                        
+                        images = await vision_engine.convert_document_to_images(tmp_path)
+                        if images:
+                            ocr_results = await vision_engine.analyze_images_with_vision(
+                                images, 
+                                "Extrahiere den gesamten Text aus diesem Dokument. Behalte die Struktur bei."
+                            )
+                            if ocr_results and ocr_results.get('success'):
+                                extracted_text = ocr_results.get('content', '')
+                    except Exception as e:
+                        upload_logger.warning(f"Vision OCR Fallback fehlgeschlagen: {e}")
+                
+                # Metadaten extrahieren (vereinfacht für Vorschau)
+                preview_metadata = {
+                    "text_length": len(extracted_text),
+                    "estimated_pages": len(extracted_text) // 3000 + 1,
+                    "has_content": len(extracted_text.strip()) > 50,
+                    "preview_text": extracted_text[:2000] + "..." if len(extracted_text) > 2000 else extracted_text
+                }
+                
+                # Kapitel und Abschnitte erkennen
+                chapters = re.findall(r'^\d+\.?\d*\s+[A-Z].*$', extracted_text, re.MULTILINE)
+                if chapters:
+                    preview_metadata["detected_chapters"] = chapters[:10]  # Erste 10 Kapitel
+                
+                return {
+                    "upload_method": "ocr",
+                    "success": True,
+                    "extracted_text": extracted_text,
+                    "metadata": preview_metadata,
+                    "message": "OCR-Verarbeitung erfolgreich. Bitte überprüfen Sie den extrahierten Text."
+                }
+                
+            else:  # visio
+                # === VISIO-VORSCHAU ===
+                from .vision_ocr_engine import VisionOCREngine
+                from .visio_prompts import visio_prompts_manager
+                
+                vision_engine = VisionOCREngine()
+                
+                # 1. Prompts laden
+                prompt1, prompt2 = visio_prompts_manager.get_prompts(document_type)
+                
+                # 2. Zu Bildern konvertieren
+                # Prüfe OpenAI API Key
+                if not vision_engine.api_key:
+                    logger.error("❌ OpenAI API Key nicht konfiguriert")
+                    raise HTTPException(
+                        status_code=500, 
+                        detail="OpenAI API Key nicht konfiguriert. Bitte setzen Sie die Umgebungsvariable OPENAI_API_KEY."
+                    )
+                
+                images = await vision_engine.convert_document_to_images(tmp_path)
+                if not images:
+                    raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
+                
+                # Erste Seite als Base64 für Vorschau
+                preview_image = None
+                if images:
+                    preview_image = base64.b64encode(images[0]).decode('utf-8')
+                
+                # 3. Wortliste extrahieren
+                # Wortlisten-Extraktion
+                logger.info(f"🔍 Starte Wortlisten-Extraktion mit {len(images)} Bildern")
+                
+                word_result = await vision_engine.analyze_images_with_vision(images, prompt1)
+                logger.info(f"📊 Wortlisten-Ergebnis: {word_result}")
+                
+                if not word_result.get('success'):
+                    error_msg = word_result.get('error', 'Unbekannter Fehler')
+                    logger.error(f"❌ Wortlisten-Extraktion fehlgeschlagen: {error_msg}")
+                    raise HTTPException(status_code=500, detail=f"Wortlisten-Extraktion fehlgeschlagen: {error_msg}")
+                
+                # Extrahiere Wörter aus dem analysis-Objekt
+                analysis = word_result.get('analysis', {})
+                word_list = analysis.get('words', [])
+                if not word_list and analysis.get('text'):
+                    # Fallback: Wörter aus Text extrahieren
+                    import re
+                    word_list = re.findall(r'\b\w+\b', analysis.get('text', ''))
+                word_list = sorted(set(word.strip() for word in word_list if word.strip()))
+                
+                # 4. Strukturierte Analyse
+                analysis_result = await vision_engine.analyze_images_with_vision(images, prompt2)
+                if not analysis_result.get('success'):
+                    raise HTTPException(status_code=500, detail="Strukturierte Analyse fehlgeschlagen")
+                
+                # JSON parsen - aus dem analysis-Objekt
+                structured_data = {}
+                analysis = analysis_result.get('analysis', {})
+                structured_analysis = analysis.get('structured_analysis', {})
+                
+                if structured_analysis:
+                    structured_data = structured_analysis
+                else:
+                    # Fallback: Versuche JSON aus Text zu parsen
+                    try:
+                        text_content = analysis.get('text', '')
+                        if text_content:
+                            structured_data = json.loads(text_content)
+                    except json.JSONDecodeError:
+                        structured_data = {"error": "JSON-Parsing fehlgeschlagen", "raw": text_content}
+                
+                # 5. Validierung
+                json_words = set()
+                def extract_words_from_json(obj, words_set):
+                    if isinstance(obj, dict):
+                        for value in obj.values():
+                            extract_words_from_json(value, words_set)
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            extract_words_from_json(item, words_set)
+                    elif isinstance(obj, str):
+                        words = re.findall(r'\b\w+\b', obj)
+                        words_set.update(word.lower() for word in words)
+                
+                extract_words_from_json(structured_data, json_words)
+                
+                word_list_lower = set(word.lower() for word in word_list)
+                missing_words = json_words - word_list_lower
+                coverage = (len(json_words - missing_words) / len(json_words) * 100) if json_words else 0
+                
+                validation_status = "VERIFIED" if coverage >= 95 else "REVIEW_REQUIRED"
+                
+                return {
+                    "upload_method": "visio",
+                    "success": True,
+                    "preview_image": preview_image,
+                    "page_count": len(images),
+                    "word_list": word_list[:100],  # Erste 100 Wörter für Vorschau
+                    "word_count": len(word_list),
+                    "structured_analysis": structured_data,
+                    "validation": {
+                        "status": validation_status,
+                        "coverage": coverage,
+                        "missing_words": list(missing_words)[:20],  # Erste 20 fehlende Wörter
+                        "total_missing": len(missing_words)
+                    },
+                    "workflow_steps": {
+                        "step1_word_extraction": {
+                            "prompt": prompt1,
+                            "result": str(word_result.get('analysis', {})),
+                            "status": "completed" if word_result.get('success') else "failed"
+                        },
+                        "step2_structured_analysis": {
+                            "prompt": prompt2,
+                            "result": str(analysis_result.get('analysis', {})),
+                            "status": "completed" if analysis_result.get('success') else "failed"
+                        }
+                    },
+                    "prompts": {
+                        "word_extraction": prompt1[:200] + "...",  # Gekürzt für Vorschau
+                        "analysis": prompt2[:200] + "..."
+                    },
+                    "message": f"Visio-Analyse abgeschlossen. Validierung: {validation_status} ({coverage:.1f}% Abdeckung)"
+                }
+                
+        finally:
+            # Temporäre Datei löschen
+            tmp_path.unlink(missing_ok=True)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        upload_logger.error(f"❌ Vorschau-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=f"Vorschau-Verarbeitung fehlgeschlagen: {str(e)}")
+
 # === DATEI-UPLOAD ENDPUNKTE ===
 
 @app.post("/api/files/upload", response_model=FileUploadResponse, tags=["File Upload"])
@@ -2433,6 +2649,7 @@ async def create_document_with_file(
     chapter_numbers: Optional[str] = Form(None),
     ai_model: Optional[str] = Form("auto"),
     enable_debug: Optional[str] = Form("false"),
+    upload_method: str = Form("ocr"),  # NEU: Upload-Methode (ocr oder visio)
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2444,6 +2661,7 @@ async def create_document_with_file(
     - 📊 **Umfassende Metadaten-Extraktion** (Keywords, Compliance-Indikatoren, etc.)
     - 🎯 **Automatische Titel/Beschreibung** falls nicht angegeben
     - 🔍 **Content-Analyse** für bessere Kategorisierung
+    - 🔀 **Zwei Upload-Methoden**: OCR (textbasiert) oder Visio (bildbasiert)
     
     Args:
         title: Dokumenttitel (optional - wird automatisch extrahiert)
@@ -2453,6 +2671,7 @@ async def create_document_with_file(
         content: Beschreibung (optional - wird automatisch extrahiert)
         remarks: Bemerkungen
         chapter_numbers: Relevante Normkapitel (z.B. "4.2.3, 7.5.1")
+        upload_method: Verarbeitungsmethode - "ocr" oder "visio" (Standard: "ocr")
         file: Upload-Datei (PDF, DOCX, XLSX, TXT)
         db: Datenbankverbindung
         
@@ -2482,13 +2701,21 @@ async def create_document_with_file(
         ```
     """
     try:
-        upload_logger.info(f"🔄 Document Upload gestartet: creator_id={creator_id}, type={document_type}, file={file.filename if file else 'None'}")
+        upload_logger.info(f"🔄 Document Upload gestartet: creator_id={creator_id}, type={document_type}, method={upload_method}, file={file.filename if file else 'None'}")
         start_time = time.time()
+        
+        # Validiere Upload-Methode
+        if upload_method not in ['ocr', 'visio']:
+            raise HTTPException(status_code=400, detail=f"Ungültige Upload-Methode: {upload_method}. Erlaubt: ocr, visio")
         
         # 1. Datei-Upload verarbeiten (falls vorhanden)
         file_data = None
         extracted_text = ""
         metadata = {}
+        validation_status = None
+        structured_analysis = None
+        prompt_used = None
+        ocr_text_preview = None
         
         if file:
             # Datei speichern
@@ -2496,14 +2723,132 @@ async def create_document_with_file(
             # FileUploadResponse hat kein success Attribut - es wird nur bei Erfolg zurückgegeben
             file_data = upload_result
             
-            # Text extrahieren
-            extracted_text = extract_text_from_file(
-                Path(upload_result.file_path), 
-                upload_result.mime_type
-            )
+            # Je nach Upload-Methode verarbeiten
+            if upload_method == "ocr":
+                # === OCR-METHODE: Textbasierte Verarbeitung ===
+                upload_logger.info("📄 OCR-Methode gewählt - Textextraktion")
+                
+                # Text extrahieren
+                extracted_text = extract_text_from_file(
+                    Path(upload_result.file_path), 
+                    upload_result.mime_type
+                )
+                
+                # Bei wenig Text: OCR-Fallback aktivieren
+                if len(extracted_text.strip()) < 100:
+                    upload_logger.warning("⚠️ Wenig Text extrahiert - verwende Vision OCR als Fallback")
+                    try:
+                        from .vision_ocr_engine import VisionOCREngine
+                        vision_engine = VisionOCREngine()
+                        
+                        # Konvertiere zu Bildern und extrahiere Text
+                        images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
+                        if images:
+                            ocr_results = await vision_engine.analyze_images_with_vision(
+                                images, 
+                                "Extrahiere den gesamten Text aus diesem Dokument. Behalte die Struktur bei."
+                            )
+                            if ocr_results and ocr_results.get('success'):
+                                extracted_text = ocr_results.get('content', '')
+                                upload_logger.info(f"✅ Vision OCR erfolgreich: {len(extracted_text)} Zeichen extrahiert")
+                    except Exception as ocr_error:
+                        upload_logger.error(f"❌ Vision OCR Fallback fehlgeschlagen: {ocr_error}")
+                
+                # OCR-Text-Vorschau speichern (erste 2000 Zeichen)
+                ocr_text_preview = extracted_text[:2000] + "..." if len(extracted_text) > 2000 else extracted_text
+                
+            else:  # upload_method == "visio"
+                # === VISIO-METHODE: Bildbasierte Verarbeitung ===
+                upload_logger.info("🖼️ Visio-Methode gewählt - Bildanalyse")
+                
+                try:
+                    from .vision_ocr_engine import VisionOCREngine
+                    from .visio_prompts import visio_prompts_manager
+                    
+                    vision_engine = VisionOCREngine()
+                    
+                    # 1. Prompts für Dokumenttyp laden
+                    prompt1, prompt2 = visio_prompts_manager.get_prompts(document_type or "OTHER")
+                    prompt_used = f"Prompt 1:\n{prompt1}\n\nPrompt 2:\n{prompt2}"
+                    
+                    # 2. Dokument zu Bildern konvertieren
+                    images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
+                    if not images:
+                        raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
+                    
+                    upload_logger.info(f"📸 {len(images)} Bilder erstellt")
+                    
+                    # 3. Wortliste extrahieren (Prompt 1)
+                    word_result = await vision_engine.analyze_images_with_vision(images, prompt1)
+                    if not word_result.get('success'):
+                        raise HTTPException(status_code=500, detail="Wortlisten-Extraktion fehlgeschlagen")
+                    
+                    # Wortliste verarbeiten
+                    word_list = word_result.get('content', '').strip().split('\n')
+                    word_list = sorted(set(word.strip() for word in word_list if word.strip()))
+                    upload_logger.info(f"📝 {len(word_list)} eindeutige Wörter extrahiert")
+                    
+                    # 4. Strukturierte Analyse (Prompt 2)
+                    analysis_result = await vision_engine.analyze_images_with_vision(images, prompt2)
+                    if not analysis_result.get('success'):
+                        raise HTTPException(status_code=500, detail="Strukturierte Analyse fehlgeschlagen")
+                    
+                    # JSON parsen
+                    try:
+                        structured_data = json.loads(analysis_result.get('content', '{}'))
+                        structured_analysis = json.dumps(structured_data, ensure_ascii=False, indent=2)
+                    except json.JSONDecodeError:
+                        structured_analysis = analysis_result.get('content', '')
+                        upload_logger.warning("⚠️ Strukturierte Analyse ist kein valides JSON")
+                    
+                    # 5. Wortliste mit JSON-Inhalt vergleichen
+                    # Extrahiere alle Wörter aus dem JSON
+                    json_words = set()
+                    def extract_words_from_json(obj, words_set):
+                        if isinstance(obj, dict):
+                            for value in obj.values():
+                                extract_words_from_json(value, words_set)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                extract_words_from_json(item, words_set)
+                        elif isinstance(obj, str):
+                            # Einfache Wort-Extraktion
+                            words = re.findall(r'\b\w+\b', obj)
+                            words_set.update(word.lower() for word in words)
+                    
+                    extract_words_from_json(structured_data if 'structured_data' in locals() else {}, json_words)
+                    
+                    # Vergleich durchführen
+                    word_list_lower = set(word.lower() for word in word_list)
+                    missing_words = json_words - word_list_lower
+                    coverage = (len(json_words - missing_words) / len(json_words) * 100) if json_words else 0
+                    
+                    upload_logger.info(f"📊 Wortabdeckung: {coverage:.1f}% ({len(json_words - missing_words)}/{len(json_words)} Wörter)")
+                    
+                    # Validierungsstatus setzen
+                    if coverage >= 95:
+                        validation_status = "VERIFIED"
+                        upload_logger.info("✅ Validierung erfolgreich: VERIFIED")
+                    else:
+                        validation_status = "REVIEW_REQUIRED"
+                        upload_logger.warning(f"⚠️ Validierung fehlgeschlagen: Nur {coverage:.1f}% Abdeckung")
+                        
+                        # Fehlende Wörter dokumentieren
+                        if missing_words:
+                            missing_info = f"\n\nFehlende Wörter ({len(missing_words)}): {', '.join(sorted(missing_words)[:20])}"
+                            if len(missing_words) > 20:
+                                missing_info += f" ... und {len(missing_words) - 20} weitere"
+                            structured_analysis += missing_info
+                    
+                    # Extrahierten Text aus Wortliste generieren (für RAG)
+                    extracted_text = ' '.join(word_list)
+                    
+                except Exception as visio_error:
+                    upload_logger.error(f"❌ Visio-Verarbeitung fehlgeschlagen: {visio_error}")
+                    raise HTTPException(status_code=500, detail=f"Visio-Verarbeitung fehlgeschlagen: {str(visio_error)}")
             
-            # 🚀 ENHANCED SCHEMA METADATEN-EXTRAKTION (Enterprise Grade v3.1.0)
-            if ENHANCED_AI_AVAILABLE:
+            # 🚀 ENHANCED SCHEMA METADATEN-EXTRAKTION (für beide Methoden)
+            if ENHANCED_AI_AVAILABLE and extracted_text:
                 upload_logger.info(f"🎯 Enhanced Schema Metadaten-Extraktion mit {ai_model}")
                 
                 try:
@@ -2552,16 +2897,6 @@ async def create_document_with_file(
                         preferred_provider=ai_model or "auto",
                         enable_debug=enable_debug.lower() == "true" if enable_debug else False
                     )
-            else:
-                # Fallback falls Enhanced Schema nicht verfügbar
-                upload_logger.info(f"🔄 Fallback zu Legacy AI-Engine (Enhanced Schema nicht verfügbar)")
-                from .ai_engine import ai_engine
-                ai_result = await ai_engine.ai_enhanced_analysis_with_provider(
-                    text=extracted_text,
-                    document_type=document_type or "unknown",
-                    preferred_provider=ai_model or "auto",
-                    enable_debug=enable_debug.lower() == "true" if enable_debug else False
-                )
             
             # Legacy-Format für Rückwärtskompatibilität erstellen
             legacy_result = type('AIResult', (), {
@@ -2659,6 +2994,13 @@ async def create_document_with_file(
             extracted_text=extracted_text,
             keywords=", ".join(legacy_result.extracted_keywords),
             
+            # NEU: Upload-Methoden-Felder
+            upload_method=upload_method,
+            validation_status=validation_status,
+            structured_analysis=structured_analysis,
+            prompt_used=prompt_used,
+            ocr_text_preview=ocr_text_preview,
+            
             # KI-Enhanced Metadaten-Felder
             compliance_status="ZU_BEWERTEN",
             priority=legacy_result.risk_level,
@@ -2666,7 +3008,6 @@ async def create_document_with_file(
             # Zusätzliche KI-Metadaten (als JSON-String in bestehenden Feldern)
             remarks=f"{remarks or ''}\n\n🤖 KI-Analyse ({ai_result.get('provider', 'unknown')}):\n- Sprache: {detected_lang} ({lang_confidence:.1%})\n- Qualität: {legacy_result.content_quality_score:.1%}\n- Komplexität: {legacy_result.complexity_score}/10\n- Compliance-Keywords: {', '.join(legacy_result.compliance_keywords[:5])}"
         )
-        
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
@@ -3126,7 +3467,6 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Fehler beim Löschen des Dokuments: {str(e)}"
         )
-
 @app.get("/api/documents/by-type/{document_type}", response_model=List[Document], tags=["Documents"])
 async def get_documents_by_type(document_type: DocumentType, db: Session = Depends(get_db)):
     """
@@ -3613,7 +3953,6 @@ async def delete_norm(norm_id: int, db: Session = Depends(get_db)):
         message=f"Norm '{norm_name}' wurde erfolgreich gelöscht",
         success=True
     )
-
 # === EQUIPMENT API ===
 
 @app.get("/api/equipment", response_model=List[Equipment], tags=["Equipment"])
@@ -4110,7 +4449,6 @@ async def get_calibration(calibration_id: int, db: Session = Depends(get_db)):
             detail=f"Kalibrierung mit ID {calibration_id} nicht gefunden"
         )
     return calibration
-
 @app.post("/api/calibrations", response_model=Calibration, tags=["Calibrations"])
 async def create_calibration(calibration: CalibrationCreate, db: Session = Depends(get_db)):
     """
@@ -5519,7 +5857,6 @@ async def compare_documents_similarity(
         },
         "comparison_timestamp": datetime.utcnow().isoformat()
     }
-
 def _generate_ai_recommendations(ai_result, document) -> List[Dict[str, str]]:
     """Generiert Empfehlungen basierend auf KI-Analyse"""
     recommendations = []
@@ -6007,7 +6344,6 @@ async def get_free_providers_status():
             "status": "error",
             "message": f"Fehler beim Prüfen der Provider-Status: {str(e)}"
         }
-
 def _generate_free_ai_recommendations(ai_result: dict, text: str) -> List[Dict[str, str]]:
     """Generiert Verbesserungsempfehlungen basierend auf kostenloser KI-Analyse"""
     recommendations = []
@@ -6506,7 +6842,6 @@ async def simple_ai_prompt_test(
             "processing_time_seconds": round(processing_time, 2),
             "timestamp": datetime.utcnow().isoformat()
         }
-
 # === RAG-SYSTEM ENDPOINTS ===
 
 @app.get("/api/rag/status", tags=["RAG System"])
@@ -7269,7 +7604,6 @@ else:
             "message": "Advanced AI System nicht geladen",
             "reason": "Import-Fehler oder fehlende Dependencies"
         }
-
 # === PROVIDER-AUSWAHL UND TEST-ENDPOINTS ===
 
 @app.get("/api/ai-providers/details", response_model=Dict[str, Any])
