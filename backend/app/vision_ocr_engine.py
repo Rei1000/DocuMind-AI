@@ -490,6 +490,58 @@ class VisionOCREngine:
                 descriptions.append(desc)
         
         return "\n\n".join(descriptions)
+    
+    async def analyze_image_with_prompt(self, image_data: bytes, prompt: str, max_tokens: int = 2000) -> Optional[str]:
+        """
+        Analysiert ein Bild mit einem benutzerdefinierten Prompt
+        
+        Args:
+            image_data: Bilddaten als bytes
+            prompt: Der zu verwendende Prompt
+            max_tokens: Maximale Anzahl Tokens für die Antwort
+            
+        Returns:
+            Die Antwort als String oder None bei Fehler
+        """
+        try:
+            if not self.client:
+                logger.error("❌ OpenAI Client nicht initialisiert")
+                return None
+            
+            # Bild zu Base64 konvertieren
+            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            
+            # API-Aufruf mit benutzerdefiniertem Prompt
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_b64}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=max_tokens,
+                temperature=0  # Deterministisch für konsistente Ergebnisse
+            )
+            
+            # Extrahiere Antwort
+            content = response.choices[0].message.content
+            
+            logger.info(f"✅ Vision-Analyse mit benutzerdefiniertem Prompt abgeschlossen")
+            return content
+            
+        except Exception as e:
+            logger.error(f"❌ Vision API Fehler mit benutzerdefiniertem Prompt: {e}")
+            return None
 
     def _create_vision_prompt(self, context: str) -> str:
         """Erstellt optimierte Vision-Prompts für QM-Flussdiagramme"""

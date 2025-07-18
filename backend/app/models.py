@@ -322,6 +322,16 @@ class Document(Base):
     status_changed_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der letzten Status-Änderung")
     status_comment = Column(Text, comment="Kommentar zur Status-Änderung")
     
+    # === VISIO UPLOAD FIELDS ===
+    upload_method = Column(String(20), default="ocr", comment="Upload-Methode: ocr oder visio")
+    validation_status = Column(String(50), default="PENDING", comment="Validierungsstatus: PENDING/VERIFIED/REVIEW_REQUIRED")
+    structured_analysis = Column(Text, comment="JSON-strukturierte Analyse aus Visio-Verarbeitung")
+    processing_state = Column(String(50), default="UPLOADED", comment="Verarbeitungszustand: UPLOADED/PNG_GENERATED/PROMPTED/VALIDATED/RELEASED")
+    vision_results = Column(Text, comment="Vision-API Ergebnisse als JSON")
+    used_prompts = Column(Text, comment="Verwendete Prompts für Nachvollziehbarkeit")
+    qm_release_at = Column(DateTime, comment="Zeitpunkt der QM-Freigabe")
+    qm_release_by_id = Column(Integer, ForeignKey("users.id"), comment="QM-Manager der die Freigabe erteilt hat")
+    
     # Metadata
     creator_id = Column(Integer, ForeignKey("users.id"), comment="Ersteller des Dokuments (User.id)")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der Erstellung")
@@ -332,6 +342,7 @@ class Document(Base):
     reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
     status_changed_by = relationship("User", foreign_keys=[status_changed_by_id])
+    qm_release_by = relationship("User", foreign_keys=[qm_release_by_id])
     parent_document = relationship("Document", remote_side=[id], back_populates="child_documents")
     child_documents = relationship("Document", back_populates="parent_document")
     norm_mappings = relationship("DocumentNormMapping", back_populates="document")

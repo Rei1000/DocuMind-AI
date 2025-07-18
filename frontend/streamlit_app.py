@@ -152,7 +152,8 @@ def upload_document_with_file(
     version: str = "1.0",
     content: Optional[str] = None,
     remarks: Optional[str] = None,
-    chapter_numbers: Optional[str] = None
+    chapter_numbers: Optional[str] = None,
+    upload_method: str = "ocr"
 ) -> Optional[Dict]:
     """
     Lädt ein Dokument mit Datei hoch - ZUVERLÄSSIG!
@@ -168,7 +169,8 @@ def upload_document_with_file(
         # Form-Daten vorbereiten
         form_data = {
             "creator_id": str(creator_id),
-            "version": version
+            "version": version,
+            "upload_method": upload_method  # NEU: Upload-Methode
         }
         
         # document_type NUR setzen wenn nicht leer (Backend hat Default "OTHER")
@@ -947,6 +949,7 @@ def render_sidebar():
         "📋 QM-Workflow": "workflow",
         "📤 Upload": "upload",
         "📚 Dokumente": "documents",
+        "🖼️ Visio-Verarbeitung": "visio_processing",
         "🤖 KI-Analyse": "ai_analysis",
         "🚀 AI Test": "ai_prompt_test",
         "💬 RAG-Chat": "rag_chat",
@@ -1124,6 +1127,16 @@ def render_upload_page():
                 help="Der Dokumenttyp wird automatisch gesetzt falls nicht ausgewählt"
             )
             
+            # Upload-Methode Auswahl
+            upload_method = st.radio(
+                "Upload-Methode",
+                options=["ocr", "visio"],
+                format_func=lambda x: "📝 Text-basiert (OCR)" if x == "ocr" else "🖼️ Bild-basiert (Visio)",
+                index=0,
+                help="OCR: Für normale Textdokumente | Visio: Für Flussdiagramme, SOPs mit Bildern",
+                horizontal=True
+            )
+            
             version = st.text_input("Version", value="1.0", help="Standardwert: 1.0")
         
         with col2:
@@ -1168,7 +1181,8 @@ def render_upload_page():
                         version=version,
                         content=content,
                         remarks=remarks,
-                        chapter_numbers=chapter_numbers
+                        chapter_numbers=chapter_numbers,
+                        upload_method=upload_method
                     )
                     
                     if result:
@@ -3928,6 +3942,166 @@ def get_interest_groups() -> List[Dict]:
         print(f"❌ Interest Groups Fehler: {e}")
         return []
 
+def render_visio_processing_page():
+    """Rendert die Visio-Verarbeitungsseite mit schrittweiser Vorschau"""
+    st.markdown("## 🖼️ Visio-Dokument Verarbeitung")
+    
+    if not check_backend_status():
+        st.error("❌ Backend nicht erreichbar!")
+        return
+    
+    # Lade Visio-Dokumente
+    documents = get_documents()
+    visio_docs = [doc for doc in documents if doc.get("upload_method") == "visio"]
+    
+    if not visio_docs:
+        st.info("📭 Keine Visio-Dokumente gefunden. Laden Sie ein Dokument mit Upload-Methode 'Visio' hoch.")
+        return
+    
+    # Dokument-Auswahl
+    doc_options = {doc['id']: f"{doc['title']} (ID: {doc['id']})" for doc in visio_docs}
+    selected_doc_id = st.selectbox(
+        "Dokument auswählen",
+        options=list(doc_options.keys()),
+        format_func=lambda x: doc_options[x]
+    )
+    
+    if selected_doc_id:
+        # Hole Visio-Status
+        response = requests.get(
+            f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-status",
+            headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+            timeout=REQUEST_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            status_data = response.json()
+            
+            # Status-Anzeige
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Verarbeitungsstatus", status_data.get("processing_state", "UNBEKANNT"))
+            with col2:
+                st.metric("Validierungsstatus", status_data.get("validation_status", "PENDING"))
+            with col3:
+                coverage = status_data.get("validation_coverage", 0)
+                st.metric("Validierungs-Abdeckung", f"{coverage:.1%}")
+            
+            st.markdown("---")
+            
+            # Schrittweise Vorschau-Module
+            vision_results = status_data.get("vision_results", {})
+            
+            # 1. PNG-Vorschau
+            if status_data.get("has_preview"):
+                with st.expander("📸 PNG-Vorschau", expanded=True):
+                    # Hole PNG-Bild
+                    preview_response = requests.get(
+                        f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-preview",
+                        headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                        timeout=REQUEST_TIMEOUT
+                    )
+                    
+                    if preview_response.status_code == 200:
+                        st.image(preview_response.content, caption="Erste Seite des Dokuments", use_column_width=True)
+                    else:
+                        st.error("PNG-Vorschau konnte nicht geladen werden")
+            
+            # 2. Verwendete Prompts
+            if vision_results.get("word_count", 0) > 0:
+                with st.expander("🤖 Verwendete Prompts"):
+                    # Hole Prompts
+                    prompts_response = requests.get(
+                        f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-prompts",
+                        headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                        timeout=REQUEST_TIMEOUT
+                    )
+                    
+                    if prompts_response.status_code == 200:
+                        prompts_data = prompts_response.json()
+                        
+                        if "visio_words" in prompts_data.get("full_prompts", {}):
+                            st.markdown("**📝 Wort-Extraktions-Prompt:**")
+                            st.code(prompts_data["full_prompts"]["visio_words"][:500] + "...", language="text")
+                        
+                        if "visio_analysis" in prompts_data.get("full_prompts", {}):
+                            st.markdown("**🔍 Analyse-Prompt:**")
+                            st.code(prompts_data["full_prompts"]["visio_analysis"][:500] + "...", language="text")
+            
+            # 3. Analyse-JSON
+            if status_data.get("processing_state") in ["ANALYSIS_COMPLETE", "VALIDATED", "QM_APPROVED", "INDEXED"]:
+                with st.expander("📊 Strukturierte Analyse"):
+                    # Hole Analyse
+                    analysis_response = requests.get(
+                        f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-analysis",
+                        headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                        timeout=REQUEST_TIMEOUT
+                    )
+                    
+                    if analysis_response.status_code == 200:
+                        analysis_data = analysis_response.json()
+                        st.json(analysis_data.get("structured_analysis", {}))
+            
+            # 4. Verifikationsliste
+            if status_data.get("processing_state") in ["VALIDATED", "QM_APPROVED", "INDEXED"]:
+                with st.expander("✔️ Verifikation"):
+                    coverage = vision_results.get("validation_coverage", 0)
+                    
+                    if coverage >= 0.95:
+                        st.success(f"✅ Validierung erfolgreich: {coverage:.1%} Abdeckung")
+                    else:
+                        st.warning(f"⚠️ Review erforderlich: {coverage:.1%} Abdeckung")
+                    
+                    missing_words = vision_results.get("missing_words", [])
+                    if missing_words:
+                        st.markdown("**Fehlende Wörter:**")
+                        st.write(", ".join(missing_words[:20]))
+                        if len(missing_words) > 20:
+                            st.write(f"... und {len(missing_words) - 20} weitere")
+            
+            # 5. QM-Freigabe
+            st.markdown("---")
+            
+            if status_data.get("qm_released"):
+                st.success(f"✅ QM-Freigabe erteilt von {status_data.get('qm_release_by')} am {status_data.get('qm_release_at')}")
+            else:
+                # QM-Freigabe Buttons
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if status_data.get("processing_state") == "VALIDATED":
+                        if st.button("✅ QM-Freigabe erteilen", use_container_width=True, type="primary"):
+                            # QM-Freigabe API-Call
+                            release_response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-qm-release",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT
+                            )
+                            
+                            if release_response.status_code == 200:
+                                st.success("✅ QM-Freigabe erteilt! RAG-Indexierung wurde gestartet.")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Freigabe fehlgeschlagen: {release_response.text}")
+                
+                with col2:
+                    if status_data.get("processing_state") == "ERROR":
+                        if st.button("🔄 Verarbeitung neu starten", use_container_width=True):
+                            # Restart API-Call
+                            restart_response = requests.post(
+                                f"{API_BASE_URL}/api/documents/{selected_doc_id}/visio-restart",
+                                headers={"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"},
+                                timeout=REQUEST_TIMEOUT
+                            )
+                            
+                            if restart_response.status_code == 200:
+                                st.success("🔄 Verarbeitung neu gestartet!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Neustart fehlgeschlagen: {restart_response.text}")
+        else:
+            st.error(f"❌ Fehler beim Laden des Visio-Status: {response.status_code}")
+
 # ===== MAIN APP =====
 def main():
     """Hauptfunktion der App"""
@@ -3944,6 +4118,8 @@ def main():
         render_upload_page()
     elif current_page == "documents":
         render_documents_page()
+    elif current_page == "visio_processing":
+        render_visio_processing_page()
     elif current_page == "ai_analysis":
         render_ai_analysis_page()
     elif current_page == "ai_prompt_test":

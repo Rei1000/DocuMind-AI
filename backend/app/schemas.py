@@ -376,6 +376,14 @@ class DocumentBase(BaseModel):
     priority: Optional[str] = Field(None, max_length=20)
     scope: Optional[str] = Field(None, max_length=1000)
     
+    # === VISIO UPLOAD FELDER ===
+    upload_method: Optional[str] = Field("ocr", max_length=20)
+    validation_status: Optional[str] = Field("PENDING", max_length=50)
+    structured_analysis: Optional[str] = Field(None)
+    processing_state: Optional[str] = Field("UPLOADED", max_length=50)
+    vision_results: Optional[str] = Field(None)
+    used_prompts: Optional[str] = Field(None)
+    
     @field_validator('version')
     @classmethod
     def validate_version(cls, v):
@@ -456,10 +464,15 @@ class Document(DocumentBase):
     approved_by_id: Optional[int] = None
     approved_at: Optional[datetime] = None
     
+    # === VISIO QM-FREIGABE ===
+    qm_release_at: Optional[datetime] = None
+    qm_release_by_id: Optional[int] = None
+    
     # === RELATIONSHIPS ===
     creator: Optional[User] = None
     reviewed_by: Optional[User] = None
     approved_by: Optional[User] = None
+    qm_release_by: Optional[User] = None
     parent_document: Optional['Document'] = None
     
     model_config = ConfigDict(from_attributes=True)

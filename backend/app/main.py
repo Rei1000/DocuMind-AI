@@ -2433,6 +2433,7 @@ async def create_document_with_file(
     chapter_numbers: Optional[str] = Form(None),
     ai_model: Optional[str] = Form("auto"),
     enable_debug: Optional[str] = Form("false"),
+    upload_method: Optional[str] = Form("ocr"),  # NEU: ocr oder visio
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2663,6 +2664,11 @@ async def create_document_with_file(
             compliance_status="ZU_BEWERTEN",
             priority=legacy_result.risk_level,
             
+            # Visio Upload-Felder
+            upload_method=upload_method or "ocr",
+            processing_state="UPLOADED" if upload_method == "visio" else None,
+            validation_status="PENDING" if upload_method == "visio" else None,
+            
             # Zusätzliche KI-Metadaten (als JSON-String in bestehenden Feldern)
             remarks=f"{remarks or ''}\n\n🤖 KI-Analyse ({ai_result.get('provider', 'unknown')}):\n- Sprache: {detected_lang} ({lang_confidence:.1%})\n- Qualität: {legacy_result.content_quality_score:.1%}\n- Komplexität: {legacy_result.complexity_score}/10\n- Compliance-Keywords: {', '.join(legacy_result.compliance_keywords[:5])}"
         )
@@ -2674,7 +2680,34 @@ async def create_document_with_file(
         upload_logger.info(f"✅ Document erfolgreich erstellt: ID={db_document.id}, Title='{db_document.title}', Type={db_document.document_type}")
         upload_logger.info(f"⏱️ Upload-Zeit: {time.time() - start_time:.2f}s")
         
-        # 5. 🚀 **ERWEITERTE RAG-INDEXIERUNG** mit Advanced AI
+        # 4.5 🎯 **VISIO-VERARBEITUNG** für bildbasierte Dokumente
+        if upload_method == "visio" and file_data:
+            upload_logger.info(f"🎯 Starte Visio-Verarbeitung für Dokument {db_document.id}")
+            
+            # Importiere Visio Processing Engine
+            from .visio_processing import visio_processing_engine
+            
+            # Starte asynchrone Visio-Verarbeitung
+            async def async_visio_processing():
+                try:
+                    result = await visio_processing_engine.process_visio_upload(db_document.id, db)
+                    if result.get("success"):
+                        upload_logger.info(f"✅ Visio-Verarbeitung gestartet: {result.get('state')}")
+                    else:
+                        upload_logger.error(f"❌ Visio-Verarbeitung fehlgeschlagen: {result.get('error')}")
+                except Exception as e:
+                    upload_logger.error(f"❌ Visio-Verarbeitung Exception: {e}")
+            
+            # Starte Verarbeitung im Hintergrund
+            import asyncio
+            asyncio.create_task(async_visio_processing())
+            
+            # Bei Visio-Uploads KEINE sofortige RAG-Indexierung
+            # Die erfolgt erst nach QM-Freigabe
+            upload_logger.info("ℹ️ RAG-Indexierung wird nach QM-Freigabe durchgeführt")
+            return db_document
+        
+        # 5. 🚀 **ERWEITERTE RAG-INDEXIERUNG** mit Advanced AI (nur für OCR-Uploads)
         if extracted_text and len(extracted_text.strip()) > 100:  # Nur sinnvolle Texte indexieren
             try:
                 # UPGRADE: Advanced RAG Engine verwenden
@@ -7490,6 +7523,205 @@ async def test_document_analysis_with_provider(
             "provider": provider,
             "fallback_used": True
         }
+
+# === VISIO PROCESSING API ===
+
+@app.get("/api/documents/{document_id}/visio-status", tags=["Documents", "Visio"])
+async def get_visio_processing_status(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Abrufen des aktuellen Visio-Verarbeitungsstatus
+    
+    Gibt detaillierte Informationen über den Verarbeitungsfortschritt zurück:
+    - processing_state: Aktueller Zustand (UPLOADED, PNG_GENERATED, etc.)
+    - validation_status: PENDING, VERIFIED oder REVIEW_REQUIRED
+    - vision_results: Detaillierte Ergebnisse der Verarbeitung
+    """
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Prüfe ob es ein Visio-Upload ist
+    if document.upload_method != "visio":
+        raise HTTPException(status_code=400, detail="Dokument ist kein Visio-Upload")
+    
+    # Parse vision_results
+    vision_results = json.loads(document.vision_results or "{}")
+    
+    return {
+        "document_id": document_id,
+        "upload_method": document.upload_method,
+        "processing_state": document.processing_state,
+        "validation_status": document.validation_status,
+        "vision_results": vision_results,
+        "has_preview": bool(vision_results.get("preview_path")),
+        "word_count": vision_results.get("word_count", 0),
+        "validation_coverage": vision_results.get("validation_coverage", 0),
+        "qm_released": document.qm_release_at is not None,
+        "qm_release_by": document.qm_release_by.full_name if document.qm_release_by else None,
+        "qm_release_at": document.qm_release_at.isoformat() if document.qm_release_at else None
+    }
+
+@app.get("/api/documents/{document_id}/visio-preview", tags=["Documents", "Visio"])
+async def get_visio_preview(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    PNG-Vorschau für Visio-Dokument abrufen
+    
+    Gibt die generierte PNG-Datei der ersten Seite zurück.
+    """
+    from fastapi.responses import FileResponse
+    
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Parse vision_results
+    vision_results = json.loads(document.vision_results or "{}")
+    preview_path = vision_results.get("preview_path")
+    
+    if not preview_path or not Path(preview_path).exists():
+        raise HTTPException(status_code=404, detail="Keine Vorschau verfügbar")
+    
+    return FileResponse(
+        path=preview_path,
+        media_type="image/png",
+        filename=f"preview_doc_{document_id}.png"
+    )
+
+@app.get("/api/documents/{document_id}/visio-prompts", tags=["Documents", "Visio"])
+async def get_visio_prompts(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Verwendete Visio-Prompts abrufen
+    
+    Zeigt die für die Verarbeitung verwendeten Prompts an.
+    """
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    # Parse used_prompts
+    used_prompts = json.loads(document.used_prompts or "{}")
+    
+    # Hole vollständige Prompts
+    from .visio_prompts import get_visio_prompt
+    
+    full_prompts = {}
+    if "visio_words" in used_prompts:
+        full_prompts["visio_words"] = get_visio_prompt(document.document_type, "visio_words")
+    if "visio_analysis" in used_prompts:
+        full_prompts["visio_analysis"] = get_visio_prompt(document.document_type, "visio_analysis")
+    
+    return {
+        "document_id": document_id,
+        "document_type": document.document_type,
+        "used_prompts": used_prompts,
+        "full_prompts": full_prompts
+    }
+
+@app.get("/api/documents/{document_id}/visio-analysis", tags=["Documents", "Visio"])
+async def get_visio_analysis(
+    document_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Strukturierte Visio-Analyse abrufen
+    
+    Gibt die JSON-strukturierte Analyse des Dokuments zurück.
+    """
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    
+    if not document.structured_analysis:
+        raise HTTPException(status_code=404, detail="Keine strukturierte Analyse verfügbar")
+    
+    # Parse structured_analysis
+    structured_analysis = json.loads(document.structured_analysis)
+    
+    return {
+        "document_id": document_id,
+        "document_type": document.document_type,
+        "structured_analysis": structured_analysis,
+        "extracted_at": json.loads(document.vision_results or "{}").get("analysis_completed_at")
+    }
+
+@app.post("/api/documents/{document_id}/visio-qm-release", tags=["Documents", "Visio"])
+async def approve_visio_qm_release(
+    document_id: int,
+    current_user: UserModel = Depends(require_qms_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    QM-Freigabe für Visio-Dokument erteilen
+    
+    Nach erfolgreicher Validierung kann ein QM-Manager die Freigabe erteilen.
+    Dies startet automatisch die RAG-Indexierung.
+    
+    Requires: QMS Admin Berechtigung
+    """
+    # Importiere Visio Processing Engine
+    from .visio_processing import visio_processing_engine
+    
+    # Erteile QM-Freigabe
+    result = await visio_processing_engine.approve_qm_release(
+        document_id=document_id,
+        user_id=current_user.id,
+        db=db
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Freigabe fehlgeschlagen"))
+    
+    return {
+        "success": True,
+        "message": f"QM-Freigabe erteilt für Dokument {document_id}",
+        "released_at": result.get("released_at"),
+        "state": result.get("state")
+    }
+
+@app.post("/api/documents/{document_id}/visio-restart", tags=["Documents", "Visio"])
+async def restart_visio_processing(
+    document_id: int,
+    current_user: UserModel = Depends(require_admin_or_qm),
+    db: Session = Depends(get_db)
+):
+    """
+    Visio-Verarbeitung neu starten
+    
+    Bei Fehlern kann die Verarbeitung neu gestartet werden.
+    Der Prozess beginnt wieder beim aktuellen Zustand.
+    
+    Requires: Admin oder QM Berechtigung
+    """
+    # Importiere Visio Processing Engine
+    from .visio_processing import visio_processing_engine
+    
+    # Starte Verarbeitung neu
+    result = await visio_processing_engine.process_visio_upload(
+        document_id=document_id,
+        db=db
+    )
+    
+    return {
+        "success": result.get("success", False),
+        "message": "Visio-Verarbeitung neu gestartet" if result.get("success") else "Neustart fehlgeschlagen",
+        "state": result.get("state"),
+        "error": result.get("error")
+    }
+
+# === Ende VISIO PROCESSING API ===
 
 if __name__ == "__main__":
     import uvicorn
