@@ -2778,11 +2778,11 @@ async def create_document_with_file(
                     
                     upload_logger.info(f"📸 {len(images)} Bilder erstellt")
                     
-                                    # NEU: PNG-Vorschau für Frontend erstellen
-                preview_image = None
-                if images:
-                    # Erste Seite als Base64 für Vorschau
-                    import base64
+                    # NEU: PNG-Vorschau für Frontend erstellen
+                    preview_image = None
+                    if images:
+                        # Erste Seite als Base64 für Vorschau
+                        import base64
                     preview_image = base64.b64encode(images[0]).decode('utf-8')
                     upload_logger.info(f"🖼️ PNG-Vorschau erstellt: {len(preview_image)} Zeichen")
                     
