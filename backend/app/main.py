@@ -2570,7 +2570,7 @@ async def preview_document_processing(
                 return {
                     "upload_method": "visio",
                     "success": True,
-                    "preview_image": preview_image,
+                    "preview_image": preview_image,  # NEU: PNG-Vorschau
                     "page_count": len(images),
                     "word_list": word_list[:100],  # Erste 100 Wörter für Vorschau
                     "word_count": len(word_list),
@@ -2771,12 +2771,20 @@ async def create_document_with_file(
                     prompt1, prompt2 = visio_prompts_manager.get_prompts(document_type or "OTHER")
                     prompt_used = f"Prompt 1:\n{prompt1}\n\nPrompt 2:\n{prompt2}"
                     
-                    # 2. Dokument zu Bildern konvertieren
+                                                        # 2. Dokument zu Bildern konvertieren
                     images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
                     if not images:
                         raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
                     
                     upload_logger.info(f"📸 {len(images)} Bilder erstellt")
+                    
+                                    # NEU: PNG-Vorschau für Frontend erstellen
+                preview_image = None
+                if images:
+                    # Erste Seite als Base64 für Vorschau
+                    import base64
+                    preview_image = base64.b64encode(images[0]).decode('utf-8')
+                    upload_logger.info(f"🖼️ PNG-Vorschau erstellt: {len(preview_image)} Zeichen")
                     
                     # 3. Wortliste extrahieren (Prompt 1)
                     word_result = await vision_engine.analyze_images_with_vision(images, prompt1)
