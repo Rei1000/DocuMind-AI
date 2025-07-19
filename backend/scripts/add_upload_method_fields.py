@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Datenbank-URL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://qms_user:securepassword123@localhost/qms_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///qms_mvp.db")
 
 def run_migration():
     """Führt die Migration aus, um neue Upload-Methoden-Felder hinzuzufügen"""
@@ -43,7 +43,13 @@ def run_migration():
             
             # Prüfe, ob die Felder bereits existieren
             inspector = inspect(engine)
-            existing_columns = [col['name'] for col in inspector.get_columns('documents')]
+            try:
+                existing_columns = [col['name'] for col in inspector.get_columns('documents')]
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Prüfen der Tabellenstruktur: {e}")
+                # Fallback: Direkte SQL-Abfrage
+                result = conn.execute(text("PRAGMA table_info(documents)"))
+                existing_columns = [row[1] for row in result.fetchall()]
             
             # 1. upload_method hinzufügen (Standard: 'ocr')
             if 'upload_method' not in existing_columns:

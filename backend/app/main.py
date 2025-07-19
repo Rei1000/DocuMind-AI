@@ -7273,82 +7273,7 @@ async def get_my_tasks(
             "error": str(e)
         }
 
-@app.post("/api/rag/upload-document")
-async def upload_document_for_rag(
-    file: UploadFile = File(...),
-    title: str = Form(...),
-    document_type: str = Form("PROCEDURE")
-):
-    """
-    🔺 UPLOAD + RAG: Dokument hochladen und sofort für Chat indexieren
-    
-    Enhanced Features:
-    - OCR für Bilder und Diagramme
-    - Automatische Texterkennung in PDFs
-    - Erweiterte Metadaten-Extraktion
-    """
-    try:
-        # 1. Datei speichern
-        file_path = Path("data/uploads") / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # 2. Advanced RAG-Engine verwenden
-        from .advanced_rag_engine import advanced_rag_engine
-        
-        if not advanced_rag_engine:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "message": "RAG-System nicht verfügbar. Document gespeichert, aber nicht indexiert.",
-                    "file_path": str(file_path)
-                }
-            )
-        
-        # 3. Enhanced Document Processing mit OCR
-        metadata = {
-            "title": title,
-            "document_type": document_type,
-            "uploaded_at": datetime.now().isoformat(),
-            "file_type": file.content_type or "unknown",
-            "original_filename": file.filename
-        }
-        
-        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine
-        index_result = {"chunks_indexed": 0, "content_types": [], "status": "deprecated"}
-        
-        # 4. Statistiken sammeln
-        total_chunks = index_result.get("chunks_indexed", 0)
-        content_types = index_result.get("content_types", [])
-        
-        return {
-            "success": True,
-            "message": f"📄 Dokument erfolgreich hochgeladen und indexiert!",
-            "details": {
-                "file_path": str(file_path),
-                "title": title,
-                "chunks_created": total_chunks,
-                "content_types": content_types,
-                "ocr_used": "image" in content_types,
-                "processing_capabilities": [
-                    "Text-Extraktion",
-                    "OCR für Bilder" if "image" in content_types else "OCR verfügbar",
-                    "Tabellen-Verarbeitung" if "table" in content_types else "Excel-Support",
-                    "Semantische Indizierung"
-                ]
-            },
-            "index_result": index_result
-        }
-        
-    except Exception as e:
-        print(f"Document upload and indexing failed: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "message": f"Upload fehlgeschlagen: {str(e)}"}
-        )
+# ENTFERNT: Veralteter RAG-Upload-Endpunkt - wird durch /api/documents/with-file ersetzt
 
 @app.post("/api/rag/chat-enhanced")
 async def chat_with_documents_enhanced(request: dict):
@@ -7557,19 +7482,7 @@ async def extract_metadata_api(
     else:
         raise HTTPException(status_code=503, detail="AI-Features nicht verfügbar")
 
-@app.post("/api/upload-with-ai", tags=["AI-Enhanced"])
-async def upload_with_ai_api(
-    file: UploadFile = File(...),
-    title: str = Form(...),
-    document_type: str = Form("PROCEDURE"),
-    ai_enhanced: bool = Form(True),
-    current_user: UserModel = Depends(get_current_active_user)
-):
-    """Upload eines Dokuments mit AI-Metadaten-Extraktion und Qdrant-Indexierung"""
-    if AI_FEATURES_AVAILABLE:
-        return await upload_document_with_ai(file, title, document_type, ai_enhanced, current_user)
-    else:
-        raise HTTPException(status_code=503, detail="AI-Features nicht verfügbar")
+# ENTFERNT: Veralteter AI-Upload-Endpunkt - wird durch /api/documents/with-file ersetzt
 
 @app.post("/api/chat-with-documents", tags=["AI-Enhanced"])
 async def chat_with_documents_api(
