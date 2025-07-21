@@ -40,94 +40,88 @@ class VisioPromptsManager:
         return self.prompts.get(document_type, self.prompts["OTHER"])
     
     def _get_sop_prompts(self) -> Tuple[str, str]:
-        """Prompts für SOP-Dokumente"""
+        """Prompts für SOP-Dokumente - Einheitlicher Prompt für Wortliste + Analyse"""
         prompt1 = """
-Du bist ein OCR-Spezialist. Extrahiere ALLE sichtbaren Wörter aus diesem SOP-Dokument.
-Beachte:
-- Kopfzeilen, Fußzeilen, Seitenzahlen
-- Titel und Überschriften
-- Fließtext und Aufzählungen
-- Text in Flussdiagrammen, Formen und Boxen
-- Beschriftungen von Pfeilen und Verbindungen
-- Legenden und Anmerkungen
+Sie sind ein Experte für die Analyse von Qualitätsmanagement-Dokumenten nach ISO 13485 und MDR.
 
-Gib NUR eine alphabetisch sortierte Wortliste zurück. Ein Wort pro Zeile.
-Keine Duplikate. Keine Erklärungen.
+Analysieren Sie das vorliegende QM-Dokument und extrahieren Sie ALLE relevanten Informationen in folgendem JSON-Format:
+
+{
+  "document_metadata": {
+    "title": "Dokumententitel",
+    "document_type": "process | work_instruction | form | norm",
+    "version": "Versionsnummer",
+    "chapter": "Kapitelnummer",
+    "valid_from": "Gültig ab Datum",
+    "author": "Autor/Ersteller",
+    "approved_by": "Freigegeben von"
+  },
+  "process_steps": [
+    {
+      "step_number": 1,
+      "label": "Kurzbeschreibung des Schritts",
+      "description": "Detaillierte Beschreibung der Aktivität",
+      "responsible_department": {
+        "short": "Abteilungskürzel (z.B. QM, WE, Service)",
+        "long": "Vollständiger Abteilungsname"
+      },
+      "inputs": ["Eingangsvoraussetzungen"],
+      "outputs": ["Ergebnisse/Dokumente"],
+      "decision": {
+        "is_decision": true,
+        "question": "Entscheidungsfrage",
+        "yes_action": "Aktion bei Ja",
+        "no_action": "Aktion bei Nein"
+      },
+      "notes": ["Zusätzliche Hinweise oder Anforderungen"]
+    }
+  ],
+  "referenced_documents": [
+    {
+      "type": "norm | sop | form | external",
+      "reference": "Dokumentenreferenz",
+      "title": "Dokumententitel"
+    }
+  ],
+  "definitions": [
+    {
+      "term": "Begriff",
+      "definition": "Erklärung"
+    }
+  ],
+  "compliance_requirements": [
+    {
+      "standard": "ISO 13485 | MDR | andere",
+      "section": "Abschnitt/Kapitel",
+      "requirement": "Anforderungsbeschreibung"
+    }
+  ],
+  "critical_rules": [
+    {
+      "rule": "Kritische Regel oder Grenzwert",
+      "consequence": "Konsequenz bei Nichteinhaltung"
+    }
+  ],
+  "all_detected_words": [
+    "alphabetisch sortierte liste aller sichtbaren wörter und zeichen ohne duplikate"
+  ]
+}
+
+Zusätzliche Anweisung:
+
+Bitte extrahieren Sie **alle sichtbaren Wörter und Zeichen** aus dem Dokument und geben Sie diese als **flache, alphabetisch sortierte Liste** unter dem Feld `all_detected_words` zurück. Beachten Sie:
+- Alle Tokens in **Kleinbuchstaben**
+- **Keine Duplikate**
+- **Satzzeichen und Sonderzeichen dürfen enthalten sein**
+- Aufzählungszeichen wie •, → oder - können ignoriert werden
+- Reihenfolge im Dokument spielt keine Rolle
+
+🔚 Geben Sie **nur ein gültiges JSON-Objekt** mit allen Informationen gemäß obigem Format zurück. Keine Kommentare, Erklärungen oder zusätzliche Ausgaben.
 """
         
-        prompt2 = """
-Du bist ein QM-Experte für SOP-Analyse. Analysiere dieses SOP-Dokument und extrahiere strukturiert:
-
-1. DOKUMENT-METADATEN:
-   - Titel
-   - Dokumentennummer
-   - Version
-   - Gültig ab
-   - Ersteller
-   - Freigabe durch
-
-2. PROZESSSTRUKTUR:
-   - Hauptprozess-Name
-   - Prozessschritte (nummeriert)
-   - Entscheidungspunkte
-   - Verantwortlichkeiten pro Schritt
-
-3. FLUSSDIAGRAMM-ELEMENTE:
-   - Start-/End-Punkte
-   - Aktivitäten (Rechtecke)
-   - Entscheidungen (Rauten)
-   - Verbindungen und Reihenfolge
-
-4. REFERENZEN:
-   - Verweis auf andere SOPs
-   - Normen-Referenzen
-   - Formulare und Vorlagen
-
-5. QUALITÄTSKONTROLLE:
-   - Prüfpunkte
-   - Freigabekriterien
-   - Dokumentationspflichten
-
-Antworte im folgenden JSON-Format:
-{
-  "metadata": {
-    "title": "",
-    "document_number": "",
-    "version": "",
-    "valid_from": "",
-    "author": "",
-    "approved_by": ""
-  },
-  "process": {
-    "name": "",
-    "steps": [
-      {
-        "number": 1,
-        "description": "",
-        "responsible": "",
-        "decision_point": false
-      }
-    ]
-  },
-  "flowchart": {
-    "start_points": [],
-    "end_points": [],
-    "activities": [],
-    "decisions": [],
-    "connections": []
-  },
-  "references": {
-    "sops": [],
-    "norms": [],
-    "forms": []
-  },
-  "quality_control": {
-    "checkpoints": [],
-    "approval_criteria": [],
-    "documentation_requirements": []
-  }
-}
-"""
+        # Prompt2 wird nicht mehr benötigt, da alles in Prompt1 enthalten ist
+        prompt2 = prompt1  # Verwende denselben Prompt für beide Schritte
+        
         return (prompt1, prompt2)
     
     def _get_work_instruction_prompts(self) -> Tuple[str, str]:
