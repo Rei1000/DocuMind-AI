@@ -322,6 +322,13 @@ class Document(Base):
     status_changed_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der letzten Status-Änderung")
     status_comment = Column(Text, comment="Kommentar zur Status-Änderung")
     
+    # === UPLOAD-METHODEN FELDER ===
+    upload_method = Column(String(10), default='ocr', comment="Upload-Verarbeitungsmethode: ocr oder visio")
+    validation_status = Column(String(50), comment="Validierungsstatus für Visio-Methode: VERIFIED, REVIEW_REQUIRED")
+    structured_analysis = Column(Text, comment="JSON-strukturierte Analyse-Daten der Visio-Methode")
+    prompt_used = Column(Text, comment="Verwendeter Prompt bei Visio-Verarbeitung")
+    ocr_text_preview = Column(Text, comment="OCR-Text-Vorschau für Benutzer-Review")
+    
     # Metadata
     creator_id = Column(Integer, ForeignKey("users.id"), comment="Ersteller des Dokuments (User.id)")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Zeitpunkt der Erstellung")

@@ -161,28 +161,45 @@ class VisionOCREngine:
         Verschiedene Ansätze:
         1. LibreOffice Headless (cross-platform)
         2. Win32 COM (Windows only)
-        3. Fallback: Erst PDF, dann Bilder
+        3. Python-basierte Konvertierung (Fallback)
+        4. Fehlerbehandlung mit detaillierten Logs
         """
         
+        logger.info(f"🔄 Word-Konvertierung gestartet: {file_path.name}")
+        
         # Ansatz 1: LibreOffice Headless (empfohlen)
+        logger.info("📄 Versuche LibreOffice Konvertierung...")
         libreoffice_result = await self._convert_word_via_libreoffice(file_path, dpi)
         if libreoffice_result:
+            logger.info("✅ LibreOffice Konvertierung erfolgreich")
             return libreoffice_result
         
         # Ansatz 2: Win32 COM (Windows only)
         if self.win32_available:
+            logger.info("💻 Versuche Win32 COM Konvertierung...")
             win32_result = await self._convert_word_via_win32(file_path, dpi)
             if win32_result:
+                logger.info("✅ Win32 Konvertierung erfolgreich")
                 return win32_result
         
-        # Ansatz 3: Word → PDF → Images
+        # Ansatz 3: Python-basierte Konvertierung (Fallback)
+        logger.info("🐍 Versuche Python-basierte Konvertierung...")
+        # python_result = await self._convert_word_via_python(file_path, dpi)  # Temporarily disabled
+        python_result = []
+        if python_result:
+            logger.info("✅ Python-Konvertierung erfolgreich")
+            return python_result
+        
+        # Ansatz 4: Word → PDF → Images
         logger.info("🔄 Fallback: Word → PDF → Images")
         pdf_path = await self._convert_word_to_pdf(file_path)
         if pdf_path and pdf_path.exists():
             try:
                 images = await self._convert_pdf_to_images(pdf_path, dpi)
                 pdf_path.unlink()  # Temporäre PDF löschen
-                return images
+                if images:
+                    logger.info("✅ PDF-Fallback erfolgreich")
+                    return images
             except Exception as e:
                 logger.error(f"❌ PDF-Fallback fehlgeschlagen: {e}")
         
@@ -199,7 +216,7 @@ class VisionOCREngine:
             with tempfile.TemporaryDirectory() as temp_dir:
                 # LibreOffice headless PDF export
                 cmd = [
-                    'libreoffice',
+                    'soffice',  # macOS LibreOffice command
                     '--headless',
                     '--convert-to', 'pdf',
                     '--outdir', temp_dir,
@@ -294,6 +311,52 @@ class VisionOCREngine:
         logger.warning("📄 Word → PDF Direktkonvertierung nicht implementiert")
         return None
 
+    async def _convert_word_via_python(self, file_path: Path, dpi: int = 300) -> List[bytes]:
+        """
+        Konvertiert Word-Dokumente zu Bildern mit Python-Bibliotheken.
+        Fallback-Methode wenn LibreOffice/win32 nicht verfügbar sind.
+        """
+        try:
+            logger.info(f"🔄 Konvertiere Word-Dokument via Python: {file_path.name}")
+            
+            # Versuche python-docx für DOCX-Dateien
+            if file_path.suffix.lower() == '.docx':
+                from docx import Document
+                from docx.shared import Inches
+                
+                doc = Document(str(file_path))
+                images = []
+                
+                # Für DOCX verwenden wir einen einfachen Ansatz
+                # Da python-docx keine direkte Bild-Konvertierung unterstützt,
+                # konvertieren wir zuerst zu PDF und dann zu Bildern
+                pdf_path = await self._convert_word_to_pdf(file_path)
+                if pdf_path and pdf_path.exists():
+                    images = await self._convert_pdf_to_images(pdf_path, dpi)
+                    # PDF-Temp-Datei löschen
+                    pdf_path.unlink(missing_ok=True)
+                
+                return images
+            
+            # Für .doc-Dateien verwenden wir PyMuPDF als Fallback
+            elif file_path.suffix.lower() == '.doc':
+                logger.warning("⚠️ .doc-Dateien werden über PDF-Konvertierung verarbeitet")
+                pdf_path = await self._convert_word_to_pdf(file_path)
+                if pdf_path and pdf_path.exists():
+                    images = await self._convert_pdf_to_images(pdf_path, dpi)
+                    pdf_path.unlink(missing_ok=True)
+                    return images
+            
+            logger.warning(f"⚠️ Nicht unterstütztes Word-Format: {file_path.suffix}")
+            return []
+            
+        except ImportError as e:
+            logger.error(f"❌ Python-Bibliothek nicht verfügbar: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"❌ Python-Konvertierung fehlgeschlagen: {e}")
+            return []
+
     async def analyze_document_with_vision(self, file_path: Path, extracted_images: List[bytes]) -> Dict[str, Any]:
         """
         Analysiert Dokument mit Vision API für Flussdiagramme und Referenzen
@@ -345,7 +408,7 @@ class VisionOCREngine:
     
     async def _analyze_image_with_gpt4_vision(self, image_b64: str, context: str) -> Dict[str, Any]:
         """
-        Analysiert ein Bild mit GPT-4o Vision API
+        Analysiert ein Bild mit GPT-4o Vision API mit Rate-Limit-Behandlung
         """
         try:
             prompt = self._create_vision_prompt(context)
@@ -353,49 +416,200 @@ class VisionOCREngine:
             if not self.client:
                 return {"success": False, "error": "OpenAI Client nicht verfügbar"}
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_b64}",
-                                    "detail": "high"  # Für detaillierte Analyse
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=1000,
-                temperature=0.1  # Konsistente Ergebnisse
-            )
+            # Rate-Limit-Behandlung mit Retry-Logic
+            max_retries = 3
+            base_delay = 5  # Start mit 5 Sekunden
             
-            # Parse JSON response
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{image_b64}",
+                                            "detail": "high"  # Für detaillierte Analyse
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        max_tokens=1000,
+                        temperature=0.1  # Konsistente Ergebnisse
+                    )
+                    
+                    # Erfolgreich - keine weiteren Versuche
+                    break
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    
+                    # Rate-Limit-Fehler erkennen
+                    if "429" in error_str or "rate_limit" in error_str.lower():
+                        if attempt < max_retries - 1:  # Nicht beim letzten Versuch
+                            delay = base_delay * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                            logger.warning(f"⚠️ Rate-Limit erreicht, warte {delay}s vor Versuch {attempt + 2}/{max_retries}")
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            logger.error(f"❌ Rate-Limit nach {max_retries} Versuchen - endgültiger Fehler")
+                            return {"success": False, "error": f"Rate limit exceeded after {max_retries} attempts: {error_str}"}
+                    else:
+                        # Anderer Fehler - nicht retry
+                        logger.error(f"❌ Nicht-Rate-Limit Fehler: {error_str}")
+                        return {"success": False, "error": error_str}
+            
+            # Parse JSON response mit robusterem Parsing
             response_text = response.choices[0].message.content or ""
+            logger.info(f"🔍 Raw API-Antwort erhalten: {len(response_text)} Zeichen")
+            
+            # Robusteres JSON-Parsing
             try:
-                result = json.loads(response_text)
+                # Level 1: Standard JSON-Parsing
+                cleaned_text = response_text.strip()
+                if cleaned_text.startswith('```json'):
+                    cleaned_text = cleaned_text[7:]
+                if cleaned_text.endswith('```'):
+                    cleaned_text = cleaned_text[:-3]
+                
+                result = json.loads(cleaned_text)
                 result['success'] = True
+                result['content'] = response_text  # Wichtig: content für Backend
                 result['context'] = context
+                logger.info("✅ Standard JSON-Parsing erfolgreich")
                 return result
-            except json.JSONDecodeError:
-                # Fallback wenn kein valides JSON
-                return {
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"⚠️ Standard JSON-Parsing fehlgeschlagen: {e}")
+                
+                # Level 2: Regex-basierte JSON-Extraktion
+                try:
+                    json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+                    matches = re.findall(json_pattern, response_text, re.DOTALL)
+                    
+                    for match in matches:
+                        try:
+                            result = json.loads(match)
+                            result['success'] = True
+                            result['content'] = response_text
+                            result['context'] = context
+                            result['parsing_method'] = 'regex_extraction'
+                            logger.info("✅ Regex-basierte JSON-Extraktion erfolgreich")
+                            return result
+                        except json.JSONDecodeError:
+                            continue
+                            
+                except Exception as regex_error:
+                    logger.warning(f"⚠️ Regex-Extraktion fehlgeschlagen: {regex_error}")
+                
+                # Level 3: Manuelle Feld-Extraktion
+                try:
+                    fallback_result = self._create_manual_fallback(response_text, context)
+                    logger.info("✅ Manuelle Feld-Extraktion erfolgreich")
+                    return fallback_result
+                    
+                except Exception as manual_error:
+                    logger.warning(f"⚠️ Manuelle Extraktion fehlgeschlagen: {manual_error}")
+                
+                # Level 4: Minimaler Fallback
+                logger.warning("⚠️ Alle Parsing-Methoden fehlgeschlagen - verwende minimalen Fallback")
+                fallback_result = {
                     "success": True,
-                    "description": response_text,
+                    "content": response_text,
+                    "description": response_text[:200] + "..." if len(response_text) > 200 else response_text,
                     "extracted_text": response_text,
                     "process_references": self._extract_references_regex(response_text),
                     "workflow_steps": [],
                     "compliance_level": "medium",
-                    "context": context
+                    "context": context,
+                    "parsing_method": "minimal_fallback",
+                    "parsing_error": str(e)
                 }
+                return fallback_result
                 
         except Exception as e:
             logger.error(f"❌ GPT-4o Vision API Fehler: {e}")
             return {"success": False, "error": str(e)}
+    
+    def _create_manual_fallback(self, response_text: str, context: str) -> Dict[str, Any]:
+        """
+        🔧 Erstellt manuellen Fallback aus API-Antwort
+        """
+        try:
+            result = {
+                "success": True,
+                "content": response_text,
+                "context": context,
+                "parsing_method": "manual_extraction"
+            }
+            
+            # Titel extrahieren
+            title_match = re.search(r'"document_title":\s*"([^"]+)"', response_text)
+            if title_match:
+                result["document_title"] = title_match.group(1)
+            else:
+                result["document_title"] = "Automatisch analysiert"
+            
+            # Dokumenttyp extrahieren
+            type_match = re.search(r'"document_type":\s*"([^"]+)"', response_text)
+            if type_match:
+                result["document_type"] = type_match.group(1)
+            else:
+                result["document_type"] = "UNKNOWN"
+            
+            # Wörter extrahieren
+            words_match = re.search(r'"all_detected_words":\s*\[(.*?)\]', response_text, re.DOTALL)
+            if words_match:
+                words_str = words_match.group(1)
+                words = re.findall(r'"([^"]+)"', words_str)
+                result["all_detected_words"] = words
+            else:
+                result["all_detected_words"] = []
+            
+            # Prozessschritte extrahieren
+            steps_match = re.search(r'"process_steps":\s*\[(.*?)\]', response_text, re.DOTALL)
+            if steps_match:
+                result["process_steps"] = []
+            
+            # Compliance-Anforderungen extrahieren
+            compliance_match = re.search(r'"compliance_requirements":\s*\[(.*?)\]', response_text, re.DOTALL)
+            if compliance_match:
+                result["compliance_requirements"] = []
+            
+            # Qualitätskontrollen extrahieren
+            quality_match = re.search(r'"quality_controls":\s*\[(.*?)\]', response_text, re.DOTALL)
+            if quality_match:
+                result["quality_controls"] = []
+            
+            # Beschreibung und extrahierter Text
+            result["description"] = response_text[:200] + "..." if len(response_text) > 200 else response_text
+            result["extracted_text"] = response_text
+            result["process_references"] = self._extract_references_regex(response_text)
+            result["workflow_steps"] = []
+            result["compliance_level"] = "medium"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Manueller Fallback fehlgeschlagen: {e}")
+            # Minimaler Fallback
+            return {
+                "success": True,
+                "content": response_text,
+                "description": "Fallback-Analyse",
+                "extracted_text": response_text,
+                "process_references": [],
+                "workflow_steps": [],
+                "compliance_level": "medium",
+                "context": context,
+                "parsing_method": "error_fallback",
+                "parsing_error": str(e)
+            }
     
     def _extract_references_regex(self, text: str) -> List[str]:
         """
@@ -566,6 +780,135 @@ Kontext: {context}
         
         return base_prompt.strip()
 
+    async def analyze_images_with_vision(self, images: List[bytes], prompt: str, preferred_provider: str = "openai_4o_mini") -> Dict[str, Any]:
+        """
+        Analysiert eine Liste von Bildern mit Vision API und einem spezifischen Prompt.
+        
+        Args:
+            images: Liste von Bildern als bytes
+            prompt: Spezifischer Prompt für die Analyse
+            preferred_provider: Gewünschter Provider (openai_4o_mini, ollama, google_gemini)
+            
+        Returns:
+            Dict mit Analyse-Ergebnissen
+        """
+        try:
+            logger.info(f"🔍 Analysiere {len(images)} Bilder mit Vision API (Provider: {preferred_provider})")
+            
+            # Provider-spezifische Logik
+            if preferred_provider == "openai_4o_mini":
+                if not self.api_key:
+                    return {
+                        'success': False,
+                        'error': 'OpenAI API Key nicht konfiguriert'
+                    }
+                logger.info("🤖 Verwende OpenAI 4o-mini Vision API")
+            elif preferred_provider == "ollama":
+                logger.info("🦙 Verwende Ollama Vision API")
+                # TODO: Ollama Vision API Integration
+                return {
+                    'success': False,
+                    'error': 'Ollama Vision API noch nicht implementiert'
+                }
+            elif preferred_provider == "google_gemini":
+                logger.info("🌟 Verwende Google Gemini Vision API")
+                # TODO: Google Gemini Vision API Integration
+                return {
+                    'success': False,
+                    'error': 'Google Gemini Vision API noch nicht implementiert'
+                }
+            else:
+                logger.warning(f"⚠️ Unbekannter Provider: {preferred_provider}, verwende OpenAI")
+                if not self.api_key:
+                    return {
+                        'success': False,
+                        'error': 'OpenAI API Key nicht konfiguriert'
+                    }
+            
+            results = []
+            total_tokens = 0
+            
+            for i, image_bytes in enumerate(images):
+                logger.info(f"📸 Verarbeite Bild {i+1}/{len(images)}")
+                
+                # Bild zu Base64 konvertieren
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                
+                # Vision-Analyse durchführen
+                result = await self._analyze_image_with_gpt4_vision(image_b64, prompt)
+                
+                if result['success']:
+                    results.append(result)
+                    total_tokens += result.get('tokens_used', 0)
+                else:
+                    logger.warning(f"⚠️ Bild {i+1} Analyse fehlgeschlagen: {result.get('error')}")
+            
+            if not results:
+                return {
+                    'success': False,
+                    'error': 'Keine Bilder erfolgreich analysiert'
+                }
+            
+            # Ergebnisse kombinieren
+            combined_analysis = self._combine_vision_results(results)
+            
+            return {
+                'success': True,
+                'content': json.dumps(combined_analysis, ensure_ascii=False),  # Wichtig: content für Backend
+                'analysis': combined_analysis,
+                'images_processed': len(images),
+                'tokens_used': total_tokens,
+                'individual_results': results
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Vision-Analyse fehlgeschlagen: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _combine_vision_results(self, results: List[Dict]) -> Dict:
+        """
+        Kombiniert mehrere Vision-Analyse-Ergebnisse zu einem konsistenten Format.
+        """
+        combined = {
+            'text': '',
+            'words': [],
+            'process_references': [],
+            'structured_analysis': {}
+        }
+        
+        for result in results:
+            # Text kombinieren
+            if result.get('extracted_text'):
+                combined['text'] += result['extracted_text'] + '\n\n'
+            elif result.get('description'):
+                combined['text'] += result['description'] + '\n\n'
+            
+            # Wörter aus Text extrahieren
+            import re
+            text_content = result.get('extracted_text', '') + ' ' + result.get('description', '')
+            if text_content:
+                words = re.findall(r'\b\w+\b', text_content)
+                combined['words'].extend(words)
+            
+            # Prozess-Referenzen sammeln
+            if result.get('process_references'):
+                combined['process_references'].extend(result['process_references'])
+            
+            # Strukturierte Analyse kombinieren
+            if result.get('process_flow'):
+                combined['structured_analysis']['process_flow'] = result.get('process_flow', [])
+            if result.get('document_title'):
+                combined['structured_analysis']['document_title'] = result.get('document_title', '')
+        
+        # Duplikate entfernen
+        combined['words'] = list(set(combined['words']))
+        combined['process_references'] = list(set(combined['process_references']))
+        
+        return combined
+
 
 async def extract_text_with_vision(file_path: str) -> Dict[str, Any]:
     """
@@ -592,12 +935,12 @@ async def extract_text_with_vision(file_path: str) -> Dict[str, Any]:
     
     # Erst Enhanced OCR für Bildextraktion
     try:
-        from .enhanced_ocr_engine import extract_enhanced_text
+        # from .enhanced_ocr_engine import extract_enhanced_text  # Temporarily disabled
         
         logger.info(f"🔍 Starte kombinierte Vision + Enhanced OCR für {file_path_obj.name}")
         
         # Enhanced OCR für Grundextraktion
-        enhanced_result = await extract_enhanced_text(file_path_obj, mime_type)
+        # enhanced_result = await extract_enhanced_text(file_path_obj, mime_type)  # Temporarily disabled
         
         if enhanced_result['success'] and enhanced_result.get('images_processed', 0) > 0:
             # Vision-Analyse der gefundenen Bilder

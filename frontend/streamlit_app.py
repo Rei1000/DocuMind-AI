@@ -152,7 +152,8 @@ def upload_document_with_file(
     version: str = "1.0",
     content: Optional[str] = None,
     remarks: Optional[str] = None,
-    chapter_numbers: Optional[str] = None
+    chapter_numbers: Optional[str] = None,
+    upload_method: str = "ocr"  # NEU: Upload-Methode Parameter
 ) -> Optional[Dict]:
     """
     Lädt ein Dokument mit Datei hoch - ZUVERLÄSSIG!
@@ -168,7 +169,8 @@ def upload_document_with_file(
         # Form-Daten vorbereiten
         form_data = {
             "creator_id": str(creator_id),
-            "version": version
+            "version": version,
+            "upload_method": upload_method  # NEU: Upload-Methode hinzufügen
         }
         
         # document_type NUR setzen wenn nicht leer (Backend hat Default "OTHER")
@@ -225,6 +227,41 @@ def upload_document_with_file(
             raise Exception(f"Upload fehlgeschlagen (Status {response.status_code}): {error_detail}")
     
     return safe_api_call(_upload)
+
+def process_document_with_prompt(file_data, upload_method: str = "visio", document_type: str = "SOP", confirm_prompt: bool = False, preferred_provider: str = "auto") -> Optional[Dict]:
+    """Optimierter Workflow mit einheitlichem Prompt"""
+    def _process():
+        try:
+            # Datei vorbereiten
+            file_data.seek(0)  # Wichtig: Zurücksetzen!
+            files = {"file": (file_data.name, file_data.getvalue(), file_data.type)}
+            data = {
+                "upload_method": upload_method,
+                "document_type": document_type,
+                "confirm_prompt": confirm_prompt,
+                "preferred_provider": preferred_provider
+            }
+            
+            response = requests.post(
+                f"{API_BASE_URL}/api/documents/process-with-prompt",
+                files=files,
+                data=data,
+                timeout=120  # Längerer Timeout für API-Aufrufe
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                st.success(f"✅ API-Antwort erhalten: {len(str(result))} Zeichen")
+                return result
+            else:
+                st.error(f"❌ Workflow-Fehler: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            st.error(f"❌ Workflow-Fehler: {str(e)}")
+            return None
+    
+    return safe_api_call(_process)
 
 def get_documents(limit: int = 100) -> List[Dict]:
     """Lädt Dokumente von der API"""
@@ -1053,6 +1090,18 @@ def render_upload_page():
         """, unsafe_allow_html=True)
         return
     
+    # Tabs für verschiedene Upload-Methoden
+    tab1, tab2 = st.tabs(["📄 Standard Upload", "🚀 Optimierter Workflow"])
+    
+    with tab1:
+        render_standard_upload()
+    
+    with tab2:
+        render_optimized_workflow()
+
+def render_standard_upload():
+    """Standard Upload-Funktionalität"""
+    
     # Erfolgs-/Fehlermeldungen anzeigen
     if st.session_state.get("upload_success"):
         success_data = st.session_state.upload_success
@@ -1064,16 +1113,640 @@ def render_upload_page():
             <p><strong>Typ:</strong> {success_data.get('document_type', 'N/A')}</p>
             <p><strong>Version:</strong> {success_data.get('version', 'N/A')}</p>
             <p><strong>Dokumentnummer:</strong> {success_data.get('document_number', 'N/A')}</p>
+            <p><strong>Upload-Methode:</strong> {success_data.get('upload_method', 'N/A')}</p>
         </div>
         """, unsafe_allow_html=True)
         
         # Reset after showing
         if st.button("🔄 Neuen Upload starten"):
             st.session_state.upload_success = None
+            st.session_state.upload_preview = None
             st.rerun()
         return
     
-    # Upload Form
+    # Vorschau anzeigen (wenn vorhanden)
+    if st.session_state.get("upload_preview"):
+        preview_data = st.session_state.upload_preview
+        st.markdown("### 👁️ Dokument-Vorschau")
+        
+        if preview_data.get("upload_method") == "ocr":
+            # OCR-Vorschau
+            st.info(f"📄 **OCR-Verarbeitung**: {preview_data.get('message', '')}")
+            
+            metadata = preview_data.get("metadata", {})
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Textlänge", f"{metadata.get('text_length', 0):,} Zeichen")
+            with col2:
+                st.metric("Geschätzte Seiten", metadata.get('estimated_pages', 0))
+            with col3:
+                st.metric("Inhalt erkannt", "✅ Ja" if metadata.get('has_content') else "❌ Nein")
+            
+            # Erkannte Kapitel anzeigen
+            if metadata.get("detected_chapters"):
+                with st.expander("🔍 Erkannte Kapitel"):
+                    for chapter in metadata["detected_chapters"]:
+                        st.write(f"• {chapter}")
+            
+            # Text-Vorschau
+            with st.expander("📝 Text-Vorschau", expanded=True):
+                st.text_area(
+                    "Extrahierter Text", 
+                    value=metadata.get("preview_text", ""),
+                    height=400,
+                    disabled=True
+                )
+        
+        else:  # visio
+            # Visio-Vorschau
+            validation = preview_data.get("validation", {})
+            status = validation.get("status", "UNKNOWN")
+            coverage = validation.get("coverage", 0)
+            
+            # Status-Anzeige
+            if status == "VERIFIED":
+                st.success(f"✅ **Visio-Verarbeitung erfolgreich**: {coverage:.1f}% Wortabdeckung")
+            else:
+                st.warning(f"⚠️ **Überprüfung erforderlich**: Nur {coverage:.1f}% Wortabdeckung")
+            
+            # Metriken
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Seiten", preview_data.get('page_count', 0))
+            with col2:
+                st.metric("Erkannte Wörter", preview_data.get('word_count', 0))
+            with col3:
+                st.metric("Fehlende Wörter", validation.get('total_missing', 0))
+            
+            # Tabs für verschiedene Ansichten
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📸 Vorschaubild", "📝 Wortliste", "🔍 Strukturierte Analyse", "⚠️ Validierung", "💬 Prompts"])
+            
+            with tab1:
+                if preview_data.get("preview_image"):
+                    st.image(
+                        f"data:image/png;base64,{preview_data['preview_image']}", 
+                        caption="Erste Seite des Dokuments",
+                        use_column_width=True
+                    )
+                else:
+                    st.warning("Kein Vorschaubild verfügbar")
+            
+            with tab2:
+                # Zuerst aus der strukturierten Analyse
+                structured_analysis = preview_data.get("structured_analysis", {})
+                detected_words = structured_analysis.get('all_detected_words', [])
+                
+                if detected_words:
+                    st.markdown("**📝 Erkannte Wörter (aus API-Analyse):**")
+                    st.write(f"**Anzahl:** {len(detected_words)} Wörter")
+                    
+                    # Wörter in Spalten anzeigen
+                    words_per_col = 25
+                    cols = st.columns(4)
+                    for i, word in enumerate(detected_words[:100]):  # Erste 100 Wörter
+                        col_idx = i // words_per_col
+                        if col_idx < 4:
+                            cols[col_idx].write(f"• {word}")
+                    
+                    if len(detected_words) > 100:
+                        st.write(f"... und {len(detected_words) - 100} weitere Wörter")
+                else:
+                    # Fallback auf alte Wortliste
+                    word_list = preview_data.get("word_list", [])
+                    if word_list:
+                        st.write(f"**Erste {len(word_list)} von {preview_data.get('word_count', 0)} Wörtern:**")
+                        # Wörter in Spalten anzeigen
+                        words_per_col = 25
+                        cols = st.columns(4)
+                        for i, word in enumerate(word_list):
+                            col_idx = i // words_per_col
+                            if col_idx < 4:
+                                cols[col_idx].write(word)
+                    else:
+                        st.info("ℹ️ Wortliste wird nach API-Aufruf verfügbar sein")
+            
+            with tab3:
+                analysis = preview_data.get("structured_analysis", {})
+                if analysis:
+                    st.markdown("**📊 Strukturierte Analyse:**")
+                    st.json(analysis)
+                    
+                    # Erkannte Wörter anzeigen
+                    detected_words = analysis.get('all_detected_words', [])
+                    if detected_words:
+                        st.markdown("**📝 Erkannte Wörter:**")
+                        st.write(f"**Anzahl:** {len(detected_words)} Wörter")
+                        with st.expander("Wortliste anzeigen"):
+                            # Wörter in Spalten anzeigen
+                            words_per_column = 20
+                            cols = st.columns(3)
+                            for i, word in enumerate(detected_words[:60]):  # Erste 60 Wörter
+                                col_idx = i // words_per_column
+                                if col_idx < len(cols):
+                                    cols[col_idx].write(f"• {word}")
+                else:
+                    st.info("ℹ️ Strukturierte Analyse wird nach API-Aufruf verfügbar sein")
+            
+            with tab4:
+                if validation.get("missing_words"):
+                    st.warning(f"**{validation['total_missing']} fehlende Wörter gefunden:**")
+                    st.write(", ".join(validation["missing_words"]))
+                    if validation['total_missing'] > len(validation["missing_words"]):
+                        st.write(f"... und {validation['total_missing'] - len(validation['missing_words'])} weitere")
+                else:
+                    st.success("✅ Alle Wörter aus der Analyse wurden in der Wortliste gefunden!")
+            
+            with tab5:
+                prompts = preview_data.get("prompts", {})
+                if prompts.get("word_extraction"):
+                    st.text_area("Prompt 1: Wortextraktion", prompts["word_extraction"], height=100)
+                if prompts.get("analysis"):
+                    st.text_area("Prompt 2: Strukturanalyse", prompts["analysis"], height=100)
+        
+        # NEU: Workflow-Schritte anzeigen
+        st.markdown("---")
+        st.markdown("### 🔄 Visio-Verarbeitungsablauf")
+        
+        workflow_steps = preview_data.get("workflow_steps", {})
+        
+        # Schritt 1: Wortextraktion
+        step1 = workflow_steps.get("step1_word_extraction", {})
+        with st.expander(f"📝 Schritt 1: Wortextraktion ({step1.get('status', 'unknown')})", expanded=True):
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.markdown("**🔍 Verwendeter Prompt:**")
+                st.text_area("", step1.get("prompt", ""), height=150, disabled=True, key="prompt1")
+            
+            with col2:
+                st.markdown("**📊 Ergebnis:**")
+                result_text = step1.get("result", "")
+                if len(result_text) > 500:
+                    result_text = result_text[:500] + "..."
+                st.text_area("", result_text, height=150, disabled=True, key="result1")
+        
+        # Schritt 2: Strukturierte Analyse
+        step2 = workflow_steps.get("step2_structured_analysis", {})
+        with st.expander(f"🔍 Schritt 2: Strukturierte Analyse ({step2.get('status', 'unknown')})", expanded=True):
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.markdown("**🔍 Verwendeter Prompt:**")
+                st.text_area("", step2.get("prompt", ""), height=150, disabled=True, key="prompt2")
+            
+            with col2:
+                st.markdown("**📊 Ergebnis:**")
+                result_text = step2.get("result", "")
+                if len(result_text) > 500:
+                    result_text = result_text[:500] + "..."
+                st.text_area("", result_text, height=150, disabled=True, key="result2")
+        
+        # NEU: Optimierter Workflow für Visio-Dokumente
+        if preview_data.get("upload_method") == "visio":
+            st.markdown("---")
+            st.markdown("### 🚀 Optimierter Workflow mit einheitlichem Prompt")
+            
+            # Workflow-Status initialisieren
+            if "workflow_step" not in st.session_state:
+                st.session_state.workflow_step = "prompt_review"
+            
+            # Schritt 1: Prompt überprüfen
+            if st.session_state.workflow_step == "prompt_review":
+                st.markdown("#### 📋 Schritt 1: Prompt überprüfen")
+                
+                # Prompt aus dem Backend holen
+                prompt_to_use = preview_data.get('prompt_to_use', '')
+                if not prompt_to_use:
+                    # Fallback-Prompt
+                    prompt_to_use = """Sie sind ein Experte für die Analyse von Qualitätsmanagement-Dokumenten nach ISO 13485 und MDR.
+
+Analysieren Sie das vorliegende QM-Dokument und extrahieren Sie ALLE relevanten Informationen in folgendem JSON-Format:
+
+{
+  "document_metadata": {
+    "title": "Dokumententitel",
+    "document_type": "process | work_instruction | form | norm",
+    "version": "Versionsnummer",
+    "chapter": "Kapitelnummer",
+    "valid_from": "Gültig ab Datum",
+    "author": "Autor/Ersteller",
+    "approved_by": "Freigegeben von"
+  },
+  "process_steps": [
+    {
+      "step_number": 1,
+      "label": "Kurzbeschreibung des Schritts",
+      "description": "Detaillierte Beschreibung der Aktivität",
+      "responsible_department": {
+        "short": "Abteilungskürzel (z.B. QM, WE, Service)",
+        "long": "Vollständiger Abteilungsname"
+      },
+      "inputs": ["Eingangsvoraussetzungen"],
+      "outputs": ["Ergebnisse/Dokumente"],
+      "decision": {
+        "is_decision": true,
+        "question": "Entscheidungsfrage",
+        "yes_action": "Aktion bei Ja",
+        "no_action": "Aktion bei Nein"
+      },
+      "notes": ["Zusätzliche Hinweise oder Anforderungen"]
+    }
+  ],
+  "referenced_documents": [
+    {
+      "type": "norm | sop | form | external",
+      "reference": "Dokumentenreferenz",
+      "title": "Dokumententitel"
+    }
+  ],
+  "definitions": [
+    {
+      "term": "Begriff",
+      "definition": "Erklärung"
+    }
+  ],
+  "compliance_requirements": [
+    {
+      "standard": "ISO 13485 | MDR | andere",
+      "section": "Abschnitt/Kapitel",
+      "requirement": "Anforderungsbeschreibung"
+    }
+  ],
+  "critical_rules": [
+    {
+      "rule": "Kritische Regel oder Grenzwert",
+      "consequence": "Konsequenz bei Nichteinhaltung"
+    }
+  ],
+  "all_detected_words": [
+    "alphabetisch sortierte liste aller sichtbaren wörter und zeichen ohne duplikate"
+  ]
+}
+
+Zusätzliche Anweisung:
+
+Bitte extrahieren Sie **alle sichtbaren Wörter und Zeichen** aus dem Dokument und geben Sie diese als **flache, alphabetisch sortierte Liste** unter dem Feld `all_detected_words` zurück. Beachten Sie:
+- Alle Tokens in **Kleinbuchstaben**
+- **Keine Duplikate**
+- **Satzzeichen und Sonderzeichen dürfen enthalten sein**
+- Aufzählungszeichen wie •, → oder - können ignoriert werden
+- Reihenfolge im Dokument spielt keine Rolle
+
+🔚 Geben Sie **nur ein gültiges JSON-Objekt** mit allen Informationen gemäß obigem Format zurück. Keine Kommentare, Erklärungen oder zusätzliche Ausgaben."""
+                
+                # Prompt anzeigen
+                st.markdown("**🤖 Einheitlicher Prompt für Wortliste + strukturierte Analyse:**")
+                with st.expander("📝 Prompt anzeigen (klicken zum Aufklappen)", expanded=True):
+                    st.code(prompt_to_use, language="text")
+                
+                # AI Provider Status und Auswahl
+                st.markdown("---")
+                st.markdown("**🤖 AI Provider Status:**")
+                
+                # Provider Status laden
+                provider_status = get_ai_provider_status_simple()
+                
+                if provider_status and "provider_status" in provider_status:
+                    providers = provider_status["provider_status"]
+                    
+                    # Verfügbare Provider anzeigen
+                    available_providers = ["auto"]
+                    for provider_name, details in providers.items():
+                        if details.get("available", False):
+                            available_providers.append(provider_name)
+                            status_icon = "✅" if details.get("available", False) else "❌"
+                            st.write(f"{status_icon} {provider_name}: {details.get('status', 'unknown')}")
+                    
+                    # Provider Auswahl
+                    st.markdown("**🎯 AI Provider Auswahl:**")
+                    selected_provider = st.selectbox(
+                        "Wähle AI Provider für die Analyse:",
+                        available_providers,
+                        index=0,
+                        help="Auto wählt automatisch den besten verfügbaren Provider"
+                    )
+                    
+                    # Provider Info anzeigen
+                    if selected_provider in providers:
+                        provider_info = providers[selected_provider]
+                        st.info(f"**{selected_provider}:** {provider_info.get('description', 'Keine Beschreibung')}")
+                    
+                    # Provider in Session State speichern
+                    st.session_state.selected_provider = selected_provider
+                else:
+                    st.warning("⚠️ Kann Provider-Status nicht laden")
+                    st.session_state.selected_provider = "auto"
+                
+                # Bestätigung für API-Aufruf
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Prompt bestätigen & API-Aufruf starten", type="primary"):
+                        st.session_state.workflow_step = "api_call"
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🔄 Zurück zur Vorschau"):
+                        st.session_state.workflow_step = "preview"
+                        st.rerun()
+            
+            # Schritt 2: API-Aufruf durchführen
+            elif st.session_state.workflow_step == "api_call":
+                st.markdown("#### 🚀 Schritt 2: API-Aufruf mit einheitlichem Prompt")
+                
+                form_data = st.session_state.get("upload_form_data", {})
+                
+                # Workflow-Status anzeigen
+                st.markdown("**📋 Workflow-Status:**")
+                workflow_status = {
+                    "🔍 API-Verbindungstest": "⏳ Läuft...",
+                    "📡 API-Aufruf": "⏳ Läuft...",
+                    "🔍 JSON-Parsing": "⏳ Läuft...",
+                    "📊 Validierung": "⏳ Läuft..."
+                }
+                
+                for step, status in workflow_status.items():
+                    st.write(f"{step}: {status}")
+                
+                with st.spinner("🤖 Führe optimierten Workflow durch..."):
+                    try:
+                        # Optimierten Workflow aufrufen
+                        selected_provider = st.session_state.get("selected_provider", "auto")
+                        result = process_document_with_prompt(
+                            form_data["file"], 
+                            upload_method="visio", 
+                            document_type=form_data["document_type"], 
+                            confirm_prompt=True,
+                            preferred_provider=selected_provider
+                        )
+                        
+                        if result and result.get('success'):
+                            # Erfolgsmeldung mit Details
+                            st.success("✅ Optimierter Workflow erfolgreich abgeschlossen!")
+                            
+                            # Workflow-Schritte anzeigen
+                            workflow_steps = result.get('workflow_steps', {})
+                            if workflow_steps:
+                                st.markdown("**📋 Workflow-Schritte:**")
+                                for step_name, step_info in workflow_steps.items():
+                                    status_icon = "✅" if step_info.get('status') == 'completed' else "❌"
+                                    st.write(f"{status_icon} {step_name}: {step_info.get('details', 'N/A')}")
+                            
+                            # AI Provider Status anzeigen
+                            api_status = result.get('api_connection_status', {})
+                            if api_status:
+                                st.markdown("**🤖 AI Provider Status:**")
+                                st.write(f"Status: {api_status.get('status', 'unknown')}")
+                                st.write(f"Verfügbare Provider: {', '.join(api_status.get('available_providers', []))}")
+                                st.write(f"Nachricht: {api_status.get('message', 'N/A')}")
+                            
+                            # Verwendeter Provider anzeigen
+                            transparency_info = result.get('transparency_info', {})
+                            if transparency_info:
+                                st.markdown("**🎯 Verwendeter Provider:**")
+                                provider_used = transparency_info.get('provider_used', 'unknown')
+                                st.write(f"Provider: {provider_used}")
+                                st.write(f"Verfügbare Provider: {', '.join(transparency_info.get('available_providers', []))}")
+                            
+                            # Validierung anzeigen
+                            validation = result.get('validation', {})
+                            if validation:
+                                st.markdown("**📊 Validierungsergebnis:**")
+                                coverage = validation.get('coverage', 0)
+                                status = validation.get('status', 'UNKNOWN')
+                                status_color = "green" if status == "VERIFIED" else "orange" if status == "WARNING" else "red"
+                                st.write(f"Abdeckung: {coverage:.1f}%")
+                                st.write(f"Status: :{status_color}[{status}]")
+                            
+                            # Debug: Zeige die API-Antwort
+                            with st.expander("🔍 Debug: Komplette API-Antwort anzeigen"):
+                                st.json(result)
+                            
+                            st.session_state.final_result = result
+                            st.session_state.workflow_step = "results"
+                            st.rerun()
+                        else:
+                            st.error("❌ API-Aufruf fehlgeschlagen")
+                            if result:
+                                st.error(f"API-Antwort: {result}")
+                            if st.button("🔄 Zurück zum Prompt"):
+                                st.session_state.workflow_step = "prompt_review"
+                                st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Fehler beim API-Aufruf: {e}")
+                        st.error("🔍 Mögliche Ursachen:")
+                        st.write("• API-Verbindung nicht verfügbar")
+                        st.write("• JSON-Parsing fehlgeschlagen")
+                        st.write("• OpenAI API Key nicht konfiguriert")
+                        if st.button("🔄 Zurück zum Prompt"):
+                            st.session_state.workflow_step = "prompt_review"
+                            st.rerun()
+            
+            # Schritt 3: Ergebnisse anzeigen
+            elif st.session_state.workflow_step == "results":
+                st.markdown("#### ✅ Schritt 3: Ergebnisse")
+                
+                final_result = st.session_state.get('final_result', {})
+                
+                # Erfolgsmeldung
+                st.success("🎉 Optimierter Workflow erfolgreich abgeschlossen!")
+                
+                # Metriken
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    api_calls = final_result.get('debug_info', {}).get('api_calls', 0)
+                    st.metric("📡 API-Aufrufe", api_calls)
+                
+                with col2:
+                    validation = final_result.get('validation', {})
+                    coverage = validation.get('coverage', 0)
+                    st.metric("📊 Abdeckung", f"{coverage:.1f}%")
+                
+                with col3:
+                    detected_words = final_result.get('detected_words', [])
+                    st.metric("📝 Wörter erkannt", len(detected_words))
+                
+                # Debug: Zeige die komplette API-Antwort
+                st.markdown("**🔍 Debug: Komplette API-Antwort:**")
+                with st.expander("API-Antwort anzeigen", expanded=True):
+                    st.json(final_result)
+                
+                # Strukturierte Analyse
+                structured_analysis = final_result.get('structured_analysis', {})
+                if structured_analysis:
+                    st.markdown("**📊 Strukturierte Analyse:**")
+                    
+                    # Vollständige JSON-Anzeige
+                    with st.expander("🔍 Vollständige JSON-Analyse anzeigen", expanded=True):
+                        st.json(structured_analysis)
+                    
+                    # Dokument-Metadaten
+                    metadata = structured_analysis.get('document_metadata', {})
+                    if metadata:
+                        st.markdown("##### 📋 Dokument-Metadaten")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Titel:** {metadata.get('title', 'N/A')}")
+                            st.write(f"**Typ:** {metadata.get('document_type', 'N/A')}")
+                            st.write(f"**Version:** {metadata.get('version', 'N/A')}")
+                        with col2:
+                            st.write(f"**Autor:** {metadata.get('author', 'N/A')}")
+                            st.write(f"**Freigegeben von:** {metadata.get('approved_by', 'N/A')}")
+                            st.write(f"**Gültig ab:** {metadata.get('valid_from', 'N/A')}")
+                    
+                    # Prozessschritte
+                    process_steps = structured_analysis.get('process_steps', [])
+                    if process_steps:
+                        st.markdown("##### ⚙️ Prozessschritte")
+                        for i, step in enumerate(process_steps[:5], 1):  # Erste 5 Schritte
+                            with st.expander(f"Schritt {i}: {step.get('label', 'Unbekannt')}"):
+                                st.write(f"**Beschreibung:** {step.get('description', 'N/A')}")
+                                responsible = step.get('responsible_department', {})
+                                if responsible:
+                                    st.write(f"**Verantwortlich:** {responsible.get('long', 'N/A')}")
+                    
+                    # Erkannte Wörter
+                    detected_words = structured_analysis.get('all_detected_words', [])
+                    if detected_words:
+                        st.markdown("##### 📝 Erkannte Wörter")
+                        with st.expander(f"Wortliste anzeigen ({len(detected_words)} Wörter)"):
+                            # Wörter in Spalten anzeigen
+                            words_per_column = 20
+                            cols = st.columns(3)
+                            for i, word in enumerate(detected_words[:60]):  # Erste 60 Wörter
+                                col_idx = i // words_per_column
+                                if col_idx < len(cols):
+                                    cols[col_idx].write(f"• {word}")
+                else:
+                    st.warning("⚠️ Keine strukturierte Analyse verfügbar")
+                
+                # Einfacher Test-Button
+                st.markdown("---")
+                st.markdown("**🧪 Einfacher Vision-Test:**")
+                if st.button("🔍 Teste Firmenname-Erkennung", type="secondary"):
+                    form_data = st.session_state.get("upload_form_data", {})
+                    if form_data and form_data.get("file"):
+                        with st.spinner("🔍 Teste Vision API..."):
+                            try:
+                                # Datei für Test vorbereiten
+                                file_data = form_data["file"]
+                                file_content = file_data.read()
+                                file_data.seek(0)  # Reset file pointer
+                                
+                                # Test-API aufrufen
+                                files = {"file": (file_data.name, file_content, file_data.type)}
+                                response = requests.post(
+                                    "http://localhost:8000/api/test/simple-vision",
+                                    files=files,
+                                    timeout=60
+                                )
+                                
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    st.success(f"✅ Test erfolgreich!")
+                                    st.write(f"**Firmenname:** {result.get('firm_name', 'N/A')}")
+                                    st.write(f"**Dauer:** {result.get('duration_seconds', 0)}s")
+                                    st.write(f"**Bildgröße:** {result.get('image_size_bytes', 0)} Bytes")
+                                else:
+                                    st.error(f"❌ Test fehlgeschlagen: {response.status_code} - {response.text}")
+                            except Exception as e:
+                                st.error(f"❌ Test-Fehler: {str(e)}")
+                    else:
+                        st.warning("⚠️ Bitte zuerst eine Datei hochladen")
+                
+                # Freigabe-Buttons
+                st.markdown("---")
+                col1, col2, col3 = st.columns([1, 1, 1])
+                
+                with col1:
+                    if st.button("🔄 Neuer Workflow", use_container_width=True):
+                        st.session_state.workflow_step = "prompt_review"
+                        st.session_state.final_result = None
+                        st.rerun()
+                
+                with col2:
+                    if st.button("❌ Abbrechen", use_container_width=True):
+                        st.session_state.upload_preview = None
+                        st.session_state.upload_form_data = None
+                        st.session_state.workflow_step = None
+                        st.session_state.final_result = None
+                        st.rerun()
+                
+                with col3:
+                    if st.button("✅ Freigeben & Speichern", type="primary", use_container_width=True):
+                        # Finale Speicherung mit den gespeicherten Form-Daten
+                        form_data = st.session_state.get("upload_form_data", {})
+                        if form_data:
+                            with st.spinner("💾 Speichere Dokument..."):
+                                try:
+                                    result = upload_document_with_file(
+                                        file_data=form_data["file"],
+                                        document_type=form_data["document_type"],
+                                        creator_id=st.session_state.current_user["id"],
+                                        title=form_data["title"],
+                                        version=form_data["version"],
+                                        content=form_data["content"],
+                                        remarks=form_data["remarks"],
+                                        chapter_numbers=form_data["chapter_numbers"],
+                                        upload_method=form_data["upload_method"]
+                                    )
+                                    
+                                    if result:
+                                        st.session_state.upload_success = result
+                                        st.session_state.upload_preview = None
+                                        st.session_state.upload_form_data = None
+                                        st.session_state.workflow_step = None
+                                        st.session_state.final_result = None
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Fehler beim Speichern des Dokuments")
+                                        
+                                except Exception as e:
+                                    st.error(f"❌ Fehler beim Speichern: {str(e)}")
+        
+        # Standard-Freigabe-Buttons für OCR-Dokumente
+        else:
+            st.markdown("---")
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col2:
+                if st.button("❌ Abbrechen", use_container_width=True):
+                    st.session_state.upload_preview = None
+                    st.session_state.upload_form_data = None
+                    st.rerun()
+            
+            with col3:
+                if st.button("✅ Freigeben & Speichern", type="primary", use_container_width=True):
+                    # Finale Speicherung mit den gespeicherten Form-Daten
+                    form_data = st.session_state.get("upload_form_data", {})
+                    if form_data:
+                        with st.spinner("💾 Speichere Dokument..."):
+                            try:
+                                result = upload_document_with_file(
+                                    file_data=form_data["file"],
+                                    document_type=form_data["document_type"],
+                                    creator_id=st.session_state.current_user["id"],
+                                    title=form_data["title"],
+                                    version=form_data["version"],
+                                    content=form_data["content"],
+                                    remarks=form_data["remarks"],
+                                    chapter_numbers=form_data["chapter_numbers"],
+                                    upload_method=form_data["upload_method"]
+                                )
+                                
+                                if result:
+                                    st.session_state.upload_success = result
+                                    st.session_state.upload_preview = None
+                                    st.session_state.upload_form_data = None
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Fehler beim Speichern des Dokuments")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Fehler beim Speichern: {str(e)}")
+        
+        return  # Verhindere das Anzeigen des Upload-Formulars
+    
+    # Upload Form (nur anzeigen, wenn keine Vorschau aktiv ist)
     with st.form("upload_form", clear_on_submit=False):
         st.markdown("### 📁 Datei auswählen")
         
@@ -1097,6 +1770,17 @@ def render_upload_page():
         col1, col2 = st.columns(2)
         
         with col1:
+            # NEU: Upload-Methode Auswahl
+            upload_method = st.selectbox(
+                "Upload-Methode",
+                options=["ocr", "visio"],
+                format_func=lambda x: {
+                    "ocr": "📄 OCR - Für textbasierte Dokumente (Normen, Richtlinien)",
+                    "visio": "🖼️ Visio - Für grafische Dokumente (Flussdiagramme, SOPs)"
+                }[x],
+                help="Wählen Sie die passende Verarbeitungsmethode für Ihr Dokument"
+            )
+            
             # Dokumenttyp - verfügbare Typen laden
             doc_types = get_document_types()
             doc_type_options = {
@@ -1117,37 +1801,45 @@ def render_upload_page():
                 available_options = {"OTHER": "🗂️ Sonstige"}
             
             document_type = st.selectbox(
-                "Dokumenttyp",
+                "Dokumenttyp *",
                 options=list(available_options.keys()),
                 format_func=lambda x: available_options[x],
                 index=0,
-                help="Der Dokumenttyp wird automatisch gesetzt falls nicht ausgewählt"
+                help="Pflichtfeld: Der Dokumenttyp bestimmt die Verarbeitungslogik"
             )
             
             version = st.text_input("Version", value="1.0", help="Standardwert: 1.0")
         
         with col2:
             title = st.text_input(
-                "Titel (optional)", 
-                help="Wird automatisch aus dem Dokumentinhalt extrahiert falls leer"
+                "Titel *", 
+                help="Pflichtfeld: Dokumententitel"
             )
             
             content = st.text_area(
                 "Beschreibung (optional)", 
                 help="Wird automatisch aus dem Dokumentinhalt extrahiert falls leer"
             )
+            
+            # NEU: Kapitel-Nummern als Pflichtfeld bei bestimmten Dokumenttypen
+            if document_type in ["STANDARD_NORM", "REGULATION", "GUIDANCE_DOCUMENT"]:
+                chapter_numbers = st.text_input(
+                    "Relevante Kapitel *", 
+                    help="Pflichtfeld für Normen: z.B. 4.2.3, 7.5.1"
+                )
+            else:
+                chapter_numbers = st.text_input(
+                    "Relevante Kapitel (optional)", 
+                    help="z.B. 4.2.3, 7.5.1"
+                )
         
         # Erweiterte Optionen
         with st.expander("🔧 Erweiterte Optionen"):
             remarks = st.text_area("Bemerkungen (optional)")
-            chapter_numbers = st.text_input(
-                "Relevante Kapitel (optional)", 
-                help="z.B. 4.2.3, 7.5.1"
-            )
         
         # Submit Button
         submit_button = st.form_submit_button(
-            "🚀 Dokument hochladen", 
+            "🔍 Vorschau generieren",  # Geändert von "Dokument hochladen"
             use_container_width=True,
             type="primary"
         )
@@ -1157,50 +1849,52 @@ def render_upload_page():
                 st.error("❌ Bitte wählen Sie eine Datei aus!")
                 return
             
-            with st.spinner("📤 Upload läuft..."):
+            if not title or title.strip() == "":
+                st.error("❌ Titel ist ein Pflichtfeld!")
+                return
+                
+            if document_type in ["STANDARD_NORM", "REGULATION", "GUIDANCE_DOCUMENT"] and (not chapter_numbers or chapter_numbers.strip() == ""):
+                st.error("❌ Kapitel-Nummern sind für Normen ein Pflichtfeld!")
+                return
+            
+            with st.spinner("🔄 Generiere Vorschau..."):
                 try:
-                    # Upload durchführen
-                    result = upload_document_with_file(
-                        file_data=uploaded_file,
-                        document_type=document_type,
-                        creator_id=st.session_state.current_user["id"],
-                        title=title,
-                        version=version,
-                        content=content,
-                        remarks=remarks,
-                        chapter_numbers=chapter_numbers
+                    # Form-Daten für späteren Upload speichern
+                    st.session_state.upload_form_data = {
+                        "file": uploaded_file,
+                        "document_type": document_type,
+                        "title": title,
+                        "version": version,
+                        "content": content,
+                        "remarks": remarks,
+                        "chapter_numbers": chapter_numbers,
+                        "upload_method": upload_method
+                    }
+                    
+                    # Vorschau generieren
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    form_data = {
+                        "upload_method": upload_method,
+                        "document_type": document_type
+                    }
+                    
+                    response = requests.post(
+                        f"{API_BASE_URL}/api/documents/preview",
+                        files=files,
+                        data=form_data,
+                        timeout=60  # Längeres Timeout für Visio-Verarbeitung
                     )
                     
-                    if result:
-                        st.session_state.upload_success = result
-                        st.success("✅ Upload erfolgreich!")
-                        time.sleep(1)
+                    if response.status_code == 200:
+                        preview_data = response.json()
+                        st.session_state.upload_preview = preview_data
                         st.rerun()
                     else:
-                        st.error("❌ Upload fehlgeschlagen!")
-                        
-                except ValueError as e:
-                    # Duplikat-Fehler speziell behandeln
-                    if "DUPLIKAT" in str(e):
-                        error_msg = str(e).replace("DUPLIKAT:", "").strip()
-                        st.markdown(f"""
-                        <div class="warning-box">
-                            <h4>⚠️ Dokument-Duplikat erkannt!</h4>
-                            <p>{error_msg}</p>
-                            <p><strong>Lösungsvorschläge:</strong></p>
-                            <ul>
-                                <li>Verwenden Sie einen anderen Titel</li>
-                                <li>Laden Sie eine andere Datei hoch</li>
-                                <li>Prüfen Sie die bestehenden Dokumente in der Dokumentenverwaltung</li>
-                            </ul>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.error(f"❌ Validierungsfehler: {e}")
+                        error_detail = response.json().get('detail', response.text)
+                        st.error(f"❌ Vorschau-Fehler: {error_detail}")
                         
                 except Exception as e:
-                    st.error(f"❌ Upload-Fehler: {e}")
-                    logger.error(f"Upload Exception: {e}")
+                    st.error(f"❌ Fehler bei der Vorschau-Generierung: {str(e)}")
 
 def render_documents_page():
     """Rendert die Dokumentenverwaltung"""
@@ -3180,10 +3874,16 @@ def simple_ai_prompt_test(prompt: str, provider: str = "auto") -> Optional[Dict]
 def get_ai_provider_status_simple() -> Optional[Dict]:
     """Lädt den Status aller AI Provider"""
     def _get_status():
-        response = requests.get(f"{API_BASE_URL}/api/ai/free-providers-status", timeout=REQUEST_TIMEOUT)
-        if response.status_code == 200:
-            return response.json()
-        return None
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/ai/free-providers-status", timeout=REQUEST_TIMEOUT)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Provider Status HTTP Error: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Provider Status Error: {e}")
+            return None
     
     result = safe_api_call(_get_status)
     return result
@@ -3237,7 +3937,7 @@ def render_ai_prompt_test_page():
     st.subheader("🧪 AI Prompt Test")
     
     # Provider Auswahl
-    available_providers = ["auto", "ollama", "google_gemini", "openai_4o_mini", "rule_based"]
+    available_providers = ["auto", "ollama", "openai_4o_mini", "google_gemini", "rule_based"]
     
     if provider_status and "provider_status" in provider_status:
         # Nur verfügbare Provider anzeigen
@@ -3903,6 +4603,209 @@ def render_my_tasks_page():
         st.error("❌ Fehler beim Laden der Aufgaben")
         if tasks_result:
             st.error(f"Fehler: {tasks_result.get('error', 'Unbekannt')}")
+
+def render_optimized_workflow():
+    """🚀 Optimierter Workflow mit einheitlichem Prompt"""
+    st.markdown("### 🚀 Optimierter Workflow")
+    st.markdown("**Einheitlicher Prompt für Wortliste + strukturierte Analyse**")
+    
+    # Backend-Status prüfen
+    if not check_backend_status():
+        st.error("❌ Backend nicht erreichbar!")
+        return
+    
+    # Dokumenttyp auswählen
+    document_type = st.selectbox(
+        "📋 Dokumenttyp:",
+        ["SOP", "WORK_INSTRUCTION", "PROCEDURE", "FORM", "OTHER"],
+        format_func=lambda x: {
+            "SOP": "📋 SOP - Standard Operating Procedure",
+            "WORK_INSTRUCTION": "📝 Arbeitsanweisung",
+            "PROCEDURE": "⚙️ Verfahrensdokument",
+            "FORM": "📄 Formular",
+            "OTHER": "📁 Sonstiges"
+        }[x],
+        help="Wählen Sie den passenden Dokumenttyp für optimale Analyse"
+    )
+    
+    # Datei-Upload
+    uploaded_file = st.file_uploader(
+        "📁 Dokument hochladen:",
+        type=['pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg'],
+        help="Unterstützte Formate: PDF, DOCX, DOC, PNG, JPG"
+    )
+    
+    if uploaded_file:
+        st.success(f"✅ Datei geladen: {uploaded_file.name} ({uploaded_file.size} Bytes)")
+        
+        # Workflow-Status
+        if 'workflow_step' not in st.session_state:
+            st.session_state.workflow_step = "preview"
+        
+        # Schritt 1: PNG-Vorschau erstellen
+        if st.session_state.workflow_step == "preview":
+            st.markdown("#### 📸 Schritt 1: PNG-Vorschau erstellen")
+            
+            if st.button("🖼️ PNG-Vorschau generieren", type="primary"):
+                with st.spinner("🖼️ Erstelle PNG-Vorschau..."):
+                    result = process_document_with_prompt(
+                        uploaded_file, 
+                        upload_method="visio", 
+                        document_type=document_type, 
+                        confirm_prompt=False
+                    )
+                
+                if result and result.get('success'):
+                    st.session_state.preview_result = result
+                    st.session_state.workflow_step = "prompt_review"
+                    st.rerun()
+                else:
+                    st.error("❌ PNG-Vorschau fehlgeschlagen")
+        
+        # Schritt 2: Prompt überprüfen
+        elif st.session_state.workflow_step == "prompt_review":
+            st.markdown("#### 📋 Schritt 2: Prompt überprüfen")
+            
+            preview_result = st.session_state.get('preview_result', {})
+            
+            # PNG-Vorschau anzeigen
+            if preview_result.get('preview_image'):
+                st.markdown("**📸 PNG-Vorschau:**")
+                try:
+                    # Base64-Bild korrekt verarbeiten
+                    import base64
+                    import io
+                    from PIL import Image
+                    
+                    # Base64-String dekodieren
+                    image_data = base64.b64decode(preview_result['preview_image'])
+                    image = Image.open(io.BytesIO(image_data))
+                    
+                    # Bild anzeigen
+                    st.image(image, caption="Dokument-Vorschau", use_container_width=True)
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Anzeigen der Vorschau: {e}")
+                    st.code(f"Base64-Länge: {len(preview_result['preview_image'])} Zeichen")
+            
+            # Prompt anzeigen
+            prompt_to_use = preview_result.get('prompt_to_use', '')
+            if prompt_to_use:
+                st.markdown("**🤖 Einheitlicher Prompt:**")
+                with st.expander("📝 Prompt anzeigen (klicken zum Aufklappen)"):
+                    st.code(prompt_to_use, language="text")
+            
+            # Bestätigung für API-Aufruf
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Prompt bestätigen & API-Aufruf starten", type="primary"):
+                    st.session_state.workflow_step = "api_call"
+                    st.rerun()
+            
+            with col2:
+                if st.button("🔄 Zurück zur Vorschau"):
+                    st.session_state.workflow_step = "preview"
+                    st.rerun()
+        
+        # Schritt 3: API-Aufruf durchführen
+        elif st.session_state.workflow_step == "api_call":
+            st.markdown("#### 🚀 Schritt 3: API-Aufruf mit einheitlichem Prompt")
+            
+            with st.spinner("🤖 Führe API-Analyse durch..."):
+                result = process_document_with_prompt(
+                    uploaded_file, 
+                    upload_method="visio", 
+                    document_type=document_type, 
+                    confirm_prompt=True
+                )
+            
+            if result and result.get('success'):
+                st.session_state.final_result = result
+                st.session_state.workflow_step = "results"
+                st.rerun()
+            else:
+                st.error("❌ API-Aufruf fehlgeschlagen")
+                if st.button("🔄 Zurück zum Prompt"):
+                    st.session_state.workflow_step = "prompt_review"
+                    st.rerun()
+        
+        # Schritt 4: Ergebnisse anzeigen
+        elif st.session_state.workflow_step == "results":
+            st.markdown("#### ✅ Schritt 4: Ergebnisse")
+            
+            final_result = st.session_state.get('final_result', {})
+            
+            # Erfolgsmeldung
+            st.success("🎉 Optimierter Workflow erfolgreich abgeschlossen!")
+            
+            # Metriken
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                api_calls = final_result.get('debug_info', {}).get('api_calls', 0)
+                st.metric("📡 API-Aufrufe", api_calls)
+            
+            with col2:
+                validation = final_result.get('validation', {})
+                coverage = validation.get('coverage', 0)
+                st.metric("📊 Abdeckung", f"{coverage:.1f}%")
+            
+            with col3:
+                detected_words = final_result.get('detected_words', [])
+                st.metric("📝 Wörter erkannt", len(detected_words))
+            
+            # PNG-Vorschau
+            if final_result.get('preview_image'):
+                st.markdown("**📸 Dokument-Vorschau:**")
+                st.image(final_result['preview_image'], caption="Dokument-Vorschau", use_column_width=True)
+            
+            # Strukturierte Analyse
+            structured_analysis = final_result.get('structured_analysis', {})
+            if structured_analysis:
+                st.markdown("**📊 Strukturierte Analyse:**")
+                
+                # Dokument-Metadaten
+                metadata = structured_analysis.get('document_metadata', {})
+                if metadata:
+                    st.markdown("##### 📋 Dokument-Metadaten")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Titel:** {metadata.get('title', 'N/A')}")
+                        st.write(f"**Typ:** {metadata.get('document_type', 'N/A')}")
+                        st.write(f"**Version:** {metadata.get('version', 'N/A')}")
+                    with col2:
+                        st.write(f"**Autor:** {metadata.get('author', 'N/A')}")
+                        st.write(f"**Freigegeben von:** {metadata.get('approved_by', 'N/A')}")
+                        st.write(f"**Gültig ab:** {metadata.get('valid_from', 'N/A')}")
+                
+                # Prozessschritte
+                process_steps = structured_analysis.get('process_steps', [])
+                if process_steps:
+                    st.markdown("##### ⚙️ Prozessschritte")
+                    for i, step in enumerate(process_steps[:5], 1):  # Erste 5 Schritte
+                        with st.expander(f"Schritt {i}: {step.get('label', 'Unbekannt')}"):
+                            st.write(f"**Beschreibung:** {step.get('description', 'N/A')}")
+                            responsible = step.get('responsible_department', {})
+                            if responsible:
+                                st.write(f"**Verantwortlich:** {responsible.get('long', 'N/A')}")
+                
+                # Erkannte Wörter
+                detected_words = structured_analysis.get('all_detected_words', [])
+                if detected_words:
+                    st.markdown("##### 📝 Erkannte Wörter")
+                    with st.expander(f"Wortliste anzeigen ({len(detected_words)} Wörter)"):
+                        # Wörter in Spalten anzeigen
+                        words_per_column = 20
+                        cols = st.columns(3)
+                        for i, word in enumerate(detected_words[:60]):  # Erste 60 Wörter
+                            col_idx = i // words_per_column
+                            if col_idx < len(cols):
+                                cols[col_idx].write(f"• {word}")
+            
+            # Workflow-Reset
+            if st.button("🔄 Neuer Workflow"):
+                st.session_state.workflow_step = "preview"
+                st.session_state.preview_result = None
+                st.session_state.final_result = None
+                st.rerun()
 
 # === NEUE DYNAMISCHE FUNKTION FÜR INTEREST GROUPS ===
 def get_interest_groups() -> List[Dict]:
