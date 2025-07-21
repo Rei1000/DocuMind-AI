@@ -42,57 +42,76 @@ class VisioPromptsManager:
     def _get_sop_prompts(self) -> Tuple[str, str]:
         """Prompts für SOP-Dokumente - Einheitlicher Prompt für Wortliste + Analyse"""
         prompt1 = """
+🔧 PROMPT-VERSION: v2.1.0 (2025-07-21) - Ergosana QM-System
+📋 ZWECK: Vollständige, auditkonforme JSON-Repräsentation für RAG-System
+🎯 COMPLIANCE: ISO 13485, MDR, FDA 21 CFR Part 820
+
 Sie sind ein Experte für die Analyse von Qualitätsmanagement-Dokumenten nach ISO 13485 und MDR.
 
-Analysieren Sie das vorliegende QM-Dokument und extrahieren Sie ALLE relevanten Informationen in folgendem JSON-Format:
+Analysieren Sie das vorliegende QM-Dokument und extrahieren Sie **alle relevanten Informationen** vollständig und strukturiert gemäß folgendem JSON-Format.
 
+Das Ziel ist es, eine **vollständige, auditkonforme JSON-Repräsentation** des Dokuments zu erzeugen. Diese wird in ein Retrieval-Augmented-Generation (RAG) System überführt und dient als Grundlage für rechtssichere Chat-Antworten im Rahmen von Audits, Normprüfungen und interner Qualitätssicherung.
+
+**WICHTIG:**
+- Es dürfen **keine sichtbaren Wörter, Zeichen, Formulierungen, Symbole oder Vorzeichen fehlen** – alles im PNG-Bild vorhandene muss sich **in der JSON-Struktur wiederfinden**, auch Fußnoten, Versionsvermerke, Spaltenüberschriften, etc.
+- Wenn ein Element nicht klar identifizierbar ist (z. B. Version, Autor), setzen Sie den Wert auf `"unknown"`.
+- Dokumente können verschiedene Layouts haben (z. B. Tabellen, Flussdiagramme, reine Texte) – analysieren Sie **alle Formate zuverlässig**.
+- Bei Prozessdarstellungen mit Spalten (z. B. links: Schritt, rechts: Beschreibung), muss die **rechte Spalte als `description`** dem jeweiligen Schritt zugeordnet werden.
+- **Abteilungen** wie „QM“, „WE“ (Wareneingang), „Service“, „Vertrieb“ etc. **müssen erkannt** und korrekt im Feld `responsible_department` eingetragen werden.
+- Entscheidungen im Prozess (z. B. Ja/Nein-Wege) müssen im Block `"decision"` vollständig erfasst sein.
+
+---
+
+JSON-Antwortformat:
+
+```json
 {
   "document_metadata": {
     "title": "Dokumententitel",
-    "document_type": "process | work_instruction | form | norm",
-    "version": "Versionsnummer",
-    "chapter": "Kapitelnummer",
-    "valid_from": "Gültig ab Datum",
-    "author": "Autor/Ersteller",
-    "approved_by": "Freigegeben von"
+    "document_type": "process | work_instruction | form | norm | unknown",
+    "version": "Versionsnummer oder 'unknown'",
+    "chapter": "Kapitelnummer oder 'unknown'",
+    "valid_from": "Gültig ab Datum (z. B. 2023-10-01) oder 'unknown'",
+    "author": "Autor/Ersteller oder 'unknown'",
+    "approved_by": "Freigegeben von oder 'unknown'"
   },
   "process_steps": [
     {
       "step_number": 1,
       "label": "Kurzbeschreibung des Schritts",
-      "description": "Detaillierte Beschreibung der Aktivität",
+      "description": "Detaillierte Beschreibung der Aktivität, ggf. rechte Spalte aus dem Dokument",
       "responsible_department": {
-        "short": "Abteilungskürzel (z.B. QM, WE, Service)",
-        "long": "Vollständiger Abteilungsname"
+        "short": "Abteilungskürzel (z. B. QM, WE, Service, Vertrieb)",
+        "long": "Vollständiger Abteilungsname oder 'unknown'"
       },
-      "inputs": ["Eingangsvoraussetzungen"],
-      "outputs": ["Ergebnisse/Dokumente"],
+      "inputs": ["Liste aller Eingangsvoraussetzungen oder 'unknown'"],
+      "outputs": ["Liste aller erzeugten Ergebnisse/Dokumente oder 'unknown'"],
       "decision": {
-        "is_decision": true,
-        "question": "Entscheidungsfrage",
-        "yes_action": "Aktion bei Ja",
-        "no_action": "Aktion bei Nein"
+        "is_decision": true | false,
+        "question": "Entscheidungsfrage oder leerer String",
+        "yes_action": "Aktion bei Ja oder leerer String",
+        "no_action": "Aktion bei Nein oder leerer String"
       },
-      "notes": ["Zusätzliche Hinweise oder Anforderungen"]
+      "notes": ["Zusätzliche Hinweise oder leeres Array"]
     }
   ],
   "referenced_documents": [
     {
-      "type": "norm | sop | form | external",
-      "reference": "Dokumentenreferenz",
-      "title": "Dokumententitel"
+      "type": "norm | sop | form | external | unknown",
+      "reference": "Dokumentenreferenz oder 'unknown'",
+      "title": "Dokumententitel oder 'unknown'"
     }
   ],
   "definitions": [
     {
-      "term": "Begriff",
-      "definition": "Erklärung"
+      "term": "Begriff aus dem Dokument",
+      "definition": "Erklärung des Begriffs"
     }
   ],
   "compliance_requirements": [
     {
-      "standard": "ISO 13485 | MDR | andere",
-      "section": "Abschnitt/Kapitel",
+      "standard": "ISO 13485 | MDR | andere | unknown",
+      "section": "Abschnitt/Kapitel oder 'unknown'",
       "requirement": "Anforderungsbeschreibung"
     }
   ],
@@ -101,21 +120,8 @@ Analysieren Sie das vorliegende QM-Dokument und extrahieren Sie ALLE relevanten 
       "rule": "Kritische Regel oder Grenzwert",
       "consequence": "Konsequenz bei Nichteinhaltung"
     }
-  ],
-  "all_detected_words": [
-    "alphabetisch sortierte liste aller sichtbaren wörter und zeichen ohne duplikate"
   ]
 }
-
-Zusätzliche Anweisung:
-
-Bitte extrahieren Sie **alle sichtbaren Wörter und Zeichen** aus dem Dokument und geben Sie diese als **flache, alphabetisch sortierte Liste** unter dem Feld `all_detected_words` zurück. Beachten Sie:
-- Alle Tokens in **Kleinbuchstaben**
-- **Keine Duplikate**
-- **Satzzeichen und Sonderzeichen dürfen enthalten sein**
-- Aufzählungszeichen wie •, → oder - können ignoriert werden
-- Reihenfolge im Dokument spielt keine Rolle
-
 🔚 Geben Sie **nur ein gültiges JSON-Objekt** mit allen Informationen gemäß obigem Format zurück. Keine Kommentare, Erklärungen oder zusätzliche Ausgaben.
 """
         
