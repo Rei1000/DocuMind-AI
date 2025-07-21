@@ -2725,9 +2725,11 @@ async def process_document_with_prompt(
             preview_image = base64.b64encode(images[0]).decode('utf-8')
             upload_logger.info(f"✅ PNG-Vorschau erstellt: {len(images[0])} Bytes")
             
-            # 5. Einheitlicher Prompt erstellen
-            prompt1 = _create_unified_visio_prompt(document_type)
-            upload_logger.info(f"📝 Einheitlicher Prompt erstellt: {len(prompt1)} Zeichen")
+            # 5. Zentrale Prompt-Verwaltung verwenden
+            from .visio_prompts import VisioPromptsManager
+            prompts_manager = VisioPromptsManager()
+            prompt1, _ = prompts_manager.get_prompts(document_type)
+            upload_logger.info(f"📝 Zentrale Prompts geladen für {document_type}: {len(prompt1)} Zeichen")
             
             # 6. Wenn keine Bestätigung: Nur Vorschau + Prompt zurückgeben
             if not confirm_prompt:
@@ -3088,84 +3090,7 @@ async def _validate_word_coverage(detected_words: List[str], structured_data: Di
             }
         }
 
-def _create_unified_visio_prompt(document_type: str) -> str:
-    """
-    📝 Erstellt einen einheitlichen Visio-Prompt für alle Dokumenttypen
-    
-    Args:
-        document_type: Typ des Dokuments (SOP, WI, etc.)
-        
-    Returns:
-        Einheitlicher Prompt-Text
-    """
-    return f"""
-Du analysierst ein QM-Flussdiagramm für Medizinprodukte. Extrahiere ALLE Informationen strukturiert als JSON.
-
-SPEZIFISCHE ERKENNUNGSAUFGABEN für Ergosana QM-Dokumente:
-
-1. PROZESS-REFERENZEN (kritisch für Compliance):
-   - PA 8.x (Prozessanweisungen) 
-   - VA x.x (Verfahrensanweisungen)
-   - QAB, CAPA, KVA Prozesse
-   - ISO 13485, MDR Referenzen
-
-2. FLUSSDIAGRAMM-STRUKTUR:
-   - Startpunkt → Entscheidungen → Endpunkt
-   - "Ja/Nein" Entscheidungspfade
-   - Verantwortlichkeiten (WE, Service, QMB, Vertrieb)
-   - Parallele Prozesse und Verzweigungen
-
-3. COMPLIANCE-TEXTBOXEN (rechts im Dokument):
-   - Detaillierte Verfahrensbeschreibungen
-   - Qualitätssicherungshinweise  
-   - Dokumentationsanforderungen
-   - Zeitvorgaben und Fristen
-
-4. ERGOSANA-SPEZIFISCHE ELEMENTE:
-   - Defektes Gerät → Gerät Reinigen → Wareneingang
-   - Reparaturerfassung → Fehlersuche → Wiederkehrender Fehler?
-   - KVA an Kunden → Reparatur durchführen
-   - ERP-Integration und Dokumentation
-
-AUSGABE-FORMAT (JSON):
-```json
-{{
-    "document_title": "Behandlung von Reparaturen",
-    "document_type": "{document_type}",
-    "all_detected_words": [
-        "Liste aller erkannten Wörter aus dem Dokument"
-    ],
-    "process_steps": [
-        {{
-            "step": "Schritt-Name",
-            "responsibility": "WE/Service/QMB/Vertrieb", 
-            "decision_point": true/false,
-            "options": ["Ja", "Nein"] oder null,
-            "description": "Detaillierte Beschreibung"
-        }}
-    ],
-    "process_references": [
-        "PA 8.5", "PA 8.2.1", etc.
-    ],
-    "compliance_requirements": [
-        "Spezifische Compliance-Anforderungen aus den Textboxen"
-    ],
-    "quality_controls": [
-        "Qualitätskontroll-Punkte im Prozess"
-    ],
-    "document_metadata": {{
-        "title": "Dokumenttitel",
-        "document_type": "{document_type}",
-        "version": "1.0",
-        "author": "Autor",
-        "approved_by": "Freigegeben von",
-        "valid_from": "Gültig ab"
-    }}
-}}
-```
-
-WICHTIG: Antworte NUR mit dem JSON-Format, keine zusätzlichen Erklärungen.
-"""
+# Zentrale Prompt-Verwaltung wird jetzt in visio_prompts.py verwaltet
 
 @app.post("/api/test/simple-vision", tags=["Test"])
 async def test_simple_vision(
