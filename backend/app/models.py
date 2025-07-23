@@ -78,6 +78,8 @@ class DocumentType(enum.Enum):
     STANDARD_NORM = "STANDARD_NORM"              # Standards und Normen (ISO, IEC, DIN, EN)
     REGULATION = "REGULATION"                    # Regulatorische Dokumente (MDR, FDA CFR)
     GUIDANCE_DOCUMENT = "GUIDANCE_DOCUMENT"      # Leitfäden und Guidance-Dokumente
+    PROCESS = "PROCESS"                          # Prozessdokumente (Flussdiagramme, Workflows)
+    PROMPT_TEST = "PROMPT_TEST"                  # Prompt-Test für Qualitätssicherung
     OTHER = "OTHER"                              # Sonstige/kundenspezifische Dokumente
 
 class EquipmentStatus(enum.Enum):

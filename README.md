@@ -2,7 +2,7 @@
 
 > **Version 3.1.0** | Ein intelligentes, ISO 13485-konformes Qualitätsmanagementsystem für die Medizintechnik mit KI-Unterstützung
 > 
-> **Letzte Aktualisierung:** 2. Juli 2025 | **Status:** ✅ Produktionsbereit
+> **Letzte Aktualisierung:** 2. Juli 2025 | **Status:** ✅ Produktionsbereit | **Upload-Methoden:** ✅ OCR & Visio
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com)
@@ -68,6 +68,7 @@
 - **Automatische Dokumentennummerierung** (DOC-YYYY-XXX Format)
 - **Intelligente Text-Extraktion** aus PDF, DOCX, TXT, XLSX
 - **🔍 Enhanced OCR Engine** für komplexe Dokumente mit Bildern und Flussdiagrammen (Neu in v3.1.0)
+- **🎯 Duale Upload-Methoden** - OCR & Visio für optimale Dokumentenverarbeitung (Neu in v3.1.0)
 - **Duplikat-Erkennung** über SHA-256 Hashing
 - **Audit-Trail** für alle Dokumentenänderungen
 - **Physische Dateispeicherung** mit Integritätsprüfung
@@ -824,6 +825,7 @@ streamlit run streamlit_app.py --server.port 8501 --server.headless true
 
 **✅ Neue Features:**
 - **🔍 Enhanced OCR Engine:** Multi-Layer OCR für komplexe Arbeitsanweisungen mit Flussdiagrammen und Bildern
+- **🎯 Duale Upload-Methoden:** OCR & Visio für optimale Dokumentenverarbeitung
 - **🧪 Live Provider-Test:** Direkter Test der KI-Provider vor Document-Upload
 - **⚡ Smart Provider-Auswahl:** Intelligente Empfehlungen basierend auf Verfügbarkeit
 - **🔄 Auto-Provider-Modus:** Automatische Wahl des besten verfügbaren Providers
@@ -842,6 +844,37 @@ streamlit run streamlit_app.py --server.port 8501 --server.headless true
 - **Verbesserte Fehlerbehandlung:** Robuste Error-Recovery bei Provider-Ausfällen
 - **Performance-Optimierung:** Schnellere Upload-Zeiten durch optimierte Provider-Auswahl
 - **Code-Qualität:** Refactoring für bessere Wartbarkeit und Testbarkeit
+
+### 🎯 Upload-Methoden: OCR & Visio
+
+Das KI-QMS System unterstützt **zwei verschiedene Upload-Methoden** für optimale Dokumentenverarbeitung:
+
+#### 📄 **OCR-Methode (Standard)**
+- **Zweck:** Automatische Textextraktion aus gescannten Dokumenten und Bildern
+- **Verwendung:** Für PDFs, gescannte Dokumente, Bilder mit Text
+- **Features:** 
+  - Multi-Layer OCR (EasyOCR + Tesseract)
+  - Automatische Bildvorverarbeitung
+  - Flussdiagramm-Text-Extraktion
+  - SmartArt/Shape-Analyse aus Word-Dokumenten
+- **Vorteile:** Vollautomatisch, keine manuelle Eingabe erforderlich
+
+#### 🎨 **Visio-Methode (Erweitert)**
+- **Zweck:** Strukturierte Analyse und Validierung von Dokumenten
+- **Verwendung:** Für komplexe QM-Dokumente, SOPs, Arbeitsanweisungen
+- **Features:**
+  - KI-basierte Dokumentenklassifizierung
+  - Automatische Metadaten-Extraktion
+  - Compliance-Check gegen ISO 13485
+  - Strukturierte JSON-Ausgabe
+  - Validierungsstatus-Tracking
+- **Vorteile:** Höhere Genauigkeit, strukturierte Daten, Audit-Trail
+
+#### 🔄 **Automatische Methodenauswahl**
+- **Standard:** OCR für alle Dokumente
+- **Intelligente Erkennung:** Automatische Umstellung auf Visio bei komplexen Dokumenten
+- **Manuelle Auswahl:** Benutzer kann Methode explizit wählen
+- **Fallback:** Immer OCR als sichere Basis
 
 ### 🧪 Provider-Test verwenden
 

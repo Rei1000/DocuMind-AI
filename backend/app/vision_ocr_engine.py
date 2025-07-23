@@ -416,6 +416,31 @@ class VisionOCREngine:
             if not self.client:
                 return {"success": False, "error": "OpenAI Client nicht verfügbar"}
             
+            # ✅ TOKENKONTROLLE: Prüfe Token-Limit
+            try:
+                import tiktoken
+                encoding = tiktoken.encoding_for_model("gpt-4o-mini")
+                prompt_tokens = len(encoding.encode(prompt))
+                image_tokens = 765  # Geschätzte Tokens für Bild (konservativ)
+                total_tokens = prompt_tokens + image_tokens
+                
+                if total_tokens > 128000:  # GPT-4o mini Token-Limit
+                    logger.error(f"❌ TOKENLIMIT ÜBERSCHRITTEN: {total_tokens} Tokens (Limit: 128000)")
+                    return {
+                        "success": False, 
+                        "error": "Fehler: Tokenlimit des Modells überschritten – Prompt und Bild sind zusammen zu groß.",
+                        "token_info": {
+                            "prompt_tokens": prompt_tokens,
+                            "image_tokens": image_tokens,
+                            "total_tokens": total_tokens,
+                            "limit": 128000
+                        }
+                    }
+                else:
+                    logger.info(f"✅ TOKENKONTROLLE: {total_tokens} Tokens (unter Limit: 128000)")
+            except Exception as token_error:
+                logger.warning(f"⚠️ Tokenkontrolle fehlgeschlagen: {token_error}")
+            
             # Rate-Limit-Behandlung mit Retry-Logic
             max_retries = 3
             base_delay = 5  # Start mit 5 Sekunden
@@ -439,7 +464,7 @@ class VisionOCREngine:
                                 ]
                             }
                         ],
-                        max_tokens=1000,
+                        max_tokens=16384,  # GPT-4o-mini Limit für vollständige JSON-Antworten
                         temperature=0.1  # Konsistente Ergebnisse
                     )
                     
@@ -466,7 +491,10 @@ class VisionOCREngine:
             
             # Parse JSON response mit robusterem Parsing
             response_text = response.choices[0].message.content or ""
+            usage = response.usage
             logger.info(f"🔍 Raw API-Antwort erhalten: {len(response_text)} Zeichen")
+            logger.info(f"📊 Token-Verbrauch: {usage.prompt_tokens} prompt + {usage.completion_tokens} completion = {usage.total_tokens} total")
+            logger.info(f"📄 API-Antwort Inhalt (vollständig): {response_text}")
             
             # Robusteres JSON-Parsing
             try:
@@ -852,9 +880,11 @@ Kontext: {context}
             # Ergebnisse kombinieren
             combined_analysis = self._combine_vision_results(results)
             
+            # 🔧 WICHTIG: Die Vision API gibt bereits das perfekte JSON zurück!
+            # KEINE weitere Verpackung in content-Feld!
+            # Die Vision API gibt direkt das gewünschte JSON zurück
             return {
                 'success': True,
-                'content': json.dumps(combined_analysis, ensure_ascii=False),  # Wichtig: content für Backend
                 'analysis': combined_analysis,
                 'images_processed': len(images),
                 'tokens_used': total_tokens,
@@ -872,6 +902,23 @@ Kontext: {context}
         """
         Kombiniert mehrere Vision-Analyse-Ergebnisse zu einem konsistenten Format.
         """
+        # 🔧 WICHTIG: Die Vision API gibt bereits das perfekte JSON zurück!
+        # Wir müssen nur das erste Ergebnis verwenden, da es bereits das gewünschte Format hat
+        if results and len(results) > 0:
+            first_result = results[0]
+            
+            # ✅ KRITISCH: Die Vision API gibt das JSON direkt in 'content' zurück!
+            if 'content' in first_result:
+                # Das ist das echte JSON aus der Vision API
+                return first_result['content']
+            elif 'extracted_text' in first_result:
+                # Fallback: Extrahierter Text (sollte JSON sein)
+                return first_result['extracted_text']
+            elif 'description' in first_result:
+                # Fallback: Beschreibung verwenden
+                return first_result['description']
+        
+        # Fallback: Alte Logik für Kompatibilität
         combined = {
             'text': '',
             'words': [],

@@ -214,28 +214,8 @@ test_upload_dokument.txt
 # TECHNISCHE DOKUMENTATION - VERTRAULICH UND LOKAL
 # =============================================================================
 # Alle technischen Analysen, Schemas und interne Dokumentation
-*-ANALYSIS.md
-*-SCHEMA*.md
-*-ROADMAP.md
-*-PLAN.md
-ENHANCED-*.md
-JSON-VALIDATION-*.md
-LANGCHAIN-*.md
-PROJEKT-ÜBERGABE-*.md
-API-BEST-PRACTICES.md
-API-ENDPOINTS-COMPLETE.md
-DATABASE-MODELS-ANALYSIS.md
-DEVELOPMENT-STANDARDS.md
-DEPLOYMENT.md
-MASTER-PROJECT-ANALYSIS.md
-NEXT-STEPS-ROADMAP.md
-PHASE1-STABILIZATION-PLAN.md
-QM-WORKFLOW-FEATURES.md
-SCHEMAS-ANALYSIS.md
-SCRIPTS-TOOLS-ANALYSIS.md
-UPLOAD-WORKFLOW-PLAN.md
-WORKFLOW-TESTING-GUIDE.md
-FIX_API_KEYS.md
-FREE-AI-SETUP.md
-CLEANUP-ROADMAP.md
+# README.md wird NICHT ausgeschlossen (Hauptdokumentation)
+*.md
+!README.md
+!LICENSE.md
 
