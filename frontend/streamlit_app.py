@@ -18,7 +18,7 @@ from datetime import datetime
 
 # ===== KONFIGURATION =====
 API_BASE_URL = "http://127.0.0.1:8000"  # OHNE /api Suffix!
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = 60
 MAX_FILE_SIZE_MB = 50
 
 # ===== LOGGING SETUP =====
@@ -142,7 +142,8 @@ def get_document_types() -> List[str]:
         return []
     
     result = safe_api_call(_get_types)
-    return result if result else ["OTHER", "QM_MANUAL", "SOP", "STANDARD_NORM", "WORK_INSTRUCTION"]
+    # VERBESSERTER FALLBACK: Nur die wichtigsten Typen
+    return result if result else ["OTHER", "SOP", "WORK_INSTRUCTION"]
 
 def upload_document_with_file(
     file_data, 
@@ -239,7 +240,7 @@ def test_simple_vision_api(file_data) -> Optional[Dict]:
             response = requests.post(
                 f"{API_BASE_URL}/api/test/simple-vision",
                 files=files,
-                timeout=60
+                timeout=180  # Längeres Timeout für Vision-API-Tests
             )
             
             if response.status_code == 200:
@@ -284,7 +285,7 @@ def process_document_with_prompt(file_data, upload_method: str = "visio", docume
                 f"{API_BASE_URL}/api/documents/process-with-prompt",
                 files=files,
                 data=data,
-                timeout=120  # Längerer Timeout für API-Aufrufe
+                timeout=300  # Längerer Timeout für API-Aufrufe (5 Minuten für komplexe Analysen)
             )
             
             if response.status_code == 200:
@@ -1257,14 +1258,8 @@ def render_unified_upload():
                 upload_method = preview_data.get("upload_method", "ocr")
                 
                 if upload_method == "visio":
-                    # IMMER Prompt direkt aus der visio_prompts.py laden (dynamisch)
+                    # IMMER Prompt dynamisch über API vom Backend laden
                     try:
-                        import sys
-                        import os
-                        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-                        from app.visio_prompts import VisioPromptsManager
-                        pm = VisioPromptsManager()
-                        
                         # Verwende den Dokumenttyp aus der Session oder aus form_data - VERBESSERT
                         current_document_type = st.session_state.get('document_type')
                         if not current_document_type:
@@ -1274,26 +1269,34 @@ def render_unified_upload():
                             # Synchronisiere Session-State
                             st.session_state.document_type = current_document_type
                         
-                        prompt_to_use = pm.get_prompts(current_document_type)
-                        st.success(f"✅ Prompt für '{current_document_type}' direkt aus visio_prompts.py geladen")
+                        # Lade Prompt über API vom Backend
+                        prompt_response = requests.get(f"{API_BASE_URL}/api/visio-prompts/{current_document_type}")
+                        
+                        if prompt_response.status_code != 200:
+                            st.error(f"❌ **KRITISCHER FEHLER:** Prompt konnte nicht vom Backend geladen werden: {prompt_response.status_code}")
+                            return
+                        
+                        prompt_data = prompt_response.json()
+                        prompt_to_use = prompt_data["prompt"]
+                        st.success(f"✅ Prompt für '{current_document_type}' dynamisch vom Backend geladen")
                         
                         # Prompt anzeigen - VERBESSERT: Keine Markdown-Ausgabe bei PROMPT_TEST
                         if current_document_type == "PROMPT_TEST":
                             st.markdown("**🤖 PROMPT-TEST: v2.0 (2025-07-21) - STRENGE QUALITÄTSSICHERUNG**")
                             st.text_area("Einheitlicher Prompt", prompt_to_use, height=300, disabled=True, key="tab5_prompt_test")
                         else:
-                            st.markdown("**🤖 Dynamischer Prompt aus visio_prompts.py:**")
+                            st.markdown("**🤖 Dynamischer Prompt vom Backend:**")
                             st.text_area("Einheitlicher Prompt", prompt_to_use, height=300, disabled=True, key="tab5_standard_prompt")
                         
                     except Exception as e:
                         st.error(f"❌ KRITISCHER FEHLER beim Laden des Prompts: {str(e)}")
                         st.error("🔧 Bitte überprüfen Sie:")
                         st.error("   - Backend läuft (http://localhost:8000)")
-                        st.error("   - visio_prompts.py ist korrekt")
-                        st.error("   - Python-Pfad ist korrekt")
+                        st.error("   - API-Endpoint ist verfügbar")
+                        st.error("   - Netzwerkverbindung ist korrekt")
                         
-                        # Fallback auf alte Prompts ENTFERNT - immer visio_prompts.py verwenden
-                        st.error("❌ Fallback-Prompts nicht verfügbar - visio_prompts.py ist erforderlich")
+                        # Fallback auf alte Prompts ENTFERNT - immer API verwenden
+                        st.error("❌ Fallback-Prompts nicht verfügbar - API ist erforderlich")
                 else:
                     # OCR-Methode - keine Prompts nötig
                     st.info("📄 **OCR-Verarbeitung**: Keine AI-Prompts erforderlich")
@@ -1311,45 +1314,55 @@ def render_unified_upload():
         upload_method = preview_data.get("upload_method", "ocr")
         
         if upload_method == "visio":
-            # ✅ KORREKT: Lade und zeige den Prompt aus visio_prompts.py
+            # ✅ KORREKT: Lade und zeige den Prompt dynamisch vom Backend
             try:
-                import sys
-                import os
-                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-                from app.visio_prompts import VisioPromptsManager
-                pm = VisioPromptsManager()
-                
                 # Dokumenttyp aus Session holen
                 form_data = st.session_state.get("upload_form_data", {})
                 current_document_type = form_data.get("document_type", "SOP")
                 
-                prompt_to_use = pm.get_prompts(current_document_type)
-                st.success(f"✅ Prompt für '{current_document_type}' geladen")
+                # Lade Prompt über API vom Backend
+                prompt_response = requests.get(f"{API_BASE_URL}/api/visio-prompts/{current_document_type}")
+                
+                if prompt_response.status_code != 200:
+                    st.error(f"❌ **KRITISCHER FEHLER:** Prompt konnte nicht vom Backend geladen werden: {prompt_response.status_code}")
+                    return
+                
+                prompt_data = prompt_response.json()
+                prompt_to_use = prompt_data["prompt"]
+                st.success(f"✅ Prompt für '{current_document_type}' dynamisch vom Backend geladen")
                 
                 # Prompt-Informationen anzeigen
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.markdown("**🤖 Dynamischer Prompt:**")
+                    st.markdown("**🤖 Dynamischer Prompt vom Backend:**")
                     st.text_area("Prompt", prompt_to_use, height=200, disabled=True, key="prompt_display")
                 
                 with col2:
                     st.markdown("**📊 Prompt-Info:**")
                     st.metric("Zeichen", len(prompt_to_use))
                     st.metric("Zeilen", prompt_to_use.count('\n') + 1)
+                    st.metric("Version", prompt_data.get('version', 'unbekannt'))
                     
                     # Prompt-Bearbeitung (optional)
-                    if st.button("📝 Prompt in visio_prompts öffnen", help="Öffnet die visio_prompts.py Datei zur Bearbeitung"):
-                        st.info("🔧 **HINWEIS:** Bearbeiten Sie den Prompt direkt in `backend/app/visio_prompts.py`")
-                        st.code("backend/app/visio_prompts.py", language="bash")
+                    if st.button("📝 Prompt-Info anzeigen", help="Zeigt Informationen über den aktuellen Prompt"):
+                        st.info("🔧 **HINWEIS:** Der Prompt wird dynamisch vom Backend geladen")
+                        st.code(f"API: {API_BASE_URL}/api/visio-prompts/{current_document_type}", language="bash")
                         
                         # Zeige aktuellen Prompt-Key
                         st.info(f"**Aktueller Prompt-Key:** `{current_document_type}`")
                         
-                        # Zeige verfügbare Prompts
-                        available_prompts = pm.get_available_prompts()
-                        st.markdown("**📋 Verfügbare Prompts:**")
-                        for prompt_name, description in available_prompts.items():
-                            st.write(f"• **{prompt_name}**: {description}")
+                        # Zeige verfügbare Prompts über API
+                        try:
+                            types_response = requests.get(f"{API_BASE_URL}/api/visio-prompts/types")
+                            if types_response.status_code == 200:
+                                available_prompts_data = types_response.json()
+                                st.markdown("**📋 Verfügbare Prompts:**")
+                                for prompt_name, prompt_info in available_prompts_data.items():
+                                    st.write(f"• **{prompt_name}**: {prompt_info.get('description', 'Keine Beschreibung')}")
+                            else:
+                                st.error("❌ Konnte verfügbare Prompts nicht laden")
+                        except Exception as e:
+                            st.error(f"❌ Fehler beim Laden der verfügbaren Prompts: {str(e)}")
                 
             except Exception as e:
                 st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
@@ -1412,27 +1425,29 @@ def render_unified_upload():
                         
                         # ✅ KRITISCHE SICHERHEIT: Verwende EXAKT den gleichen Prompt wie in der Vorschau
                         try:
-                            import sys
-                            import os
-                            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-                            from app.visio_prompts import VisioPromptsManager
-                            pm = VisioPromptsManager()
-                            
                             # Verwende den gleichen Dokumenttyp wie in der Vorschau
                             current_document_type = st.session_state.get('document_type')
                             if not current_document_type:
                                 current_document_type = form_data.get("document_type", "SOP")
                             
-                            # Lade den EXAKTEN Prompt, der in der Vorschau angezeigt wird
-                            prompt_to_use = pm.get_prompts(current_document_type)
+                            # Lade den EXAKTEN Prompt über die API vom Backend
+                            prompt_response = requests.get(f"{API_BASE_URL}/api/visio-prompts/{current_document_type}")
+                            
+                            if prompt_response.status_code != 200:
+                                st.error(f"❌ **KRITISCHER FEHLER:** Prompt konnte nicht vom Backend geladen werden: {prompt_response.status_code}")
+                                return
+                            
+                            prompt_data = prompt_response.json()
+                            prompt_to_use = prompt_data["prompt"]
                             
                             st.success(f"✅ **PROMPT-SICHERHEIT:** Verwende exakt den gleichen Prompt wie in der Vorschau")
                             st.info(f"📝 **DOKUMENTTYP:** {current_document_type}")
                             st.info(f"📏 **PROMPT-LÄNGE:** {len(prompt_to_use)} Zeichen")
+                            st.info(f"🔢 **VERSION:** {prompt_data.get('version', 'unbekannt')}")
                             
                         except Exception as e:
                             st.error(f"❌ **KRITISCHER FEHLER:** Prompt-Sicherheit fehlgeschlagen: {str(e)}")
-                            st.error("🔧 **LÖSUNG:** Bitte überprüfen Sie das Backend und visio_prompts.py")
+                            st.error("🔧 **LÖSUNG:** Bitte überprüfen Sie das Backend und die API-Verbindung")
                             return
                         
                         # ✅ PROMPT-SICHERHEIT: Übertrage den exakten Prompt an das Backend
@@ -1501,6 +1516,7 @@ def render_unified_upload():
             
             final_result = st.session_state.final_result
             structured_analysis = final_result.get("structured_analysis", "")
+            raw_ki_response = final_result.get("raw_ki_response", "")
             
             if structured_analysis:
                 st.success("✅ **SAUBERE KI-ANTWORT:** Entpackt und bereinigt")
@@ -1724,29 +1740,54 @@ def render_unified_upload():
             
             # Dokumenttyp - verfügbare Typen laden
             doc_types = get_document_types()
+            
+            # Debug-Ausgabe (nur im Entwicklungsmodus)
+            if st.session_state.get("debug_mode", False):
+                st.info(f"🔍 Debug: {len(doc_types)} Dokumenttypen vom Backend geladen")
+                st.json(doc_types)
+            
+            # Dynamische Dokumenttyp-Optionen basierend auf Backend
             doc_type_options = {
                 "OTHER": "🗂️ Sonstige",
                 "QM_MANUAL": "📖 QM-Handbuch", 
                 "SOP": "📋 SOP",
-                "PROCESS": "🔄 Prozess (Flussdiagramme, Workflows)",
-                "STANDARD_NORM": "⚖️ Norm/Standard (ISO, DIN, EN)",
                 "WORK_INSTRUCTION": "📝 Arbeitsanweisung",
                 "FORM": "📄 Formular",
+                "USER_MANUAL": "👤 Benutzerhandbuch",
+                "SERVICE_MANUAL": "🔧 Servicehandbuch",
+                "RISK_ASSESSMENT": "⚠️ Risikoanalyse",
+                "VALIDATION_PROTOCOL": "✅ Validierungsprotokoll",
+                "CALIBRATION_PROCEDURE": "⚖️ Kalibrierverfahren",
+                "AUDIT_REPORT": "🔍 Audit-Bericht",
+                "CAPA_DOCUMENT": "🛠️ CAPA-Dokumentation",
+                "TRAINING_MATERIAL": "🎓 Schulungsunterlagen",
                 "SPECIFICATION": "📐 Spezifikation",
-                "PROCEDURE": "🔄 Verfahren",
-                "POLICY": "📜 Richtlinie",
+                "STANDARD_NORM": "⚖️ Norm/Standard (ISO, DIN, EN)",
+                "REGULATION": "📜 Regulatorische Dokumente",
+                "GUIDANCE_DOCUMENT": "📋 Leitfäden",
+                "PROCESS": "🔄 Prozess (Flussdiagramme, Workflows)",
                 "PROMPT_TEST": "🧪 Prompt Test (Qualitätssicherung)"
             }
             
-            # Nur verfügbare Typen anzeigen
-            available_options = {k: v for k, v in doc_type_options.items() if k in doc_types}
-            if not available_options:
-                available_options = {"OTHER": "🗂️ Sonstige"}
+            # Alle verfügbaren Typen aus Backend anzeigen
+            available_options = {}
+            for doc_type in doc_types:
+                if doc_type in doc_type_options:
+                    available_options[doc_type] = doc_type_options[doc_type]
+                else:
+                    # Fallback für unbekannte Typen
+                    available_options[doc_type] = f"📄 {doc_type}"
+            
+            # Sortiere alphabetisch nach deutschen Namen
+            sorted_options = dict(sorted(available_options.items(), key=lambda x: x[1]))
+            
+            if not sorted_options:
+                sorted_options = {"OTHER": "🗂️ Sonstige"}
             
             document_type = st.selectbox(
                 "Dokumenttyp *",
-                options=list(available_options.keys()),
-                format_func=lambda x: available_options[x],
+                options=list(sorted_options.keys()),
+                format_func=lambda x: sorted_options[x],
                 index=0,
                 help="Pflichtfeld: Der Dokumenttyp bestimmt die Verarbeitungslogik"
             )
@@ -1795,6 +1836,12 @@ def render_unified_upload():
             if not title or title.strip() == "":
                 st.error("❌ Titel ist ein Pflichtfeld!")
                 return
+            
+            # Validierung: Dokumenttyp muss vom Backend unterstützt werden
+            if document_type not in doc_types:
+                st.error(f"❌ Dokumenttyp '{document_type}' wird vom Backend nicht unterstützt!")
+                st.error(f"Verfügbare Typen: {', '.join(doc_types[:5])}...")
+                return
                 
             if document_type in ["STANDARD_NORM", "REGULATION", "GUIDANCE_DOCUMENT"] and (not chapter_numbers or chapter_numbers.strip() == ""):
                 st.error("❌ Kapitel-Nummern sind für Normen ein Pflichtfeld!")
@@ -1829,7 +1876,7 @@ def render_unified_upload():
                         f"{API_BASE_URL}/api/documents/preview",
                         files=files,
                         data=form_data,
-                        timeout=60  # Längeres Timeout für Visio-Verarbeitung
+                        timeout=180  # Längeres Timeout für Visio-Verarbeitung (3 Minuten)
                     )
                     
                     if response.status_code == 200:
@@ -2253,25 +2300,13 @@ def render_users_page():
                 password = st.text_input("Passwort *", type="password", placeholder="Mindestens 8 Zeichen")
             
             with col2:
-                # Interessengruppen aus der Datenbank laden (live)
+                # Interessengruppen dynamisch vom Backend laden
+                organizational_units = get_organizational_units()
+                unit_names = [unit["name"] for unit in organizational_units]
+                
                 organizational_unit = st.selectbox(
                     "Abteilung",
-                    [
-                        "System Administration",      # Für QMS Admin
-                        "Einkauf",                   # procurement (ID 1)
-                        "Qualitätsmanagement",       # quality_management (ID 2)
-                        "Entwicklung",               # development (ID 3)
-                        "Produktion",                # production (ID 4)
-                        "Service & Support",         # service_support (ID 5)
-                        "Vertrieb",                  # sales (ID 6)
-                        "Regulatorische Angelegenheiten",  # regulatory (ID 7)
-                        "Klinik",                    # clinical (ID 8)
-                        "IT",                        # it (ID 9)
-                        "Geschäftsleitung",          # management (ID 10)
-                        "Externe Auditoren",         # external_auditors (ID 11)
-                        "Lieferanten",               # suppliers (ID 12)
-                        "Kunden"                     # customers (ID 13)
-                    ]
+                    unit_names
                 )
                 
                 approval_level = st.selectbox(
@@ -4564,7 +4599,7 @@ def get_interest_groups() -> List[Dict]:
             return []
         
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get("http://localhost:8000/api/interest-groups", headers=headers, timeout=10)
+        response = requests.get(f"{API_BASE_URL}/api/interest-groups", headers=headers, timeout=REQUEST_TIMEOUT)
         
         if response.status_code == 200:
             groups = response.json()
@@ -4577,6 +4612,43 @@ def get_interest_groups() -> List[Dict]:
     except Exception as e:
         print(f"❌ Interest Groups Fehler: {e}")
         return []
+
+def get_organizational_units() -> List[Dict]:
+    """Lädt verfügbare Abteilungen/Interest Groups vom Backend"""
+    def _get_units():
+        response = requests.get(f"{API_BASE_URL}/api/interest-groups", timeout=REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            groups = response.json()
+            # Mapping zu deutschen Namen für UI
+            unit_mapping = {
+                "procurement": "Einkauf",
+                "quality_management": "Qualitätsmanagement", 
+                "development": "Entwicklung",
+                "production": "Produktion",
+                "service_support": "Service & Support",
+                "sales": "Vertrieb",
+                "regulatory_affairs": "Regulatorische Angelegenheiten",
+                "clinical_affairs": "Klinische Angelegenheiten",
+                "post_market_surveillance": "Post-Market Surveillance",
+                "risk_management": "Risikomanagement",
+                "supplier_management": "Lieferantenmanagement",
+                "training": "Schulung",
+                "audit": "Audit"
+            }
+            
+            return [
+                {
+                    "name": unit_mapping.get(group.get("name", ""), group.get("name", "Unbekannt")),
+                    "id": group.get("id", 0),
+                    "original_name": group.get("name", "")
+                }
+                for group in groups
+            ]
+        return []
+    
+    result = safe_api_call(_get_units)
+    # FALLBACK: Mindestens System Admin
+    return result if result else [{"name": "System Administration", "id": 0, "original_name": "system_administration"}]
 
 # ===== MAIN APP =====
 def main():

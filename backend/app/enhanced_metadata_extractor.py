@@ -50,7 +50,7 @@ from json_parser import (
     validate_json_response
 )
 
-from prompts_enhanced import (
+from .rag_prompts import (
     build_enhanced_extraction_prompt,
     build_chunking_prompt,
     build_quality_assessment_prompt,

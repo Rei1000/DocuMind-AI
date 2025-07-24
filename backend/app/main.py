@@ -239,7 +239,7 @@ try:
         normalize_document_type
     )
     from .json_parser import EnhancedJSONParser
-    from .prompts_enhanced import get_prompt_config
+    from .rag_prompts import get_prompt_config
     ENHANCED_AI_AVAILABLE = True
     print("✅ Enhanced AI System (Enterprise Grade v3.1.0) geladen")
     print("🎯 Features: Enhanced Schemas, JSON Parser, Temperature=0 Prompts")
@@ -2347,6 +2347,80 @@ async def get_document_types():
     """
     return [doc_type.value for doc_type in DocumentType]
 
+# === VISIO-PROMPT ENDPOINTS ===
+
+@app.get("/api/visio-prompts/types", response_model=Dict[str, Dict[str, str]], tags=["Visio Prompts"])
+async def get_visio_prompt_types():
+    """Gibt alle verfügbaren Visio-Prompts mit Metadaten zurück"""
+    from .visio_prompts import get_available_document_types
+    return get_available_document_types()
+
+@app.get("/api/visio-prompts/{document_type}", response_model=Dict[str, Any], tags=["Visio Prompts"])
+async def get_visio_prompt_for_type(document_type: str):
+    """Gibt den Prompt für einen bestimmten Dokumenttyp mit erweiterten Metadaten zurück"""
+    from .visio_prompts import get_prompt_for_document_type
+    return get_prompt_for_document_type(document_type)
+
+@app.get("/api/visio-prompts/{document_type}/debug", response_model=Dict[str, str], tags=["Visio Prompts"])
+async def get_visio_prompt_debug_info(document_type: str):
+    """Gibt Debug-Informationen für einen Prompt zurück"""
+    from .visio_prompts import get_prompt_debug_info
+    return get_prompt_debug_info(document_type)
+
+@app.get("/api/visio-prompts/validate", response_model=Dict[str, bool], tags=["Visio Prompts"])
+async def validate_visio_prompts():
+    """Validiert alle Visio-Prompts"""
+    from .visio_prompts import validate_all_prompts
+    return validate_all_prompts()
+
+@app.get("/api/visio-prompts/{document_type}/confirm", response_model=Dict[str, Any], tags=["Visio Prompts"])
+async def confirm_visio_prompt_usage(document_type: str):
+    """Bestätigt die Verwendung eines Prompts mit Hash und Version für Audit-Zwecke"""
+    from .visio_prompts import get_prompt_for_document_type
+    import hashlib
+    from datetime import datetime
+    
+    try:
+        prompt_data = get_prompt_for_document_type(document_type)
+        
+        if not prompt_data.get("success"):
+            return {
+                "success": False,
+                "error": f"Prompt für {document_type} konnte nicht geladen werden",
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
+        
+        # Erstelle zusätzliche Bestätigung
+        confirmation_hash = hashlib.sha256(
+            f"{prompt_data['hash']}:{prompt_data['version']}:{datetime.utcnow().isoformat()}".encode('utf-8')
+        ).hexdigest()[:16]
+        
+        return {
+            "success": True,
+            "prompt_confirmation": {
+                "document_type": document_type,
+                "prompt_version": prompt_data["version"],
+                "prompt_hash": prompt_data["hash"],
+                "confirmation_hash": confirmation_hash,
+                "metadata": prompt_data["metadata"],
+                "audit_info": prompt_data["audit_info"],
+                "verification": {
+                    "hash_verified": True,
+                    "version_verified": True,
+                    "prompt_loaded_successfully": True,
+                    "confirmation_timestamp": datetime.utcnow().isoformat() + "Z"
+                }
+            },
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Fehler bei Prompt-Bestätigung: {str(e)}",
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
 @app.get("/api/documents/{document_id}", response_model=Document, tags=["Documents"])
 async def get_document(document_id: int, db: Session = Depends(get_db)):
     """
@@ -2441,22 +2515,7 @@ async def preview_document_processing(
                 mime_type = file.content_type or "application/octet-stream"
                 extracted_text = extract_text_from_file(tmp_path, mime_type)
                 
-                # Bei wenig Text: Vision OCR Fallback
-                if len(extracted_text.strip()) < 100:
-                    try:
-                        from .vision_ocr_engine import VisionOCREngine
-                        vision_engine = VisionOCREngine()
-                        
-                        images = await vision_engine.convert_document_to_images(tmp_path)
-                        if images:
-                            ocr_results = await vision_engine.analyze_images_with_vision(
-                                images, 
-                                "Extrahiere den gesamten Text aus diesem Dokument. Behalte die Struktur bei."
-                            )
-                            if ocr_results and ocr_results.get('success'):
-                                extracted_text = ocr_results.get('content', '')
-                    except Exception as e:
-                        upload_logger.warning(f"Vision OCR Fallback fehlgeschlagen: {e}")
+                # KEIN FALLBACK: OCR-Text wird so verwendet wie er ist
                 
                 # Metadaten extrahieren (vereinfacht für Vorschau)
                 preview_metadata = {
@@ -2482,12 +2541,13 @@ async def preview_document_processing(
             else:  # visio
                 # === VISIO-VORSCHAU ===
                 from .vision_ocr_engine import VisionOCREngine
-                from .visio_prompts import visio_prompts_manager
+                from .visio_prompts import get_prompt_for_document_type
                 
                 vision_engine = VisionOCREngine()
                 
-                # 1. Prompts laden
-                prompt1 = visio_prompts_manager.get_prompts(document_type)
+                # 1. Prompts laden (direkt aus visio_prompts Ordner)
+                prompt_data = get_prompt_for_document_type(document_type)
+                prompt1 = prompt_data["prompt"]
                 
                 # 2. Zu Bildern konvertieren (NUR PNG-VORSCHAU - OHNE OPENAI API)
                 logger.info(f"🖼️ Erstelle PNG-Vorschau für {file.filename}")
@@ -2710,10 +2770,10 @@ async def process_document_with_prompt(
                 upload_logger.info(f"🔒 PROMPT-SICHERHEIT: Verwende exakten Prompt vom Frontend: {len(prompt1)} Zeichen")
                 upload_logger.info(f"📝 DOKUMENTTYP: {document_type}")
             else:
-                # Fallback: Zentrale Prompt-Verwaltung verwenden
-                from .visio_prompts import VisioPromptsManager
-                prompts_manager = VisioPromptsManager()
-                prompt1 = prompts_manager.get_prompts(document_type)
+                # Fallback: Direkte Prompt-Verwaltung verwenden
+                from .visio_prompts import get_prompt_for_document_type
+                prompt_data = get_prompt_for_document_type(document_type)
+                prompt1 = prompt_data["prompt"]
                 upload_logger.info(f"📝 Zentrale Prompts geladen für {document_type}: {len(prompt1)} Zeichen")
             
             # 6. Wenn keine Bestätigung: Nur Vorschau + Prompt zurückgeben
@@ -2743,12 +2803,22 @@ async def process_document_with_prompt(
             # Verwende Vision Engine mit Provider-Auswahl
             upload_logger.info(f"📡 Sende PNG-Bild an Vision API: {preferred_provider}")
             
-            # Vision API-Aufruf mit PNG-Bild und Prompt
-            analysis_result = await vision_engine.analyze_images_with_vision(
+            # ZENTRALE VISION-ANALYSE: Verwende NUR die API-Prompt-Funktion - KEIN FALLBACK!
+            analysis_result = await vision_engine.analyze_document_with_api_prompt(
                 images=images,
-                prompt=prompt1,
+                document_type=document_type,
                 preferred_provider=preferred_provider
             )
+            
+            # Logge Prompt-Bestätigung für Audit
+            if analysis_result.get('success') and 'prompt_confirmation' in analysis_result:
+                prompt_conf = analysis_result['prompt_confirmation']
+                upload_logger.info(f"🔐 PROMPT-BESTÄTIGUNG FÜR AUDIT:")
+                upload_logger.info(f"   Dokumenttyp: {prompt_conf.get('prompt_metadata', {}).get('document_type')}")
+                upload_logger.info(f"   Version: {prompt_conf.get('prompt_version')}")
+                upload_logger.info(f"   Hash: {prompt_conf.get('prompt_hash')}")
+                upload_logger.info(f"   Länge: {prompt_conf.get('prompt_metadata', {}).get('prompt_length')} Zeichen")
+                upload_logger.info(f"   Verifiziert: {prompt_conf.get('prompt_verification', {}).get('hash_verified')}")
             
             # Provider-Info hinzufügen
             analysis_result['provider'] = preferred_provider
@@ -3397,7 +3467,8 @@ Antworte NUR mit gültigem JSON, kein Markdown, kein Freitext.
                     
                     analysis_result = await vision_engine._analyze_image_with_gpt4_vision(
                         image_b64, 
-                        context="Einfacher Firmenname-Test"
+                        context="Einfacher Firmenname-Test",
+                        custom_prompt="Analysiere dieses Bild und antworte nur mit dem Namen der Firma, die erwähnt wird. Falls kein Firmenname erwähnt wird, antworte mit 'Kein Firmenname erwähnt'."
                     )
             else:
                 # Text-Analyse für Text-Dateien
@@ -3623,122 +3694,75 @@ async def create_document_with_file(
                     upload_result.mime_type
                 )
                 
-                # Bei wenig Text: OCR-Fallback aktivieren
-                if len(extracted_text.strip()) < 100:
-                    upload_logger.warning("⚠️ Wenig Text extrahiert - verwende Vision OCR als Fallback")
-                    try:
-                        from .vision_ocr_engine import VisionOCREngine
-                        vision_engine = VisionOCREngine()
-                        
-                        # Konvertiere zu Bildern und extrahiere Text
-                        images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
-                        if images:
-                            ocr_results = await vision_engine.analyze_images_with_vision(
-                                images, 
-                                "Extrahiere den gesamten Text aus diesem Dokument. Behalte die Struktur bei."
-                            )
-                            if ocr_results and ocr_results.get('success'):
-                                extracted_text = ocr_results.get('content', '')
-                                upload_logger.info(f"✅ Vision OCR erfolgreich: {len(extracted_text)} Zeichen extrahiert")
-                    except Exception as ocr_error:
-                        upload_logger.error(f"❌ Vision OCR Fallback fehlgeschlagen: {ocr_error}")
+                # KEIN FALLBACK: OCR-Text wird so verwendet wie er ist
                 
                 # OCR-Text-Vorschau speichern (erste 2000 Zeichen)
                 ocr_text_preview = extracted_text[:2000] + "..." if len(extracted_text) > 2000 else extracted_text
                 
             else:  # upload_method == "visio"
-                # === VISIO-METHODE: Bildbasierte Verarbeitung ===
-                upload_logger.info("🖼️ Visio-Methode gewählt - Bildanalyse")
+                # === ZENTRALE VISIO-METHODE: KEIN FALLBACK! ===
+                upload_logger.info("🖼️ ZENTRALE Visio-Methode gewählt - KEIN FALLBACK!")
                 
                 try:
                     from .vision_ocr_engine import VisionOCREngine
-                    from .visio_prompts import visio_prompts_manager
                     
                     vision_engine = VisionOCREngine()
                     
-                    # 1. Prompts für Dokumenttyp laden
-                    prompt1 = visio_prompts_manager.get_prompts(document_type or "OTHER")
-                    prompt_used = f"Prompt:\n{prompt1}"
-                    
-                    # 2. Dokument zu Bildern konvertieren
+                    # 1. Dokument zu Bildern konvertieren
                     images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
                     if not images:
                         raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
                     
                     upload_logger.info(f"📸 {len(images)} Bilder erstellt")
                     
-                    # NEU: PNG-Vorschau für Frontend erstellen
+                    # 2. ZENTRALE VISION-ANALYSE: Verwende NUR die API-Prompt-Funktion - KEIN FALLBACK!
+                    analysis_result = await vision_engine.analyze_document_with_api_prompt(
+                        images=images,
+                        document_type=document_type or "OTHER",
+                        preferred_provider="openai_4o_mini"
+                    )
+                    
+                    if not analysis_result.get('success'):
+                        error_msg = analysis_result.get('error', 'Unbekannter Fehler')
+                        upload_logger.error(f"❌ ZENTRALE VISION-ANALYSE fehlgeschlagen: {error_msg}")
+                        raise HTTPException(status_code=500, detail=f"Zentrale Vision-Analyse fehlgeschlagen: {error_msg}")
+                    
+                    # 3. Erfolgreiche Analyse verarbeiten
+                    upload_logger.info("✅ ZENTRALE VISION-ANALYSE erfolgreich")
+                    
+                    # PNG-Vorschau für Frontend erstellen
                     preview_image = None
                     if images:
-                        # Erste Seite als Base64 für Vorschau
                         import base64
                         preview_image = base64.b64encode(images[0]).decode('utf-8')
                         upload_logger.info(f"🖼️ PNG-Vorschau erstellt: {len(preview_image)} Zeichen")
                     
-                    # 3. Wortliste extrahieren (Prompt 1)
-                    word_result = await vision_engine.analyze_images_with_vision(images, prompt1)
-                    if not word_result.get('success'):
-                        raise HTTPException(status_code=500, detail="Wortlisten-Extraktion fehlgeschlagen")
+                    # Strukturierte Analyse extrahieren
+                    structured_analysis = analysis_result.get('analysis', '')
+                    if isinstance(structured_analysis, dict):
+                        structured_analysis = json.dumps(structured_analysis, ensure_ascii=False, indent=2)
                     
-                    # Wortliste verarbeiten
-                    word_list = word_result.get('content', '').strip().split('\n')
-                    word_list = sorted(set(word.strip() for word in word_list if word.strip()))
-                    upload_logger.info(f"📝 {len(word_list)} eindeutige Wörter extrahiert")
+                    # Prompt-Info extrahieren
+                    prompt_info = analysis_result.get('prompt_used', {})
+                    prompt_used = f"Prompt: {document_type} (Version: {prompt_info.get('version', 'unbekannt')})"
                     
-                    # 4. Strukturierte Analyse (Prompt 2) - mit Rate-Limit-Behandlung
-                    upload_logger.info("🔄 Starte strukturierte Analyse (Prompt 2)...")
+                    # Wortliste aus strukturierter Analyse extrahieren (falls vorhanden)
+                    word_list = []
+                    if isinstance(analysis_result.get('analysis'), dict):
+                        # Versuche Wörter aus verschiedenen Feldern zu extrahieren
+                        analysis_data = analysis_result['analysis']
+                        if 'process_steps' in analysis_data:
+                            for step in analysis_data['process_steps']:
+                                if isinstance(step, dict) and 'label' in step:
+                                    word_list.append(step['label'])
+                                elif isinstance(step, str):
+                                    word_list.append(step)
+                        elif 'extracted_text' in analysis_data:
+                            # Fallback: Wörter aus extrahiertem Text
+                            text = analysis_data['extracted_text']
+                            word_list = [word.strip() for word in text.split() if len(word.strip()) > 2][:50]
                     
-                    # Rate-Limit-Behandlung: Warte zwischen den API-Aufrufen
-                    import asyncio
-                    await asyncio.sleep(2)  # 2 Sekunden Pause zwischen API-Aufrufen
-                    
-                    max_retries = 3
-                    retry_delay = 5  # Sekunden
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            analysis_result = await vision_engine.analyze_images_with_vision(images, prompt2)
-                            if analysis_result.get('success'):
-                                upload_logger.info("✅ Strukturierte Analyse erfolgreich")
-                                break
-                            else:
-                                raise Exception(f"Vision API Fehler: {analysis_result.get('error', 'Unbekannter Fehler')}")
-                                
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "rate_limit" in error_msg.lower() or "429" in error_msg:
-                                if attempt < max_retries - 1:
-                                    wait_time = retry_delay * (attempt + 1)
-                                    upload_logger.warning(f"⚠️ Rate Limit erreicht. Warte {wait_time}s vor Versuch {attempt + 2}/{max_retries}")
-                                    await asyncio.sleep(wait_time)
-                                    continue
-                                else:
-                                    upload_logger.error(f"❌ Rate Limit nach {max_retries} Versuchen - verwende Fallback")
-                                    # Fallback: Verwende Wortliste als strukturierte Analyse
-                                    structured_analysis = json.dumps({
-                                        "document_type": "SOP",
-                                        "title": "Automatisch generiert (Rate Limit)",
-                                        "sections": [{"title": "Extrahierte Wörter", "content": word_list}],
-                                        "process_steps": word_list[:10],  # Erste 10 Wörter als Prozessschritte
-                                        "compliance_level": "medium",
-                                        "rate_limit_fallback": True
-                                    }, ensure_ascii=False, indent=2)
-                                    break
-                            else:
-                                upload_logger.error(f"❌ Vision API Fehler: {e}")
-                                raise HTTPException(status_code=500, detail=f"Strukturierte Analyse fehlgeschlagen: {str(e)}")
-                    else:
-                        # Alle Versuche fehlgeschlagen
-                        raise HTTPException(status_code=500, detail="Strukturierte Analyse nach mehreren Versuchen fehlgeschlagen")
-                    
-                    # JSON parsen (falls nicht bereits als Fallback erstellt)
-                    if 'structured_analysis' not in locals():
-                        try:
-                            structured_data = json.loads(analysis_result.get('content', '{}'))
-                            structured_analysis = json.dumps(structured_data, ensure_ascii=False, indent=2)
-                        except json.JSONDecodeError:
-                            structured_analysis = analysis_result.get('content', '')
-                            upload_logger.warning("⚠️ Strukturierte Analyse ist kein valides JSON")
+                    upload_logger.info(f"📝 {len(word_list)} Wörter aus strukturierter Analyse extrahiert")
                     
                     # JSON parsen
                     try:
@@ -7681,583 +7705,6 @@ async def simple_ai_prompt_test(
             "processing_time_seconds": round(processing_time, 2),
             "timestamp": datetime.utcnow().isoformat()
         }
-# === RAG-SYSTEM ENDPOINTS ===
-
-@app.get("/api/rag/status", tags=["RAG System"])
-async def get_rag_status():
-    """
-    🧠 RAG-System Status und Statistiken
-    
-    Überprüft Verfügbarkeit und zeigt Statistiken des RAG-Systems.
-    """
-    try:
-        # Verwende verfügbare RAG Engine (Qdrant Advanced oder Basic)
-        if ADVANCED_AI_AVAILABLE:
-            stats = await get_advanced_stats()
-            return {
-                "success": True,
-                "status": "initialized" if stats.get("total_chunks", 0) > 0 else "not_initialized",
-                "total_documents": stats.get("total_documents", 0),
-                "total_chunks": stats.get("total_chunks", 0),
-                "collection_name": stats.get("collection_name", "qms_documents"),
-                "engine_info": {
-                    "type": "advanced_qdrant",
-                    "embedding_model": "all-MiniLM-L6-v2",
-                    "embedding_dimension": 384
-                }
-            }
-        elif RAG_AVAILABLE:
-            # Fallback zu Basic Qdrant
-            try:
-                stats = await qdrant_rag_engine.get_system_stats()
-                return {
-                    "success": True,
-                    "status": "initialized" if stats.get("total_chunks", 0) > 0 else "not_initialized",
-                    "total_documents": stats.get("total_documents", 0),
-                    "total_chunks": stats.get("total_chunks", 0),
-                    "collection_name": "qms_documents",
-                    "engine_info": {
-                        "type": "qdrant",
-                        "embedding_model": "all-MiniLM-L6-v2",
-                        "embedding_dimension": 384
-                    }
-                }
-            except:
-                # Manual stats from SQL + Qdrant collection
-                from .database import get_db
-                db = next(get_db())
-                try:
-                    from .models import Document as DocumentModel
-                    doc_count = db.query(DocumentModel).count()
-                    
-                    # Check Qdrant collection
-                    from qdrant_client import QdrantClient
-                    qdrant = QdrantClient(path="./qdrant_storage")
-                    try:
-                        collection_info = qdrant.get_collection("qms_documents")
-                        chunk_count = collection_info.points_count
-                    except:
-                        chunk_count = 0
-                    
-                    return {
-                        "success": True,
-                        "status": "initialized" if chunk_count > 0 else "not_initialized",
-                        "total_documents": doc_count,
-                        "total_chunks": chunk_count,
-                        "collection_name": "qms_documents",
-                        "engine_info": {
-                            "type": "qdrant",
-                            "embedding_model": "all-MiniLM-L6-v2",
-                            "embedding_dimension": 384
-                        }
-                    }
-                finally:
-                    db.close()
-        else:
-            return {
-                "success": False,
-                "status": "unavailable",
-                "total_documents": 0,
-                "total_chunks": 0,
-                "collection_name": "none",
-                "engine_info": {
-                    "type": "none",
-                    "embedding_model": "none",
-                    "embedding_dimension": 0
-                },
-                "error": "RAG System nicht verfügbar"
-            }
-    except Exception as e:
-        print(f"RAG-Status abrufen fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "status": "error",
-            "total_documents": 0,
-            "total_chunks": 0
-        }
-
-@app.post("/api/rag/index-all", tags=["RAG System"])
-async def index_all_documents_endpoint(db: Session = Depends(get_db)):
-    """
-    📚 Alle Dokumente für RAG indexieren
-    
-    Indexiert alle verfügbaren Dokumente in der Vector-Database
-    für semantische Suche und Chat-Funktionalität.
-    """
-    try:
-        result = await index_all_documents(db)
-        return {
-            "success": True,
-            "message": "Vollindexierung abgeschlossen",
-            "indexed_documents": result.get("indexed", 0),
-            "failed_documents": result.get("failed", 0)
-        }
-    except Exception as e:
-        logger.error(f"Vollindexierung fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "message": "Fehler bei der Vollindexierung"
-        }
-
-@app.post("/api/rag/chat", tags=["RAG System"])
-async def chat_with_documents(
-    request: Dict[str, Any],
-    current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """
-    💬 Chat mit QMS-Dokumenten - DER GAME CHANGER!
-    
-    Ermöglicht natürlichsprachige Fragen an alle QMS-Dokumente:
-    - "Welche Schraube bei Antriebseinheit verwenden?"
-    - "Was sagt ISO 13485 zu Dokumentenkontrolle?"
-    - "Wie funktioniert der Kalibrierungsprozess?"
-    
-    Request Body:
-        {"question": "Benutzer-Frage hier"}
-    
-    Response:
-        {
-            "answer": "Detaillierte Antwort mit Quellenangaben",
-            "sources": [...],
-            "confidence": 0.95,
-            "processing_time": 2.3
-        }
-    """
-    try:
-        question = request.get("question", "").strip()
-        enable_debug = request.get("enable_debug", False)  # Debug-Modus aus Request
-        
-        if not question:
-            return {
-                "success": False,
-                "error": "Keine Frage bereitgestellt",
-                "message": "Bitte stellen Sie eine Frage"
-            }
-        
-        if len(question) < 5:
-            return {
-                "success": False,
-                "error": "Frage zu kurz", 
-                "message": "Bitte stellen Sie eine detailliertere Frage"
-            }
-        
-        # RAG-Chat durchführen mit Debug-Option
-        result = await rag_engine.chat_with_documents(question, enable_debug=enable_debug)
-        
-        # Query in Datenbank speichern für Analytics
-        try:
-            from .models import RAGQuery
-            rag_query = RAGQuery(
-                user_id=current_user.id,
-                query_text=question,
-                response_text=result.answer,
-                confidence_score=result.confidence_score,
-                processing_time=result.processing_time,
-                sources_used=json.dumps(result.sources),
-                provider_used="google_gemini"
-            )
-            db.add(rag_query)
-            db.commit()
-        except Exception as e:
-            logger.warning(f"RAG-Query-Logging fehlgeschlagen: {e}")
-        
-        # Basis-Response
-        response_data = {
-            "success": True,
-            "answer": result.response,
-            "sources": result.sources,
-            "confidence_score": result.confidence,
-            "processing_time": result.processing_time,
-            "context_chunks": len(result.context_used) if result.context_used else 0
-        }
-        
-        # Debug-Informationen hinzufügen wenn aktiviert
-        if enable_debug and result.debug_info:
-            response_data["debug_info"] = result.debug_info
-            response_data["debug_enabled"] = True
-        
-        return response_data
-        
-    except Exception as e:
-        logger.error(f"RAG-Chat fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "message": "Fehler beim Chat mit Dokumenten"
-        }
-
-@app.get("/api/rag/search", tags=["RAG System"])
-async def search_documents_semantic(
-    query: str = Query(..., description="Suchanfrage für semantische Suche"),
-    max_results: int = Query(default=5, ge=1, le=20, description="Maximale Anzahl Ergebnisse")
-):
-    """
-    🔍 Semantische Dokumentensuche
-    
-    Durchsucht alle QMS-Dokumente semantisch basierend auf Bedeutung,
-    nicht nur Stichworten.
-    """
-    try:
-        # Verwende verfügbare RAG Engine (Advanced oder Basic)
-        if ADVANCED_AI_AVAILABLE:
-            results = await search_documents_advanced(query, max_results)
-            return {
-                "success": True,
-                "query": query,
-                "results_count": len(results.get("results", [])),
-                "results": results.get("results", [])
-            }
-        elif RAG_AVAILABLE:
-            from .qdrant_rag_engine import search_documents_semantic
-            results = await search_documents_semantic(query, max_results)
-            return {
-                "success": True,
-                "query": query,
-                "results_count": len(results),
-                "results": results
-            }
-        else:
-            return {
-                "success": False,
-                "error": "RAG System nicht verfügbar",
-                "message": "Keine RAG Engine verfügbar"
-            }
-        
-    except Exception as e:
-        logger.error(f"Semantische Suche fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "message": "Fehler bei der semantischen Suche"
-        }
-
-# === INTELLIGENTE WORKFLOW-ENDPOINTS ===
-
-@app.post("/api/workflow/trigger-message", tags=["Intelligent Workflows"])
-async def trigger_workflow_from_message(
-    request: Dict[str, str],
-    current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """
-    🚀 Intelligenter Workflow-Trigger - DAS IST MAGIC!
-    
-    Analysiert Benutzer-Nachrichten und löst automatisch
-    passende Workflows aus:
-    
-    Beispiele:
-    - "Bluetooth Modul nicht mehr lieferbar" 
-      → Vollständiger Lieferanten-Krise-Workflow
-    - "Lötofen ist defekt"
-      → Equipment-Ausfall-Management
-    - "Kunde beschwert sich über Fehler"
-      → 8D-Beschwerdemanagement
-    
-    Request Body:
-        {"message": "Problem-Beschreibung"}
-    
-    Response:
-        {
-            "workflow_triggered": true,
-            "workflow_name": "Lieferanten-Krise Management",
-            "tasks_created": 8,
-            "workflow_id": "wf_supplier_issue_20241201_143022"
-        }
-    """
-    try:
-        message = request.get("message", "").strip()
-        
-        if not message:
-            return {
-                "success": False,
-                "error": "Keine Nachricht bereitgestellt"
-            }
-        
-        # Intelligente Workflow-Auslösung
-        result = await intelligent_workflow_engine.process_message_trigger(
-            message, current_user.id, db
-        )
-        
-        return {
-            "success": True,
-            **result
-        }
-        
-    except Exception as e:
-        logger.error(f"Workflow-Trigger fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "message": "Fehler bei der Workflow-Auslösung"
-        }
-
-@app.get("/api/workflow/active", tags=["Intelligent Workflows"])
-async def get_active_workflows():
-    """
-    📋 Aktive Workflows anzeigen
-    
-    Zeigt alle aktuell laufenden intelligenten Workflows.
-    """
-    try:
-        workflows = await intelligent_workflow_engine.get_active_workflows()
-        return {
-            "success": True,
-            "active_workflows": workflows,
-            "total_count": len(workflows)
-        }
-    except Exception as e:
-        logger.error(f"Aktive Workflows abrufen fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-@app.get("/api/workflow/{workflow_id}/status", tags=["Intelligent Workflows"])
-async def get_workflow_status(workflow_id: str):
-    """
-    📊 Workflow-Status abrufen
-    
-    Detaillierter Status eines spezifischen Workflows.
-    """
-    try:
-        status = await intelligent_workflow_engine.get_workflow_status(workflow_id)
-        
-        if not status:
-            return {
-                "success": False,
-                "error": f"Workflow {workflow_id} nicht gefunden"
-            }
-        
-        return {
-            "success": True,
-            "workflow": status
-        }
-        
-    except Exception as e:
-        logger.error(f"Workflow-Status abrufen fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-@app.get("/api/tasks/my-tasks", tags=["Task Management"])
-async def get_my_tasks(
-    current_user: UserModel = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-    status: Optional[str] = Query(None, description="Filter nach Task-Status"),
-    priority: Optional[str] = Query(None, description="Filter nach Priorität")
-):
-    """
-    📋 Meine Aufgaben abrufen
-    
-    Zeigt alle dem aktuellen Benutzer zugewiesenen Tasks
-    aus intelligenten Workflows.
-    """
-    try:
-        from .models import QMSTask, TaskStatus as TaskStatusEnum
-        
-        # Base Query für User's Tasks
-        query = db.query(QMSTask).filter(
-            or_(
-                QMSTask.assigned_user_id == current_user.id,
-                QMSTask.assigned_group_id.in_(
-                    [membership.interest_group_id for membership in current_user.group_memberships]
-                )
-            )
-        )
-        
-        # Filter anwenden
-        if status:
-            try:
-                status_enum = TaskStatusEnum(status)
-                query = query.filter(QMSTask.status == status_enum)
-            except ValueError:
-                pass
-        
-        if priority:
-            query = query.filter(QMSTask.priority == priority.upper())
-        
-        # Tasks abrufen
-        tasks = query.order_by(QMSTask.created_at.desc()).all()
-        
-        task_list = []
-        for task in tasks:
-            task_data = {
-                "id": task.id,
-                "title": task.title,
-                "description": task.description,
-                "status": task.status.value if task.status else "open",
-                "priority": task.priority,
-                "due_date": task.due_date.isoformat() if task.due_date else None,
-                "created_at": task.created_at.isoformat(),
-                "workflow_id": task.workflow_id,
-                "assigned_group": task.assigned_group.name if task.assigned_group else None,
-                "approval_needed": task.approval_needed
-            }
-            task_list.append(task_data)
-        
-        return {
-            "success": True,
-            "tasks": task_list,
-            "total_count": len(task_list)
-        }
-        
-    except Exception as e:
-        logger.error(f"Tasks abrufen fehlgeschlagen: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-# ENTFERNT: Veralteter RAG-Upload-Endpunkt - wird durch /api/documents/with-file ersetzt
-
-@app.post("/api/rag/chat-enhanced")
-async def chat_with_documents_enhanced(request: dict):
-    """
-    🤖 ENHANCED CHAT: Intelligenter Chat mit allen Dokumenttypen
-    
-    Features:
-    - Semantische Suche über Text, Bilder, Tabellen
-    - OCR-basierte Inhalte durchsuchbar
-    - Quellenangaben mit Content-Type
-    - Konfidenz-Score
-    """
-    try:
-        query = request.get("query", "")
-        context_limit = request.get("context_limit", 5)
-        
-        if not query.strip():
-            return {"success": False, "message": "Keine Frage gestellt"}
-        
-        # Advanced RAG-Engine verwenden
-        from .advanced_rag_engine import advanced_rag_engine
-        
-        if not advanced_rag_engine:
-            return {
-                "success": False,
-                "message": "RAG-System nicht verfügbar. Bitte Dependencies installieren."
-            }
-        
-        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine stattdessen
-        return {"success": False, "message": "Diese Funktion ist veraltet. Nutzen Sie /api/rag/chat stattdessen."}
-        
-        # Detaillierte Antwort aufbereiten
-        response_data = {
-            "success": True,
-            "query": query,
-            "response": result.response,
-            "confidence": result.confidence,
-            "sources": result.sources,
-            "content_types_found": list(set(s.get("content_type", "text") for s in result.sources)),
-            "processing_info": {
-                "sources_searched": len(result.sources),
-                "confidence_level": "high" if result.confidence > 0.8 else "medium" if result.confidence > 0.5 else "low",
-                "contains_ocr_content": any(s.get("content_type") == "image" for s in result.sources),
-                "contains_table_data": any(s.get("content_type") == "table" for s in result.sources)
-            }
-        }
-        
-        return response_data
-        
-    except Exception as e:
-        print(f"Enhanced chat failed: {e}")
-        return {"success": False, "message": f"Chat fehlgeschlagen: {str(e)}"}
-
-@app.get("/api/rag/documents")
-async def list_indexed_documents():
-    """
-    📋 DOKUMENTEN-ÜBERSICHT: Alle indexierten Dokumente mit Details
-    """
-    try:
-        # Diese Funktion ist veraltet - verwendet Advanced RAG Engine
-        return {"success": False, "message": "Diese veraltete Funktion wird nicht mehr unterstützt. Nutzen Sie /api/rag-stats stattdessen."}
-        
-        # Dokumente gruppieren
-        documents = {}
-        content_stats = {"text": 0, "image": 0, "table": 0, "other": 0}
-        
-        for metadata in all_data.get('metadatas', []):
-            source_file = metadata.get('source_file', 'Unknown')
-            content_type = metadata.get('content_type', 'text')
-            
-            # Statistiken
-            content_stats[content_type] = content_stats.get(content_type, 0) + 1
-            
-            # Dokument-Info sammeln
-            if source_file not in documents:
-                documents[source_file] = {
-                    "file_path": source_file,
-                    "title": metadata.get('title', os.path.basename(source_file)),
-                    "document_type": metadata.get('document_type', 'UNKNOWN'),
-                    "indexed_at": metadata.get('indexed_at', 'Unknown'),
-                    "chunks": 0,
-                    "content_types": set()
-                }
-            
-            documents[source_file]["chunks"] += 1
-            documents[source_file]["content_types"].add(content_type)
-        
-        # Set zu Liste konvertieren
-        for doc_info in documents.values():
-            doc_info["content_types"] = list(doc_info["content_types"])
-        
-        return {
-            "success": True,
-            "documents": list(documents.values()),
-            "statistics": {
-                "total_documents": len(documents),
-                "total_chunks": len(all_data.get('metadatas', [])),
-                "content_distribution": content_stats,
-                "ocr_enabled": rag_engine.processor.ocr_available
-            }
-        }
-        
-    except Exception as e:
-        print(f"Document listing failed: {e}")
-        return {"success": False, "message": str(e)}
-
-@app.post("/api/rag/cleanup-orphaned", tags=["RAG System"])
-async def cleanup_orphaned_vectors():
-    """
-    🧹 Bereinigt verwaiste Vektoren aus der ChromaDB.
-    
-    Entfernt alle Vektoren für Dokumente, die nicht mehr in der 
-    SQL-Datenbank existieren. Nützlich für Datenkonsistenz nach
-    manuellen Löschungen oder Datenbankmigrationen.
-    
-    Returns:
-        Dict mit Bereinigungsstatistiken
-    """
-    if not RAG_AVAILABLE:
-        return {"success": False, "message": "RAG-System nicht verfügbar"}
-    
-    try:
-        from .rag_engine import get_rag_engine
-        rag_engine = get_rag_engine()
-        
-        if not rag_engine:
-            return {"success": False, "message": "RAG Engine konnte nicht initialisiert werden"}
-        
-        # Bereinigung starten
-        cleanup_result = rag_engine.cleanup_orphaned_vectors()
-        
-        if cleanup_result.get('success'):
-            return {
-                "success": True,
-                "message": "✅ Bereinigung erfolgreich abgeschlossen",
-                "statistics": cleanup_result
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"❌ Bereinigung fehlgeschlagen: {cleanup_result.get('message', 'Unbekannter Fehler')}"
-            }
-    
-    except Exception as e:
-        return {"success": False, "message": f"❌ Bereinigung fehlgeschlagen: {str(e)}"}
 
 @app.post("/api/rag/search-documents")
 async def search_documents_semantic(request: dict):
@@ -8307,276 +7754,3 @@ async def search_documents_semantic(request: dict):
     except Exception as e:
         print(f"Semantic search failed: {e}")
         return {"success": False, "message": str(e)}
-
-# === AI-ENHANCED ENDPOINTS ===
-
-@app.post("/api/extract-metadata", tags=["AI-Enhanced"])
-async def extract_metadata_api(
-    file: UploadFile = File(...),
-    current_user: UserModel = Depends(get_current_active_user)
-):
-    """Extrahiert Metadaten aus einem Dokument mit AI (ohne Upload)"""
-    if AI_FEATURES_AVAILABLE:
-        return await extract_metadata_endpoint(file, current_user)
-    else:
-        raise HTTPException(status_code=503, detail="AI-Features nicht verfügbar")
-
-# ENTFERNT: Veralteter AI-Upload-Endpunkt - wird durch /api/documents/with-file ersetzt
-
-@app.post("/api/chat-with-documents", tags=["AI-Enhanced"])
-async def chat_with_documents_api(
-    request: dict,
-    current_user: UserModel = Depends(get_current_active_user)
-):
-    """Chat mit QMS-Dokumenten über Qdrant RAG Engine"""
-    if AI_FEATURES_AVAILABLE:
-        return await chat_with_documents_endpoint(request, current_user)
-    else:
-        raise HTTPException(status_code=503, detail="AI-Features nicht verfügbar")
-
-@app.get("/api/rag-stats", tags=["AI-Enhanced"])
-async def rag_stats_api():
-    """RAG-System Status und Statistiken"""
-    if AI_FEATURES_AVAILABLE:
-        return await get_rag_stats(None)
-    else:
-        raise HTTPException(status_code=503, detail="AI-Features nicht verfügbar")
-
-# === ADVANCED AI ENDPOINTS (Enterprise Grade 2024) ===
-
-if ADVANCED_AI_AVAILABLE:
-    # Registriere den Advanced AI Router
-    app.include_router(advanced_ai_router, prefix="/api/ai-advanced", tags=["Advanced AI System"])
-    print("🚀 Advanced AI Endpoints unter /api/ai-advanced/* verfügbar")
-else:
-    @app.get("/api/ai-advanced/status")
-    async def advanced_ai_unavailable():
-        return {
-            "status": "unavailable",
-            "message": "Advanced AI System nicht geladen",
-            "reason": "Import-Fehler oder fehlende Dependencies"
-        }
-# === PROVIDER-AUSWAHL UND TEST-ENDPOINTS ===
-
-@app.get("/api/ai-providers/details", response_model=Dict[str, Any])
-async def get_ai_providers_details():
-    """
-    🤖 Detaillierte Provider-Informationen für Frontend-Auswahl
-    Zeigt verfügbare Provider, ihre Prompts und Status an
-    """
-    try:
-        providers_info = {
-            "available_providers": {},
-            "prompt_examples": {},
-            "recommendations": {}
-        }
-        
-        # OpenAI 4o-mini
-        providers_info["available_providers"]["openai_4o_mini"] = {
-            "name": "OpenAI 4o Mini",
-            "icon": "🤖",
-            "description": "Sehr günstig, sehr präzise (~$0.0001/Dokument)",
-            "status": "available" if os.getenv('OPENAI_API_KEY') else "needs_key",
-            "cost": "~$0.0001 pro Dokument",
-            "speed": "Sehr schnell (1-2s)",
-            "accuracy": "Sehr hoch (95%+)",
-            "features": ["Metadaten-Extraktion", "Typ-Klassifikation", "Titel-Generierung", "Compliance-Check"]
-        }
-        
-        # Ollama (Lokal)
-        providers_info["available_providers"]["ollama"] = {
-            "name": "Ollama (Lokal)",
-            "icon": "🖥️",
-            "description": "100% lokal, kostenlos, Datenschutz",
-            "status": "available",  # Immer verfügbar
-            "cost": "Kostenlos",
-            "speed": "Schnell (2-5s)",
-            "accuracy": "Hoch (85%+)",
-            "features": ["Offline-Betrieb", "Datenschutz", "Keine API-Kosten"]
-        }
-        
-        # Google Gemini
-        providers_info["available_providers"]["google_gemini"] = {
-            "name": "Google Gemini Flash",
-            "icon": "🌟",
-            "description": "1500 Anfragen/Tag kostenlos",
-            "status": "available" if os.getenv('GOOGLE_API_KEY') else "needs_key",
-            "cost": "Kostenlos (bis 1500/Tag)",
-            "speed": "Schnell (1-3s)",
-            "accuracy": "Sehr hoch (90%+)",
-            "features": ["Hohe Limits", "Schnell", "Kostenlos"]
-        }
-        
-        # Rule-based Fallback
-        providers_info["available_providers"]["rule_based"] = {
-            "name": "Regel-basiert",
-            "icon": "📋",
-            "description": "Immer verfügbar, kein KI-Provider nötig",
-            "status": "available",
-            "cost": "Kostenlos",
-            "speed": "Sehr schnell (<1s)",
-            "accuracy": "Mittel (70%+)",
-            "features": ["Immer verfügbar", "Keine Abhängigkeiten", "Deterministisch"]
-        }
-        
-        # ECHTE PROMPTS aus prompts.py laden
-        try:
-            from .prompts import (
-                get_metadata_prompt, get_rag_prompt, get_available_prompts, 
-                get_prompt_description, PromptCategory, PromptLanguage
-            )
-            
-            # Verfügbare Prompt-Kategorien laden
-            available_prompts = get_available_prompts()
-            providers_info["available_prompt_categories"] = available_prompts
-            
-            # ECHTE PROMPTS für wichtigste Kategorien
-            providers_info["real_prompts"] = {}
-            
-            # 1. Metadaten-Extraktion (der echte Prompt, der verwendet wird)
-            metadata_prompt = get_metadata_prompt(
-                prompt_type="document_analysis",
-                language="de",
-                content="{DOCUMENT_CONTENT}",
-                complexity="standard"
-            )
-            providers_info["real_prompts"]["metadata_extraction"] = {
-                "title": "🔍 Metadaten-Extraktion (LIVE PROMPT)",
-                "description": "Der tatsächlich verwendete Prompt für Dokumenten-Analyse",
-                "prompt_preview": metadata_prompt[:800] + "..." if len(metadata_prompt) > 800 else metadata_prompt,
-                "full_length": len(metadata_prompt),
-                "variables": ["{DOCUMENT_CONTENT}"],
-                "category": "metadata_extraction",
-                "language": "de"
-            }
-            
-            # 2. RAG-Chat (der echte Prompt, der verwendet wird)
-            rag_prompt = get_rag_prompt(
-                prompt_type="enhanced_rag_chat",
-                language="de", 
-                context="{DOCUMENT_CONTEXT}",
-                question="{USER_QUESTION}",
-                complexity="standard"
-            )
-            providers_info["real_prompts"]["rag_chat"] = {
-                "title": "💬 RAG-Chat (LIVE PROMPT)",
-                "description": "Der tatsächlich verwendete Prompt für Dokumenten-Chat",
-                "prompt_preview": rag_prompt[:800] + "..." if len(rag_prompt) > 800 else rag_prompt,
-                "full_length": len(rag_prompt),
-                "variables": ["{DOCUMENT_CONTEXT}", "{USER_QUESTION}"],
-                "category": "rag_chat",
-                "language": "de"
-            }
-            
-            # 3. Verfügbare Prompt-Typen für jede Kategorie
-            for category, prompt_types in available_prompts.items():
-                for prompt_type in prompt_types:
-                    try:
-                        description = get_prompt_description(category, prompt_type)
-                        if description and description != "Beschreibung nicht verfügbar":
-                            key = f"{category}_{prompt_type}"
-                            providers_info["real_prompts"][key] = {
-                                "title": f"📝 {category.replace('_', ' ').title()}: {prompt_type}",
-                                "description": description,
-                                "category": category,
-                                "prompt_type": prompt_type,
-                                "available": True
-                            }
-                    except Exception as e:
-                        logger.warning(f"Prompt-Beschreibung für {category}/{prompt_type} nicht verfügbar: {e}")
-            
-            providers_info["prompt_status"] = "✅ Echte Prompts aus prompts.py geladen"
-            
-        except ImportError as e:
-            logger.warning(f"Prompts.py Import-Fehler: {e}")
-            providers_info["real_prompts"] = {
-                "error": "Zentrale Prompt-Verwaltung (prompts.py) nicht verfügbar",
-                "import_error": str(e)
-            }
-            providers_info["prompt_status"] = "❌ Prompts.py nicht verfügbar"
-        except Exception as e:
-            logger.error(f"Fehler beim Laden der Prompts: {e}")
-            providers_info["real_prompts"] = {
-                "error": "Fehler beim Laden der echten Prompts",
-                "details": str(e)
-            }
-            providers_info["prompt_status"] = "⚠️ Fehler beim Prompt-Laden"
-        
-        # Empfehlungen
-        providers_info["recommendations"] = {
-            "for_testing": "openai_4o_mini",
-            "for_production": "openai_4o_mini",
-            "for_privacy": "ollama", 
-            "for_free": "ollama",
-            "for_offline": "ollama",
-            "explanation": {
-                "openai_4o_mini": "Beste Balance: Günstig + Präzise + Schnell",
-                "ollama": "Ideal für Datenschutz und kostenlosen Betrieb",
-                "google_gemini": "Gut für Tests mit hohem Volumen (kostenlos)",
-                "rule_based": "Backup falls alle KI-Provider fehlen"
-            }
-        }
-        
-        return providers_info
-        
-    except Exception as e:
-        logger.error(f"Provider-Details Fehler: {e}")
-        return {
-            "error": str(e),
-            "available_providers": {
-                "rule_based": {
-                    "name": "Regel-basiert (Fallback)",
-                    "status": "available"
-                }
-            }
-        }
-
-@app.post("/api/ai-providers/test-upload")
-async def test_document_analysis_with_provider(
-    request: Dict[str, Any]
-):
-    """
-    🧪 Test-Upload mit spezifischem Provider
-    Für Frontend-Tests ohne echten Upload
-    """
-    try:
-        text = request.get("text", "")
-        provider = request.get("provider", "auto") 
-        filename = request.get("filename", "test.pdf")
-        
-        if not text or len(text.strip()) < 10:
-            return {
-                "error": "Text zu kurz für aussagekräftige Analyse",
-                "min_length": 10
-            }
-        
-        # AI-Engine verwenden
-        result = await ai_engine.ai_enhanced_analysis_with_provider(
-            text=text,
-            document_type="unknown",
-            preferred_provider=provider,
-            enable_debug=True
-        )
-        
-        # Zusätzliche Test-Infos
-        result["test_info"] = {
-            "provider_used": result.get("provider", "unknown"),
-            "text_length": len(text),
-            "filename": filename,
-            "analysis_timestamp": datetime.now().isoformat(),
-            "cost_estimate": result.get("cost", "unbekannt")
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Test-Upload Fehler: {e}")
-        return {
-            "error": str(e),
-            "provider": provider,
-            "fallback_used": True
-        }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

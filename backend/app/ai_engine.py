@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 
 # ⭐ NEUE INTEGRATION: Zentrale Prompt-Verwaltung
 try:
-    from .prompts import (
+    from .rag_prompts import (
         get_metadata_prompt, 
         PromptCategory, 
         PromptLanguage,

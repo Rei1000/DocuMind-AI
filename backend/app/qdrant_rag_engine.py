@@ -247,7 +247,7 @@ class QdrantRAGEngine:
             
             # Verwende neue strikte JSON-Prompts aus prompts.py
             try:
-                from .prompts import get_strict_json_prompt
+                from .rag_prompts import get_strict_json_prompt
                 
                 if debug_info:
                     debug_info["processing_steps"].append("4. Using centralized JSON prompt system...")
