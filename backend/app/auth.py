@@ -168,9 +168,9 @@ def is_qms_admin(user: UserModel) -> bool:
     
     QMS Admin-Kriterien:
     - Email: qms.admin@company.com
-    - Approval Level: 4
-    - Employee ID: QMS001
-    - Organizational Unit: QMS System
+    - Approval Level: 4 oder 5
+    - Employee ID: QMS001 oder ADMIN001
+    - Organizational Unit: QMS System oder IT/System
     
     Args:
         user: UserModel-Instanz
@@ -180,8 +180,8 @@ def is_qms_admin(user: UserModel) -> bool:
     """
     return (
         user.email == "qms.admin@company.com" and 
-        user.approval_level == 4 and
-        user.employee_id == "QMS001"
+        user.approval_level >= 4 and
+        (user.employee_id == "QMS001" or user.employee_id == "ADMIN001")
     )
 
 def is_system_admin(user: UserModel) -> bool:

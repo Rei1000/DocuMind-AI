@@ -190,7 +190,7 @@ class UserBase(BaseModel):
     
     Permission System:
     - individual_permissions: Benutzer-spezifische Rechte
-    - approval_level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager
+    - approval_level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager, 5=System-Admin
     - is_department_head: Sonderrecht für Freigabe-Workflows
     """
     email: EmailStr = Field(..., description="Email-Adresse (eindeutig)")
@@ -203,7 +203,7 @@ class UserBase(BaseModel):
     individual_permissions: Optional[List[str]] = Field(default_factory=list,
                                                       description="Individuelle Benutzer-Berechtigungen")
     is_department_head: bool = Field(False, description="Abteilungsleiter-Status")
-    approval_level: int = Field(1, ge=1, le=4, description="Freigabe-Level (1-4)")
+    approval_level: int = Field(1, ge=1, le=5, description="Freigabe-Level (1-5)")
     
     @field_validator('individual_permissions', mode='before')
     @classmethod
@@ -226,8 +226,8 @@ class UserBase(BaseModel):
     @classmethod
     def validate_approval_level(cls, v: int) -> int:
         """Validiert Freigabe-Level im gültigen Bereich."""
-        if not 1 <= v <= 4:
-            raise ValueError('approval_level muss zwischen 1 und 4 liegen')
+        if not 1 <= v <= 5:
+            raise ValueError('approval_level muss zwischen 1 und 5 liegen')
         return v
     
     @field_validator('email')
@@ -269,7 +269,7 @@ class UserUpdate(BaseModel):
     organizational_unit: Optional[str] = Field(None, max_length=100)
     individual_permissions: Optional[List[str]] = None
     is_department_head: Optional[bool] = None
-    approval_level: Optional[int] = Field(None, ge=1, le=4)
+    approval_level: Optional[int] = Field(None, ge=1, le=5)
     is_active: Optional[bool] = None
     
     @field_validator('individual_permissions', mode='before')
@@ -293,8 +293,8 @@ class UserUpdate(BaseModel):
     @classmethod
     def validate_approval_level(cls, v: Optional[int]) -> Optional[int]:
         """Validierung für optionale approval_level Updates."""
-        if v is not None and not 1 <= v <= 4:
-            raise ValueError('approval_level muss zwischen 1 und 4 liegen')
+        if v is not None and not 1 <= v <= 5:
+            raise ValueError('approval_level muss zwischen 1 und 5 liegen')
         return v
 
 class User(UserBase):
@@ -720,7 +720,7 @@ class UserProfileResponse(BaseModel):
     individual_permissions: List[str] = Field(default_factory=list, 
                                             description="Individuelle Berechtigungen")
     is_department_head: bool = Field(description="Abteilungsleiter-Status")
-    approval_level: int = Field(description="Freigabe-Level (1-4)")
+    approval_level: int = Field(description="Freigabe-Level (1-5)")
     is_active: bool = Field(description="Account-Status")
     created_at: datetime = Field(description="Account-Erstellungsdatum")
     

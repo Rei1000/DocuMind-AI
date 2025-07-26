@@ -32,6 +32,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from app.database import engine, SessionLocal, create_tables
 from app.models import InterestGroup, User, UserGroupMembership, Document, Equipment, Norm, DocumentStatus, EquipmentStatus, Calibration, DocumentType
+from app.auth import get_password_hash
 
 def init_interest_groups(db):
     """
@@ -238,6 +239,20 @@ def init_test_users(db):
     groups = {g.code: g.id for g in db.query(InterestGroup).all()}
     
     test_users = [
+        # 0. System Administrator (Standard Admin)
+        {
+            "email": "qms.admin@company.com",
+            "full_name": "QMS System Administrator",
+            "employee_id": "ADMIN001",
+            "organizational_unit": "IT/System",
+            "hashed_password": get_password_hash("admin123"),
+            "individual_permissions": ["system_administration", "final_approval", "audit_management", "user_management"],
+            "is_department_head": True,
+            "approval_level": 5,
+            "groups": ["system_admin", "quality_management"],
+            "primary": "system_admin"
+        },
+        
         # 1. Einkauf
         {
             "email": "max.einkauf@company.com",
@@ -478,7 +493,7 @@ def init_sample_data(db):
             document_number="RMP-001",
             document_type=DocumentType.RISK_ASSESSMENT,
             version="1.0",
-            status=DocumentStatus.REVIEW,
+            status=DocumentStatus.REVIEWED,
             content="Risikomanagementplan für Produktentwicklung nach ISO 14971...",
             creator_id=9,  # Dr. Klaus Müller (Entwicklung)
             tags='["Risikomanagement", "ISO14971", "Entwicklung"]'

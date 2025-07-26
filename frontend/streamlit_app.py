@@ -1960,7 +1960,7 @@ def render_documents_page():
             
             with col2:
                 st.markdown(f"""
-                **Erstellt:** {doc.get('created_at', 'N/A')[:10] if doc.get('created_at') else 'N/A'}  
+                **Erstellt:** {doc.get('created_at')[:10] if doc.get('created_at') else 'N/A'}  
                 **Ersteller:** {doc.get('creator_id', 'N/A')}  
                 **Dateigröße:** {doc.get('file_size', 'N/A')} Bytes  
                 **MIME-Type:** {doc.get('mime_type', 'N/A')}
@@ -2218,7 +2218,11 @@ def render_workflow_page():
             for doc in approved_docs[:10]:
                 with st.expander(f"✅ {doc['title'][:50]}..."):
                     st.write(f"**ID:** {doc['id']} | **Typ:** {doc['document_type']}")
-                    st.write(f"**Freigegeben:** {doc.get('approved_at', 'N/A')[:16]}")
+                    approved_at = doc.get('approved_at')
+                    if approved_at:
+                        st.write(f"**Freigegeben:** {approved_at[:16]}")
+                    else:
+                        st.write(f"**Freigegeben:** N/A")
                     
                     # Status-History anzeigen
                     if st.button(f"📊 Historie", key=f"history_{doc['id']}"):
@@ -2399,7 +2403,11 @@ def render_users_page():
                     with col2:
                         st.write(f"**Abteilungsleiter:** {'✅' if user.get('is_department_head') else '❌'}")
                         st.write(f"**Status:** {'🟢 Aktiv' if user.get('is_active', True) else '🔴 Inaktiv'}")
-                        st.write(f"**Erstellt:** {user.get('created_at', 'N/A')[:10]}")
+                        created_at = user.get('created_at')
+                        if created_at:
+                            st.write(f"**Erstellt:** {created_at[:10]}")
+                        else:
+                            st.write(f"**Erstellt:** N/A")
                     
                     with col3:
                         perms = user.get('individual_permissions', [])
@@ -2648,19 +2656,20 @@ def render_users_page():
                                                 key=f"del_confirm_{user['id']}"
                                             )
                                             
-                                            col_confirm, col_abort = st.columns(2)
+                                            # Buttons ohne verschachtelte Columns
+                                            if st.button(f"🗑️ ENDGÜLTIG LÖSCHEN", key=f"final_delete_{user['id']}", type="primary"):
+                                                if admin_password:
+                                                    if delete_user_permanently(user['id'], admin_password, st.session_state.auth_token):
+                                                        st.success(f"User {user['full_name']} permanent gelöscht!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error("❌ Löschung fehlgeschlagen - Passwort oder Berechtigung falsch")
+                                                else:
+                                                    st.error("❌ Admin-Passwort erforderlich")
                                             
-                                            with col_confirm:
-                                                if st.button(f"🗑️ ENDGÜLTIG LÖSCHEN", key=f"final_delete_{user['id']}", type="primary"):
-                                                    if admin_password:
-                                                        if delete_user_permanently(user['id'], admin_password, st.session_state.auth_token):
-                                                            st.success(f"User {user['full_name']} permanent gelöscht!")
-                                                            st.rerun()
-                                            
-                                            with col_abort:
-                                                if st.button(f"❌ Abbrechen", key=f"abort_delete_{user['id']}"):
-                                                    st.session_state[f"confirm_delete_{user['id']}"] = False
-                                                    st.rerun()
+                                            if st.button(f"❌ Abbrechen", key=f"abort_delete_{user['id']}"):
+                                                st.session_state[f"confirm_delete_{user['id']}"] = False
+                                                st.rerun()
                     
                     # === TEMPORÄRES PASSWORT ANZEIGEN ===
                     temp_pw_key = f"temp_password_{user['id']}"
@@ -4059,7 +4068,8 @@ def render_ai_provider_management_page():
         st.metric("🔗 Aktuelle Fallback-Kette", "", fallback_chain)
     
     with col3:
-        recommended = " → ".join(provider_status.get("recommended_order", [])[:2])
+        recommended_order = provider_status.get("recommended_order", [])
+        recommended = " → ".join(recommended_order[:2]) if recommended_order else "N/A"
         st.metric("⭐ Empfohlen", "", recommended)
     
     # Provider Details-Tabelle
@@ -4095,7 +4105,7 @@ def render_ai_provider_management_page():
                             "Hauptthemen": analysis.get("main_topics"),
                             "Sprache": analysis.get("language"),
                             "Qualitätsscore": analysis.get("quality_score"),
-                            "Zusammenfassung": analysis.get("ai_summary"),
+                            "Zusammenfassung": analysis.get("ai_summary", "N/A")[:100] + "...",
                             "Provider": analysis.get("provider")
                         })
                     else:
@@ -4135,7 +4145,7 @@ def render_ai_provider_management_page():
                             "Dokumenttyp": analysis.get("document_type", "N/A"),
                             "Qualität": analysis.get("quality_score", "N/A"),
                             "Sprache": analysis.get("language", "N/A"),
-                            "Zusammenfassung": analysis.get("ai_summary", "N/A")[:100] + "..."
+                            "Zusammenfassung": (analysis.get("ai_summary", "N/A")[:100] + "...") if analysis.get("ai_summary") else "N/A"
                         })
                     else:
                         results.append({
@@ -4557,7 +4567,11 @@ def render_my_tasks_page():
                             st.write(f"**Workflow:** {task.get('workflow_id', 'N/A')}")
                             if task.get('approval_needed'):
                                 st.write("**🔒 Freigabe erforderlich**")
-                            created = task.get('created_at', '')[:19].replace('T', ' ')
+                            created_at = task.get('created_at', '')
+                            if created_at:
+                                created = created_at[:19].replace('T', ' ')
+                            else:
+                                created = 'N/A'
                             st.write(f"**Erstellt:** {created}")
                         
                         if task.get('description'):

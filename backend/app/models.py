@@ -177,7 +177,7 @@ class User(Base):
     individual_permissions = Column(Text, comment="JSON-String mit individuellen User-Berechtigungen (z.B. Abteilungsleiter-Rechte, Sonderzugänge)")
     is_department_head = Column(Boolean, default=False, nullable=False,
                                comment="Abteilungsleiter-Status für Freigabe-Berechtigungen")
-    approval_level = Column(Integer, default=1, comment="Freigabe-Level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager")
+    approval_level = Column(Integer, default=1, comment="Freigabe-Level: 1=Standard, 2=Teamleiter, 3=Abteilungsleiter, 4=QM-Manager, 5=System-Admin")
     is_active = Column(Boolean, default=True, nullable=False,
                       comment="Account-Status: False = deaktiviert")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False,
