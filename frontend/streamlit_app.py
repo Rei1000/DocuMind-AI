@@ -30,72 +30,156 @@ logger = logging.getLogger(__name__)
 
 # ===== STREAMLIT CONFIG =====
 st.set_page_config(
-    page_title="KI-QMS Dokumentenverwaltung",
-    page_icon="🏥",
+    page_title="DocuMind-AI | Dokumentenverwaltung",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ===== CSS STYLING =====
+# ===== CSS STYLING & FAVICON =====
 st.markdown("""
 <style>
-    .main-header {
-        background: linear-gradient(90deg, #1f77b4, #ff7f0e);
-        padding: 1rem;
-        border-radius: 0.5rem;
-        color: white;
+    /* DocuMind-AI Clean Medical Design - TEST LIGHTER VERSION */
+    :root {
+        --primary-blue: #5B84C4;
+        --text-gray: #6B7280;
+        --light-gray: #F8FAFC;
+        --border-light: #E2E8F0;
+        --white: #FFFFFF;
+        --shadow-light: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        --shadow-medium: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Global Clean Styling */
+    .main .block-container {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text-gray);
+        background-color: var(--white);
+        padding-top: 2rem;
+    }
+    
+    /* Komplett weißer Hintergrund überall */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: var(--white) !important;
+    }
+    
+    /* Sidebar - minimalistisch weiß */
+    [data-testid="stSidebar"] > div {
+        background-color: var(--white) !important;
+        border-right: 1px solid var(--border-light) !important;
+        padding: 1rem !important;
+    }
+    
+
+    
+    /* Sidebar Logo - sauberer Abstand */
+    [data-testid="stSidebar"] .stImage {
+        margin-bottom: 2rem !important;
+    }
+    
+    /* Buttons - kompakt und konsistent mit fester Breite */
+    .stButton > button, [data-testid="stSidebar"] .stButton > button {
+        background-color: var(--white) !important;
+        color: var(--text-gray) !important;
+        border: 1px solid var(--border-light) !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        font-size: 0.85rem !important;
+        padding: 0.4rem 0.8rem !important;
+        margin-bottom: 0.3rem !important;
+        box-shadow: var(--shadow-light) !important;
+        transition: all 0.2s ease !important;
+        height: auto !important;
+        min-height: 2.2rem !important;
+        max-width: 200px !important;
+        width: auto !important;
+        display: inline-block !important;
+    }
+    
+    /* Sidebar Buttons - volle Breite nur in Sidebar */
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100% !important;
+        max-width: none !important;
+    }
+    
+    .stButton > button:hover, [data-testid="stSidebar"] .stButton > button:hover {
+        color: var(--primary-blue) !important;
+        border-color: var(--primary-blue) !important;
+        background-color: var(--white) !important;
+        box-shadow: var(--shadow-medium) !important;
+    }
+    
+    /* Login-Formular - sauber und klar */
+    [data-testid="stSidebar"] .stTextInput > div > div > input {
+        background-color: var(--white) !important;
+        border: 1px solid var(--border-light) !important;
+        border-radius: 6px !important;
+        padding: 0.5rem !important;
+        color: var(--text-gray) !important;
+    }
+    
+    [data-testid="stSidebar"] .stTextInput > div > div > input:focus {
+        border-color: var(--primary-blue) !important;
+        box-shadow: 0 0 0 2px rgba(58, 107, 165, 0.2) !important;
+    }
+    
+    /* Header - professioneller blauer Balken */
+    .documind-header-clean {
+        background: linear-gradient(135deg, var(--primary-blue) 0%, #2E5A94 100%);
+        color: var(--white);
+        padding: 2rem;
+        border-radius: 12px;
         text-align: center;
         margin-bottom: 2rem;
+        box-shadow: var(--shadow-medium);
     }
     
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 0.375rem;
-        padding: 1rem;
-        margin: 1rem 0;
+    .documind-header-clean h1 {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem 0;
+        letter-spacing: -0.025em;
     }
     
-    .error-box {
-        background-color: #f8d7da;
-        border: 1px solid #f1aeb5;
-        border-radius: 0.375rem;
-        padding: 1rem;
-        margin: 1rem 0;
+    .documind-header-clean p {
+        font-size: 1.1rem;
+        margin: 0;
+        opacity: 0.95;
+        font-weight: 300;
     }
     
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 0.375rem;
-        padding: 1rem;
-        margin: 1rem 0;
+
+    
+    /* Wasserzeichen - dezent */
+    .main-content-watermark::before {
+        content: '🧠';
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 200px;
+        opacity: 0.03;
+        z-index: -1;
+        pointer-events: none;
+        color: var(--primary-blue);
     }
     
-    .info-box {
-        background-color: #cce7ff;
-        border: 1px solid #99d6ff;
-        border-radius: 0.375rem;
-        padding: 1rem;
-        margin: 1rem 0;
+    /* Verstecke Streamlit-Branding */
+    #MainMenu, footer, .stDeployButton {
+        display: none !important;
     }
     
-    .upload-area {
-        border: 2px dashed #ccc;
-        border-radius: 0.5rem;
-        padding: 2rem;
-        text-align: center;
-        margin: 1rem 0;
-        background-color: #f8f9fa;
-    }
-    
-    .doc-card {
-        border: 1px solid #ddd;
-        border-radius: 0.375rem;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        background-color: white;
-    }
+    /* Responsive für verschiedene Bildschirmgrößen */
+    @media (max-width: 768px) {
+        .login-card-clean {
+            margin: 1rem;
+            padding: 2rem 1.5rem;
+        }
+        .documind-header-clean h1 {
+            font-size: 1.6rem;
+        }
+         }
+     
 </style>
 """, unsafe_allow_html=True)
 
@@ -956,15 +1040,18 @@ def init_session_state():
 def render_header():
     """Rendert den Header"""
     st.markdown("""
-    <div class="main-header">
-        <h1>🏥 KI-QMS Dokumentenverwaltung</h1>
-        <p style="font-size: 1.2em; margin: 0;">ISO 13485 & MDR konforme Dokumentenlenkung</p>
+    <div class="documind-header-clean">
+        <h1>Dokumentenverwaltung</h1>
+        <p>ISO 13485 & MDR konforme Dokumentenlenkung</p>
     </div>
     """, unsafe_allow_html=True)
 
 def render_sidebar():
     """Rendert die Sidebar mit Navigation und Status"""
-    st.sidebar.title("🏥 KI-QMS Navigation")
+    
+    # Logo - schlicht und elegant (ohne zusätzliche Container)
+    with st.sidebar:
+        st.image("logo-documind-ai.png", use_container_width=True)
     
     # Login-Bereich
     if not st.session_state.authenticated:
@@ -4665,11 +4752,32 @@ def get_organizational_units() -> List[Dict]:
     return result if result else [{"name": "System Administration", "id": 0, "original_name": "system_administration"}]
 
 # ===== MAIN APP =====
+def render_login_welcome():
+    """Rendert die Login-Welcome-Seite mit großem Logo"""
+    # Zentriertes Logo mit ausreichend Abstand
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    # Responsive zentriertes Layout  
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.image("logo-documind-ai.png", use_container_width=True)
+
 def main():
     """Hauptfunktion der App"""
     init_session_state()
-    render_header()
     render_sidebar()
+    
+    # Zeige Login-Welcome-Seite wenn nicht eingeloggt
+    if not st.session_state.authenticated:
+        render_login_welcome()
+        return
+    
+    # Für eingeloggte User: Header, Wasserzeichen und normale Navigation
+    render_header()
+    
+    # Wasserzeichen-Container für eingeloggte User
+    st.markdown('<div class="main-content-watermark">', unsafe_allow_html=True)
     
     # Page Routing
     current_page = st.session_state.get("current_page", "workflow")
@@ -4702,6 +4810,9 @@ def main():
         render_ai_provider_management_page()
     else:
         st.error(f"Unbekannte Seite: {current_page}")
+    
+    # Schließe Wasserzeichen-Container
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
