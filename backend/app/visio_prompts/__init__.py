@@ -4,7 +4,7 @@ Zentrale Prompt-Verwaltung für Visio-Upload-Methode
 Diese Datei verwaltet alle spezialisierten Prompts für die Visio-Verarbeitung
 verschiedener Dokumenttypen im KI-QMS System.
 
-VERSION: v3.1.0 (2025-07-02)
+VERSION: v3.5.0 (2025-07-26)
 SYSTEM: DocuMind-AI QM-System
 COMPLIANCE: ISO 13485, MDR, FDA 21 CFR Part 820
 
@@ -387,7 +387,7 @@ def get_prompt_for_document_type(document_type: str) -> Dict[str, str]:
         "prompt_length": len(prompt_text),
         "prompt_hash": prompt_hash,
         "loaded_at": datetime.utcnow().isoformat() + "Z",
-        "system_version": "v3.1.0 (2025-07-02)"
+        "system_version": "v3.5.0 (2025-07-26)"
     }
     
     # Audit-Informationen

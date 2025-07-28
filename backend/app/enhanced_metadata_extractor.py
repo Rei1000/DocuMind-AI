@@ -19,7 +19,7 @@ Fortgeschrittener Metadaten-Extraktor mit:
 - Enhanced Prompt Engineering
 
 Author: Enhanced AI Assistant
-Version: 3.1.0 - Enterprise Edition
+Version: 3.5.0 - Enterprise Edition
 """
 
 import logging

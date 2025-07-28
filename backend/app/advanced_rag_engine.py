@@ -11,7 +11,7 @@ Moderne RAG-Implementation mit Best Practices:
 - Re-ranking und Post-processing
 
 Author: AI Assistant  
-Version: 3.0 - OpenAI Enterprise Grade
+Version: 3.5.0 - OpenAI Enterprise Grade
 """
 
 from typing import List, Dict, Optional, Any, Tuple, Union

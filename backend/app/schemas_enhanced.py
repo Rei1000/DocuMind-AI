@@ -13,7 +13,7 @@ Umfassende Pydantic Schemas für erweiterte Metadaten-Verarbeitung:
 - 🔄 Backward-Compatibility für bestehende Systeme
 
 Author: Enhanced AI Assistant
-Version: 3.1.0 - Enterprise Edition
+Version: 3.5.0 - Enterprise Edition
 """
 
 from typing import Dict, List, Optional, Any, Union, Tuple
@@ -125,7 +125,7 @@ class EnhancedChunkMetadata(BaseModel):
     # Technical Metadata
     chunking_method: str = Field("hierarchical", description="Verwendete Chunking-Methode")
     embedding_model: str = Field("text-embedding-3-small", description="Verwendetes Embedding-Model")
-    metadata_version: str = Field("3.1.0", description="Version dieses Metadaten-Schemas")
+    metadata_version: str = Field("3.5.0", description="Version dieses Metadaten-Schemas")
     
     @validator('chunk_id', always=True)
     def generate_chunk_id(cls, v, values):
@@ -180,7 +180,7 @@ class EnhancedDocumentMetadata(BaseModel):
     ai_methodology: str = Field("multilayer_analysis", description="Verwendete AI-Methodik")
     
     # Versioning
-    metadata_version: str = Field("3.1.0", description="Metadaten-Schema-Version")
+    metadata_version: str = Field("3.5.0", description="Metadaten-Schema-Version")
     extracted_at: datetime = Field(default_factory=datetime.utcnow, description="Extraktionszeitpunkt")
 
 
@@ -199,7 +199,7 @@ class EnhancedMetadataResponse(BaseModel):
     confidence_score: float = Field(0.7, ge=0.0, le=1.0, description="Gesamt-Konfidenz")
     
     # Versioning
-    schema_version: str = Field("3.1.0", description="Schema-Version")
+    schema_version: str = Field("3.5.0", description="Schema-Version")
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Response-Zeitstempel")
 
 

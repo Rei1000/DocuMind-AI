@@ -20,7 +20,7 @@ Robuster JSON Parser mit umfassenden Fallback-Mechanismen:
 5. Minimal Fallback Schema
 
 Author: Enhanced AI Assistant
-Version: 3.1.0 - Enterprise Edition
+Version: 3.5.0 - Enterprise Edition
 """
 
 import json
