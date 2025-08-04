@@ -2709,13 +2709,35 @@ async def preview_document_processing(
                 # Multi-Visio Engine initialisieren
                 multi_visio_engine = MultiVisioEngine()
                 
-                # 1. Prompts für alle 4 Stufen laden
+                # 1. Prompts für alle 5 Stufen laden (mit korrekten Keys)
                 prompts = {
-                    "expert_induction": multi_visio_engine.prompts.get("01_expert_induction.txt", ""),
-                    "structured_analysis": multi_visio_engine.prompts.get("02_structured_analysis.txt", ""),
-                    "word_coverage": multi_visio_engine.prompts.get("03_word_coverage.txt", ""),
-                    "norm_compliance": multi_visio_engine.prompts.get("04_norm_compliance.txt", "")
+                    "expert_induction": multi_visio_engine.prompts.get("context_setup", ""),
+                    "structured_analysis": multi_visio_engine.prompts.get("structured_analysis", ""),
+                    "word_coverage": multi_visio_engine.prompts.get("text_extraction", ""),
+                    "norm_compliance": multi_visio_engine.prompts.get("norm_compliance", "")
                 }
+                
+                # Debug: Prompt-Längen für Audit Trail
+                logger.info(f"🔍 MULTI-VISIO PROMPT AUDIT:")
+                for key, prompt_content in prompts.items():
+                    logger.info(f"   {key}: {len(prompt_content)} Zeichen")
+                    if key == "structured_analysis":
+                        logger.info(f"   📝 Structured Analysis Vorschau: {prompt_content[:100]}...")
+                
+                # Verifiziere dass ein gültiger Analyse-Prompt geladen wurde (versionsunabhängig)
+                if len(prompts["structured_analysis"]) > 0:
+                    # Inhaltsbezogene Validierung statt hardcodierte Version
+                    has_system_role = "System:" in prompts["structured_analysis"]
+                    has_json_schema = "process_steps" in prompts["structured_analysis"]
+                    has_iso_reference = "ISO 13485" in prompts["structured_analysis"]
+                    
+                    if has_system_role and has_json_schema and has_iso_reference:
+                        logger.info(f"✅ Gültiger Multi-Visio Analyse-Prompt geladen ({len(prompts['structured_analysis'])} Zeichen)")
+                        logger.info(f"🔍 Inhaltsprüfung: System-Rolle ✓, JSON-Schema ✓, ISO-Referenz ✓")
+                    else:
+                        logger.warning(f"⚠️ Prompt-Inhalt unvollständig: System={has_system_role}, JSON={has_json_schema}, ISO={has_iso_reference}")
+                else:
+                    logger.error("❌ Structured_analysis Prompt ist leer!")
                 
                 # 2. Zu Bildern konvertieren (PNG-Vorschau)
                 from .vision_ocr_engine import VisionOCREngine
@@ -2732,27 +2754,43 @@ async def preview_document_processing(
                     preview_image = base64.b64encode(images[0]).decode('utf-8')
                     logger.info(f"✅ PNG-Vorschau für Multi-Visio erstellt: {len(images[0])} Bytes")
                 
-                # 3. Multi-Visio Workflow-Status
+                # 3. Multi-Visio Workflow-Status mit Audit Trail
                 workflow_status = {
                     "step1_expert_induction": {
                         "status": "pending",
                         "description": "Experten-Einweisung des KI-Modells",
-                        "prompt_preview": prompts["expert_induction"][:200] + "..." if len(prompts["expert_induction"]) > 200 else prompts["expert_induction"]
+                        "prompt_preview": prompts["expert_induction"][:300] + "..." if len(prompts["expert_induction"]) > 300 else prompts["expert_induction"],
+                        "prompt_length": len(prompts["expert_induction"]),
+                        "prompt_source": "01_expert_induction.txt"
                     },
                     "step2_structured_analysis": {
                         "status": "pending", 
-                        "description": "Strukturierte JSON-Analyse",
-                        "prompt_preview": prompts["structured_analysis"][:200] + "..." if len(prompts["structured_analysis"]) > 200 else prompts["structured_analysis"]
+                        "description": f"Strukturierte JSON-Analyse für {document_type}",
+                        "prompt_preview": prompts["structured_analysis"][:300] + "..." if len(prompts["structured_analysis"]) > 300 else prompts["structured_analysis"],
+                        "prompt_length": len(prompts["structured_analysis"]),
+                        "prompt_source": "02_structured_analysis.txt",
+                        "audit_validation": len(prompts["structured_analysis"]) > 1000 and "System:" in prompts["structured_analysis"]
                     },
                     "step3_word_coverage_validation": {
                         "status": "pending",
-                        "description": "Wortabdeckungs-Validierung",
-                        "prompt_preview": prompts["word_coverage"][:200] + "..." if len(prompts["word_coverage"]) > 200 else prompts["word_coverage"]
+                        "description": "Zweistufige Wortextraktion (LLM + OCR)",
+                        "prompt_preview": prompts["word_coverage"][:300] + "..." if len(prompts["word_coverage"]) > 300 else prompts["word_coverage"],
+                        "prompt_length": len(prompts["word_coverage"]),
+                        "prompt_source": "03_word_coverage.txt"
                     },
-                    "step4_norm_compliance_check": {
+                    "step4_verification": {
+                        "status": "pending",
+                        "description": "Backend-Verifikation (JSON vs. Wörter)",
+                        "prompt_preview": "Backend-Logik: Fuzzy-Matching zwischen strukturierter JSON und extrahierten Wörtern",
+                        "prompt_length": 0,
+                        "prompt_source": "Backend-Algorithmus"
+                    },
+                    "step5_norm_compliance_check": {
                         "status": "pending",
                         "description": "Normkonformitäts-Check (ISO 13485 + MDR)",
-                        "prompt_preview": prompts["norm_compliance"][:200] + "..." if len(prompts["norm_compliance"]) > 200 else prompts["norm_compliance"]
+                        "prompt_preview": prompts["norm_compliance"][:300] + "..." if len(prompts["norm_compliance"]) > 300 else prompts["norm_compliance"],
+                        "prompt_length": len(prompts["norm_compliance"]),
+                        "prompt_source": "05_norm_compliance.txt"
                     }
                 }
                 
@@ -3489,6 +3527,7 @@ async def _validate_word_coverage(detected_words: List[str], structured_data: Di
         # 3. Wortabdeckung berechnen
         if len(detected_words_normalized) == 0:
             coverage_percentage = 0.0
+            missing_words = set()  # Leere Menge wenn keine Wörter extrahiert wurden
         else:
             # Wörter, die in der JSON-Analyse fehlen
             missing_words = detected_words_normalized - json_words

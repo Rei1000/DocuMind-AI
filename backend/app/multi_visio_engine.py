@@ -44,8 +44,9 @@ class MultiVisioEngine:
         self.prompts_dir = Path(__file__).parent / "multi_visio_prompts"
         self.prompts = self._load_prompts()
         
-        # Cache für Bilder
+        # Cache für Bilder und Datei-Hashes
         self.cached_images = None
+        self.cached_file_hash = None
         
         logger.info("🔍 Multi-Visio Engine v4.0 (5-Stufen Prompt-Chain) initialisiert")
     
@@ -61,7 +62,32 @@ class MultiVisioEngine:
                     prompts['context_setup'] = f.read()
                 logger.info("📝 Prompt geladen: 01_expert_induction.txt")
             
-            # Stufe 2: Strukturierte Analyse (verwendet normale Vision Engine)
+            # Stufe 2: Strukturierte Analyse
+            structured_analysis_prompt_path = self.prompts_dir / "02_structured_analysis.txt"
+            if structured_analysis_prompt_path.exists():
+                with open(structured_analysis_prompt_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                    # Extrahiere den Prompt aus der Variable PROMPT_PROCESS_ANALYSE_EXTENDED
+                    if 'PROMPT_PROCESS_ANALYSE_EXTENDED = """' in file_content:
+                        start_marker = 'PROMPT_PROCESS_ANALYSE_EXTENDED = """'
+                        start_idx = file_content.find(start_marker) + len(start_marker)
+                        
+                        # Finde das schließende """ aber ignoriere das erste (nach dem start_marker)
+                        remaining_content = file_content[start_idx:]
+                        end_idx = remaining_content.find('"""')
+                        
+                        if end_idx > 0:
+                            extracted_prompt = remaining_content[:end_idx].strip()
+                            prompts['structured_analysis'] = extracted_prompt
+                            logger.info(f"✅ PROMPT_PROCESS_ANALYSE_EXTENDED extrahiert: {len(extracted_prompt)} Zeichen")
+                        else:
+                            prompts['structured_analysis'] = file_content
+                            logger.warning("⚠️ Konnte PROMPT_PROCESS_ANALYSE_EXTENDED nicht extrahieren - verwende ganze Datei")
+                    else:
+                        prompts['structured_analysis'] = file_content
+                        logger.warning("⚠️ PROMPT_PROCESS_ANALYSE_EXTENDED nicht gefunden - verwende ganze Datei")
+                logger.info("📝 Prompt geladen: 02_structured_analysis.txt")
+            
             # Stufe 3: Textextraktion
             text_extraction_prompt_path = self.prompts_dir / "03_word_coverage.txt"
             if text_extraction_prompt_path.exists():
@@ -84,6 +110,43 @@ class MultiVisioEngine:
         
         return prompts
     
+    async def _get_or_convert_images(self, file_path: str) -> List[bytes]:
+        """
+        Cached Image Conversion - verhindert doppelte LibreOffice-Aufrufe
+        
+        Args:
+            file_path: Pfad zur Datei
+            
+        Returns:
+            Liste der konvertierten Bilder (aus Cache oder neu konvertiert)
+        """
+        import hashlib
+        
+        # Berechne Datei-Hash für Cache-Validierung
+        try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+                current_hash = hashlib.sha256(file_content).hexdigest()
+        except Exception as e:
+            logger.warning(f"⚠️ Kann Datei-Hash nicht berechnen: {e}")
+            current_hash = f"{file_path}_{os.path.getmtime(file_path)}"
+        
+        # Prüfe Cache
+        if self.cached_images and self.cached_file_hash == current_hash:
+            logger.info(f"♻️ Verwende gecachte Bilder für {Path(file_path).name} (Hash: {current_hash[:8]}...)")
+            return self.cached_images
+        
+        # Konvertiere neu und cache
+        logger.info(f"🔄 Konvertiere Datei zu Bildern: {Path(file_path).name}")
+        images = await self.vision_engine.convert_document_to_images(Path(file_path))
+        
+        if images:
+            self.cached_images = images
+            self.cached_file_hash = current_hash
+            logger.info(f"📸 {len(images)} Bilder konvertiert und gecacht (Hash: {current_hash[:8]}...)")
+        
+        return images
+    
     async def run_full_pipeline(
         self, 
         file_path: str,
@@ -105,15 +168,12 @@ class MultiVisioEngine:
             logger.info(f"🔍 Multi-Visio Pipeline gestartet: {file_path} (Typ: {document_type})")
             start_time = datetime.now()
             
-            # 1. Dokument zu Bildern konvertieren (einmal)
-            images = await self.vision_engine.convert_document_to_images(Path(file_path))
+            # 1. Dokument zu Bildern konvertieren (mit Cache-Unterstützung)
+            images = await self._get_or_convert_images(file_path)
             if not images:
                 raise Exception("Dokument konnte nicht zu Bildern konvertiert werden")
             
-            # Cache die Bilder für alle Stufen
-            self.cached_images = images
-            
-            logger.info(f"📸 {len(images)} Bilder erstellt und gecacht")
+            logger.info(f"📸 {len(images)} Bilder verfügbar für Pipeline")
             
             # Pipeline-Ergebnisse
             pipeline_results = {
@@ -125,16 +185,16 @@ class MultiVisioEngine:
             
             # Stufe 1: Bild übergeben & Kontext setzen (EINZIGER BILD-UPLOAD)
             logger.info("🔄 Stufe 1/5: Bild übergeben & Kontext setzen (EINZIGER BILD-UPLOAD)")
-            stage1_result = await self._stage1_context_setup(images, document_type, provider)
+            stage1_result = await self._stage1_context_setup(self.cached_images, document_type, provider)
             pipeline_results["stages"]["context_setup"] = stage1_result
             
             if not stage1_result.get('success'):
                 logger.error("❌ Pipeline abgebrochen: Stufe 1 fehlgeschlagen")
                 return self._finalize_pipeline(pipeline_results, start_time, False)
             
-            # Stufe 2: Strukturierte Analyse (TEXT-PROMPT ohne Bild)
-            logger.info("🔄 Stufe 2/5: Strukturierte Analyse (TEXT-PROMPT)")
-            stage2_result = await self._stage2_structured_analysis_text_only(document_type, provider, stage1_result)
+            # Stufe 2: Strukturierte Analyse (MIT Multi-Visio Prompt)
+            logger.info("🔄 Stufe 2/5: Strukturierte Analyse (MIT 02_structured_analysis.txt)")
+            stage2_result = await self._stage2_structured_analysis(self.cached_images, document_type, provider)
             pipeline_results["stages"]["structured_analysis"] = stage2_result
             
             if not stage2_result.get('success'):
@@ -231,11 +291,21 @@ Es findet noch keine Analyse statt – nur die Vorbereitung.
         try:
             start_time = datetime.now()
             
-            # Verwende normale Vision Engine mit strukturiertem Prompt
+            # Hole den spezialisierten Multi-Visio Prompt für Stufe 2
+            structured_analysis_prompt = self.prompts.get('structured_analysis', '')
+            if not structured_analysis_prompt:
+                logger.warning("⚠️ Stufe 2 Prompt nicht gefunden - verwende Fallback")
+                structured_analysis_prompt = "Analysiere das Dokument und gib eine strukturierte JSON-Analyse zurück."
+            else:
+                logger.info(f"✅ Stufe 2: Multi-Visio Prompt geladen ({len(structured_analysis_prompt)} Zeichen)")
+                logger.info(f"🔍 Prompt-Anfang: {structured_analysis_prompt[:100]}...")
+            
+            # Verwende Vision Engine mit Multi-Visio Prompt
             result = await self.vision_engine.analyze_document_with_api_prompt(
                 images=images,
                 document_type=document_type,
-                preferred_provider=provider
+                preferred_provider=provider,
+                custom_prompt=structured_analysis_prompt
             )
             
             duration = (datetime.now() - start_time).total_seconds()
@@ -308,13 +378,19 @@ Kein Verständnis, keine Interpretation – nur sichtbarer Text.
             start_time = datetime.now()
             
             # Extrahiere Wörter aus Stufe 3 Ergebnis
+            logger.info(f"🔍 DEBUG: text_extraction_result keys: {list(text_extraction_result.keys())}")
+            
             response_content = text_extraction_result.get('response', {})
+            logger.info(f"🔍 DEBUG: response_content type: {type(response_content)}")
+            logger.info(f"🔍 DEBUG: response_content keys: {list(response_content.keys()) if isinstance(response_content, dict) else 'not a dict'}")
             
             if isinstance(response_content, dict):
                 extracted_words = response_content.get('extracted_words', [])
+                logger.info(f"🔍 DEBUG: extracted_words type: {type(extracted_words)}, length: {len(extracted_words)}")
             else:
                 # Fallback für alte Format
                 extracted_words = []
+                logger.warning(f"⚠️ response_content ist kein dict: {type(response_content)}")
             
             logger.info(f"📝 {len(extracted_words)} Wörter aus Stufe 3 erhalten")
             
@@ -478,6 +554,17 @@ Bewerte, ob die Inhalte den Anforderungen eines relevanten ISO-/MDR-Kapitels ent
             start_time = datetime.now()
             
             logger.info("🔤 Starte zweistufige Wortextraktion...")
+            
+            # Prüfe cached_images
+            if not self.cached_images or len(self.cached_images) == 0:
+                logger.error("❌ Keine cached_images verfügbar für Textextraktion!")
+                return {
+                    "success": False,
+                    "stage": "text_extraction",
+                    "error": "Keine cached_images verfügbar"
+                }
+            
+            logger.info(f"📸 {len(self.cached_images)} cached_images verfügbar")
             
             # Schritt 1: LLM-Wortextraktion
             llm_result = await self.word_engine.extract_words_with_llm(
