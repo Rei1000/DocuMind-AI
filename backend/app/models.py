@@ -295,6 +295,24 @@ class Document(Base):
     file_hash = Column(String(64), comment="SHA-256 Hash für Integrität")
     mime_type = Column(String(100), comment="MIME-Type der Datei")
     
+    # === ERWEITERTES DATEI-MANAGEMENT FÜR AUDITIERBARKEIT ===
+    original_document_path = Column(String(500), comment="Pfad zum Original-Dokument (DOCX, PDF, etc.)")
+    original_document_hash = Column(String(64), comment="SHA-256 Hash des Original-Dokuments")
+    original_document_size = Column(Integer, comment="Größe des Original-Dokuments in Bytes")
+    original_document_mime_type = Column(String(100), comment="MIME-Type des Original-Dokuments")
+    
+    # PNG-Referenzen für Vision-API und RAG
+    png_preview_path = Column(String(500), comment="Pfad zur PNG-Vorschau (für Vision-API)")
+    png_preview_hash = Column(String(64), comment="SHA-256 Hash der PNG-Vorschau")
+    png_preview_size = Column(Integer, comment="Größe der PNG-Vorschau in Bytes")
+    png_generation_timestamp = Column(DateTime, comment="Zeitpunkt der PNG-Generierung")
+    png_generation_method = Column(String(50), comment="Methode der PNG-Generierung (LibreOffice, etc.)")
+    
+    # Konvertierungs-Metadaten
+    conversion_success = Column(Boolean, default=True, comment="Erfolg der Dokument-Konvertierung")
+    conversion_duration_seconds = Column(Float, comment="Dauer der Konvertierung in Sekunden")
+    conversion_log = Column(Text, comment="Log der Konvertierung für Debugging")
+    
     # === RAG-VORBEREITUNG ===
     extracted_text = Column(Text, comment="Extrahierter Text für RAG/AI-Indexierung")
     keywords = Column(String(1000), comment="Extrahierte Schlüsselwörter")
@@ -330,6 +348,17 @@ class Document(Base):
     structured_analysis = Column(Text, comment="JSON-strukturierte Analyse-Daten der Visio-Methode")
     prompt_used = Column(Text, comment="Verwendeter Prompt bei Visio-Verarbeitung")
     ocr_text_preview = Column(Text, comment="OCR-Text-Vorschau für Benutzer-Review")
+    
+    # === MULTI-VISIO PIPELINE STUFEN-ERGEBNISSE ===
+    multi_visio_stage1_result = Column(Text, comment="JSON-Ergebnis Stufe 1: Experten-Einweisung")
+    multi_visio_stage2_result = Column(Text, comment="JSON-Ergebnis Stufe 2: Strukturierte JSON-Analyse")
+    multi_visio_stage3_result = Column(Text, comment="JSON-Ergebnis Stufe 3: Textextraktion (Wortliste)")
+    multi_visio_stage4_result = Column(Text, comment="JSON-Ergebnis Stufe 4: Verifikation (Backend-Logik)")
+    multi_visio_stage5_result = Column(Text, comment="JSON-Ergebnis Stufe 5: Normkonformität")
+    multi_visio_pipeline_summary = Column(Text, comment="JSON-Zusammenfassung der gesamten Multi-Visio-Pipeline")
+    multi_visio_provider_used = Column(String(50), comment="Verwendeter AI-Provider für Multi-Visio-Pipeline")
+    multi_visio_total_duration = Column(Float, comment="Gesamtdauer der Multi-Visio-Pipeline in Sekunden")
+    multi_visio_success_rate = Column(Float, comment="Erfolgsrate der Multi-Visio-Pipeline (0.0-1.0)")
     
     # Metadata
     creator_id = Column(Integer, ForeignKey("users.id"), comment="Ersteller des Dokuments (User.id)")

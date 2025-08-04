@@ -128,11 +128,15 @@ class AdvancedAIEngine:
             
             # 3. Google Gemini (Backup)
             if GoogleGeminiProvider:
-                self.ai_providers['google_gemini'] = GoogleGeminiProvider()
+                self.ai_providers['gemini'] = GoogleGeminiProvider()
                 self.logger.info("🌟 Google Gemini Provider initialisiert")
                 
         except Exception as e:
             self.logger.warning(f"Provider Setup Warnung: {e}")
+    
+    def check_providers_available(self) -> bool:
+        """Prüft ob mindestens ein AI-Provider verfügbar ist"""
+        return len(self.ai_providers) > 0
 
     async def ai_enhanced_analysis(self, text: str, document_type: str = "unknown") -> Dict[str, Any]:
         """
@@ -169,11 +173,11 @@ class AdvancedAIEngine:
                 self.logger.warning(f"Ollama Analyse fehlgeschlagen: {e}")
         
         # 3. Fallback: Google Gemini
-        if 'google_gemini' in self.ai_providers:
+        if 'gemini' in self.ai_providers:
             try:
                 self.logger.info("🌟 Nutze Google Gemini als Fallback")
-                result = await self.ai_providers['google_gemini'].analyze_document(text, document_type)
-                result['provider'] = 'google_gemini'
+                result = await self.ai_providers['gemini'].analyze_document(text, document_type)
+                result['provider'] = 'gemini'
                 result['cost'] = 'kostenlos (limitiert)'
                 return result
             except Exception as e:
@@ -1081,12 +1085,12 @@ class AdvancedAIEngine:
         
         # Provider-Priorisierung basierend auf Auswahl
         if preferred_provider == "auto":
-            provider_chain = ["openai_4o_mini", "ollama", "google_gemini", "rule_based"]
+            provider_chain = ["openai_4o_mini", "ollama", "gemini", "rule_based"]
         elif preferred_provider == "rule_based":
             provider_chain = ["rule_based"]  # Direkt zu Rule-based
         else:
             # Gewünschter Provider zuerst, dann Fallbacks
-            provider_chain = [preferred_provider, "openai_4o_mini", "ollama", "google_gemini", "rule_based"]
+            provider_chain = [preferred_provider, "openai_4o_mini", "ollama", "gemini", "rule_based"]
             # Duplikate entfernen und Reihenfolge beibehalten
             provider_chain = list(dict.fromkeys(provider_chain))
         
@@ -1224,10 +1228,10 @@ class AdvancedAIEngine:
         
         # Auto-Selection: OpenAI 4o-mini first
         if preferred_provider == "auto" or not preferred_provider:
-            provider_chain = ["openai_4o_mini", "ollama", "google_gemini", "rule_based"]
+            provider_chain = ["openai_4o_mini", "ollama", "gemini", "rule_based"]
         else:
             # Bevorzugter Provider zuerst, dann Standard-Fallbacks
-            provider_chain = [preferred_provider, "openai_4o_mini", "ollama", "google_gemini", "rule_based"]
+            provider_chain = [preferred_provider, "openai_4o_mini", "ollama", "gemini", "rule_based"]
         
         last_error = None
         

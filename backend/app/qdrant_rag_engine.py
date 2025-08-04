@@ -311,7 +311,7 @@ Gib eine präzise, fachlich korrekte Antwort."""
                     
                     if debug_info:
                         debug_info["ai_response_length"] = len(answer_text)
-                        debug_info["ai_provider_used"] = "google_gemini"
+                        debug_info["ai_provider_used"] = "gemini"
                         debug_info["generation_config"] = generation_config
                     
                 except Exception as ai_error:

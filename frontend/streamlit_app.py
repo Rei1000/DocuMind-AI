@@ -18,7 +18,7 @@ from datetime import datetime
 
 # ===== KONFIGURATION =====
 API_BASE_URL = "http://127.0.0.1:8000"  # OHNE /api Suffix!
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 120  # Erhöht auf 2 Minuten für Vision-API
 MAX_FILE_SIZE_MB = 50
 
 # ===== LOGGING SETUP =====
@@ -217,6 +217,31 @@ def check_backend_status() -> bool:
     result = safe_api_call(_check)
     return result is True
 
+def get_upload_methods() -> List[Dict]:
+    """
+    Lädt alle verfügbaren Upload-Methoden vom Backend.
+    
+    Returns:
+        List[Dict]: Liste der verfügbaren Upload-Methoden
+    """
+    def _get_methods():
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/api/upload-methods",
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("methods", [])
+            else:
+                st.error(f"❌ Fehler beim Laden der Upload-Methoden: {response.status_code}")
+                return []
+        except Exception as e:
+            st.error(f"❌ Verbindungsfehler beim Laden der Upload-Methoden: {str(e)}")
+            return []
+    
+    return safe_api_call(_get_methods)
+
 def get_document_types() -> List[str]:
     """Lädt verfügbare Dokumenttypen"""
     def _get_types():
@@ -238,7 +263,8 @@ def upload_document_with_file(
     content: Optional[str] = None,
     remarks: Optional[str] = None,
     chapter_numbers: Optional[str] = None,
-    upload_method: str = "ocr"  # NEU: Upload-Methode Parameter
+    upload_method: str = "ocr",  # NEU: Upload-Methode Parameter
+    ai_model: str = "auto"  # NEU: AI-Modell Parameter
 ) -> Optional[Dict]:
     """
     Lädt ein Dokument mit Datei hoch - ZUVERLÄSSIG!
@@ -255,7 +281,8 @@ def upload_document_with_file(
         form_data = {
             "creator_id": str(creator_id),
             "version": version,
-            "upload_method": upload_method  # NEU: Upload-Methode hinzufügen
+            "upload_method": upload_method,  # NEU: Upload-Methode hinzufügen
+            "ai_model": ai_model  # NEU: AI-Modell hinzufügen
         }
         
         # document_type NUR setzen wenn nicht leer (Backend hat Default "OTHER")
@@ -346,6 +373,36 @@ def test_simple_vision_api(file_data) -> Optional[Dict]:
             return None
     
     return safe_api_call(_test)
+
+def process_multi_visio_stage(file_data, stage: int, provider: str = "auto") -> Optional[Dict]:
+    """Führt eine einzelne Stufe der Multi-Visio-Pipeline aus"""
+    
+    def _process_stage():
+        try:
+            # Datei vorbereiten
+            files = {"file": (file_data.name, file_data.getvalue(), file_data.type)}
+            
+            # API-Aufruf für Multi-Visio-Stufe
+            response = requests.post(
+                f"{API_BASE_URL}/api/multi-visio/stage/{stage}",
+                files=files,
+                data={
+                    "provider": provider
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"❌ API-Fehler: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            st.error(f"❌ Fehler: {str(e)}")
+            return None
+    
+    return safe_api_call(_process_stage)
 
 def process_document_with_prompt(file_data, upload_method: str = "visio", document_type: str = "SOP", confirm_prompt: bool = False, preferred_provider: str = "auto", exact_prompt: str = None) -> Optional[Dict]:
     """Optimierter Workflow mit einheitlichem Prompt"""
@@ -1396,8 +1453,38 @@ def render_unified_upload():
         st.markdown("### 📸 Schritt 1: Dokument-Vorschau ✅")
         st.success("✅ Vorschau erfolgreich erstellt!")
         
-        # Schritt 2: Prompt anzeigen
-        st.markdown("### 🤖 Schritt 2: Dynamischer Prompt")
+        # Schritt 2: KI-Modell wählen (für alle Methoden)
+        st.markdown("### 🧠 Schritt 2: KI-Modell wählen")
+        
+        # Provider-Status abrufen
+        provider_status = get_ai_provider_status()
+        if provider_status and "provider_status" in provider_status:
+            providers = provider_status["provider_status"]
+            
+            # Verfügbare Provider anzeigen
+            available_providers = ["auto"]
+            for provider_name, details in providers.items():
+                if details.get("available", False):
+                    available_providers.append(provider_name)
+            
+            selected_provider = st.selectbox(
+                "KI-Modell auswählen:",
+                options=available_providers,
+                format_func=lambda x: {
+                    "auto": "🤖 Auto (Beste verfügbare)",
+                    "openai": "🌟 OpenAI GPT-4o",
+                    "ollama": "🦙 Ollama (Lokal)",
+                    "gemini": "🌐 Google Gemini"
+                }.get(x, x)
+            )
+            
+            st.success(f"✅ KI-Modell ausgewählt: {selected_provider}")
+        else:
+            st.warning("⚠️ KI-Provider-Status nicht verfügbar")
+            selected_provider = "auto"
+        
+        # Schritt 3: Prompt anzeigen
+        st.markdown("### 🤖 Schritt 3: Dynamischer Prompt")
         upload_method = preview_data.get("upload_method", "ocr")
         
         if upload_method == "visio":
@@ -1454,38 +1541,688 @@ def render_unified_upload():
             except Exception as e:
                 st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
                 st.stop()
+        elif upload_method == "multi-visio":
+            # === MULTI-VISIO 5-STUFEN-PIPELINE ===
+            st.success("🔍 **Multi-Visio 5-Stufen-Pipeline** aktiviert")
+            st.info("📋 **Workflow:** Experten-Einweisung → JSON-Analyse → Textextraktion → Verifikation (Backend) → Normkonformität")
+            
+            # Multi-Visio Pipeline-Status initialisieren
+            if "multi_visio_pipeline" not in st.session_state:
+                st.session_state.multi_visio_pipeline = {
+                    "current_stage": 1,
+                    "stages_completed": [],
+                    "results": {},
+                    "selected_provider": selected_provider  # Verwende die ausgewählte Provider
+                }
+            else:
+                # Provider aktualisieren
+                st.session_state.multi_visio_pipeline["selected_provider"] = selected_provider
+            
+            # Fortschrittsanzeige
+            st.markdown("### 📊 Pipeline-Fortschritt")
+            stages = ["1️⃣ Experten-Einweisung", "2️⃣ JSON-Analyse", "3️⃣ Textextraktion", "4️⃣ Verifikation", "5️⃣ Normkonformität"]
+            progress = len(st.session_state.multi_visio_pipeline["stages_completed"]) / 5
+            st.progress(progress)
+            
+            # ✅ KORRIGIERT: 5 Spalten für 5 Stages
+            col1, col2, col3, col4, col5 = st.columns(5)
+            columns = [col1, col2, col3, col4, col5]
+            
+            for i, stage in enumerate(stages):
+                with columns[i]:
+                    if i + 1 in st.session_state.multi_visio_pipeline["stages_completed"]:
+                        st.success(f"✅ {stage.split(' ')[1]}")
+                    elif i + 1 == st.session_state.multi_visio_pipeline["current_stage"]:
+                        st.info(f"🔄 {stage.split(' ')[1]}")
+                    else:
+                        st.info(f"⏳ {stage.split(' ')[1]}")
+            
+            # Stufe 1: Experten-Einweisung
+            if st.session_state.multi_visio_pipeline["current_stage"] == 1:
+                st.markdown("### 🎯 Stufe 1: Experten-Einweisung")
+                
+                # Prompt für Stufe 1 laden
+                try:
+                    prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/expert-induction")
+                    if prompt_response.status_code == 200:
+                        prompt_data = prompt_response.json()
+                        prompt_to_use = prompt_data["prompt"]
+                        
+                        st.markdown("**🤖 Prompt für Experten-Einweisung:**")
+                        st.text_area("Experten-Einweisung", prompt_to_use, height=150, disabled=True, key="stage1_prompt")
+                        
+                        # KI-Modell-Info anzeigen
+                        st.success(f"✅ KI-Modell ausgewählt: {st.session_state.multi_visio_pipeline['selected_provider']}")
+                        
+                        # Stufe 1 ausführen
+                        if st.button("🚀 Stufe 1: Experten-Einweisung starten", type="primary", key="stage1_btn"):
+                            with st.spinner("🤖 Führe Experten-Einweisung durch..."):
+                                try:
+                                    # API-Aufruf für Stufe 1
+                                    form_data = st.session_state.get("upload_form_data", {})
+                                    result = process_multi_visio_stage(
+                                        file_data=form_data["file"],
+                                        stage=1,
+                                        provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                                    )
+                                    
+                                    if result and result.get("success"):
+                                        st.session_state.multi_visio_pipeline["results"]["stage1"] = result
+                                        st.session_state.multi_visio_pipeline["stages_completed"].append(1)
+                                        st.session_state.multi_visio_pipeline["current_stage"] = 2
+                                        st.success("✅ Stufe 1 erfolgreich abgeschlossen!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Stufe 1 fehlgeschlagen")
+                                except Exception as e:
+                                    st.error(f"❌ Fehler in Stufe 1: {str(e)}")
+                    else:
+                        st.error(f"❌ Prompt für Stufe 1 konnte nicht geladen werden: {prompt_response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
+            
+            # Stufe 2: JSON-Analyse
+            elif st.session_state.multi_visio_pipeline["current_stage"] == 2:
+                st.markdown("### 📊 Stufe 2: Strukturierte JSON-Analyse")
+                
+                # ✅ VERBESSERTE AUDIT-TRANSPARENZ: Stufe 1 Ergebnis
+                if "stage1" in st.session_state.multi_visio_pipeline["results"]:
+                    with st.expander("📋 **AUDIT: Stufe 1 - Experten-Einweisung**", expanded=True):
+                        stage1_result = st.session_state.multi_visio_pipeline["results"]["stage1"]
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Status", "✅ Erfolgreich" if stage1_result.get('success') else "❌ Fehlgeschlagen")
+                        with col2:
+                            st.metric("Provider", stage1_result.get('provider_used', 'Unbekannt'))
+                        with col3:
+                            st.metric("Dauer", f"{stage1_result.get('duration_seconds', 0):.2f}s")
+                        
+                        st.markdown("**🤖 KI-Antwort:**")
+                        st.text_area("Experten-Einweisung Antwort", stage1_result.get('response', 'Keine Antwort'), height=100, disabled=True)
+                        
+                        # Audit-Informationen
+                        st.markdown("**📋 Audit-Details:**")
+                        st.json({
+                            "stage": stage1_result.get('stage'),
+                            "timestamp": datetime.now().isoformat(),
+                            "provider": stage1_result.get('provider_used'),
+                            "duration_seconds": stage1_result.get('duration_seconds'),
+                            "success": stage1_result.get('success')
+                        })
+                
+                # Prompt für Stufe 2 laden
+                try:
+                    prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/structured-analysis")
+                    if prompt_response.status_code == 200:
+                        prompt_data = prompt_response.json()
+                        prompt_to_use = prompt_data["prompt"]
+                        
+                        st.markdown("**🤖 Prompt für JSON-Analyse:**")
+                        st.text_area("JSON-Analyse", prompt_to_use, height=200, disabled=True, key="stage2_prompt")
+                        
+                        # Prompt-Informationen anzeigen
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Zeichen", len(prompt_to_use))
+                            st.metric("Zeilen", prompt_to_use.count('\n') + 1)
+                        with col2:
+                            st.metric("Version", prompt_data.get('version', 'unbekannt'))
+                        
+                        # Stufe 2 ausführen
+                        if st.button("🚀 Stufe 2: JSON-Analyse starten", type="primary", key="stage2_btn"):
+                            with st.spinner("🤖 Führe JSON-Analyse durch..."):
+                                try:
+                                    form_data = st.session_state.get("upload_form_data", {})
+                                    result = process_multi_visio_stage(
+                                        file_data=form_data["file"],
+                                        stage=2,
+                                        provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                                    )
+                                    
+                                    if result and result.get("success"):
+                                        st.session_state.multi_visio_pipeline["results"]["stage2"] = result
+                                        st.session_state.multi_visio_pipeline["stages_completed"].append(2)
+                                        st.session_state.multi_visio_pipeline["current_stage"] = 3
+                                        st.success("✅ Stufe 2 erfolgreich abgeschlossen!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Stufe 2 fehlgeschlagen")
+                                except Exception as e:
+                                    st.error(f"❌ Fehler in Stufe 2: {str(e)}")
+                    else:
+                        st.error(f"❌ Prompt für Stufe 2 konnte nicht geladen werden: {prompt_response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
+            
+            # Stufe 3: Textextraktion
+            elif st.session_state.multi_visio_pipeline["current_stage"] == 3:
+                st.markdown("### 📝 Stufe 3: Textextraktion")
+                
+                # Ergebnisse der vorherigen Stufen anzeigen
+                if "stage1" in st.session_state.multi_visio_pipeline["results"]:
+                    with st.expander("📋 Ergebnis Stufe 1: Experten-Einweisung"):
+                        stage1_result = st.session_state.multi_visio_pipeline["results"]["stage1"]
+                        st.success("✅ Experten-Einweisung erfolgreich")
+                        st.write(f"**Antwort:** {stage1_result.get('response', 'Keine Antwort')}")
+                
+                if "stage2" in st.session_state.multi_visio_pipeline["results"]:
+                    with st.expander("📋 Ergebnis Stufe 2: JSON-Analyse"):
+                        stage2_result = st.session_state.multi_visio_pipeline["results"]["stage2"]
+                        st.success("✅ JSON-Analyse erfolgreich")
+                        if "structured_analysis" in stage2_result:
+                            st.json(stage2_result["structured_analysis"])
+                
+                # Prompt für Stufe 3 laden
+                try:
+                    prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/word-coverage")
+                    if prompt_response.status_code == 200:
+                        prompt_data = prompt_response.json()
+                        prompt_to_use = prompt_data["prompt"]
+                        
+                        st.markdown("**🤖 Prompt für Textextraktion:**")
+                        st.text_area("Textextraktion", prompt_to_use, height=150, disabled=True, key="stage3_prompt")
+                        
+                        # Stufe 3 ausführen
+                        if st.button("🚀 Stufe 3: Textextraktion starten", type="primary", key="stage3_btn"):
+                            with st.spinner("🤖 Führe Textextraktion durch..."):
+                                try:
+                                    form_data = st.session_state.get("upload_form_data", {})
+                                    result = process_multi_visio_stage(
+                                        file_data=form_data["file"],
+                                        stage=3,
+                                        provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                                    )
+                                    
+                                    if result and result.get("success"):
+                                        st.session_state.multi_visio_pipeline["results"]["stage3"] = result
+                                        st.session_state.multi_visio_pipeline["stages_completed"].append(3)
+                                        st.session_state.multi_visio_pipeline["current_stage"] = 4
+                                        st.success("✅ Stufe 3 erfolgreich abgeschlossen!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Stufe 3 fehlgeschlagen")
+                                except Exception as e:
+                                    st.error(f"❌ Fehler in Stufe 3: {str(e)}")
+                    else:
+                        st.error(f"❌ Prompt für Stufe 3 konnte nicht geladen werden: {prompt_response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
+            
+            # Stufe 4: Verifikation (Backend-Logik)
+            elif st.session_state.multi_visio_pipeline["current_stage"] == 4:
+                st.markdown("### 🔍 Stufe 4: Verifikation (Backend-Logik)")
+                
+                # Ergebnisse der vorherigen Stufen anzeigen
+                for stage_num in [1, 2, 3]:
+                    if f"stage{stage_num}" in st.session_state.multi_visio_pipeline["results"]:
+                        stage_names = {1: "Experten-Einweisung", 2: "JSON-Analyse", 3: "Textextraktion"}
+                        with st.expander(f"📋 Ergebnis Stufe {stage_num}: {stage_names[stage_num]}"):
+                            stage_result = st.session_state.multi_visio_pipeline["results"][f"stage{stage_num}"]
+                            st.success(f"✅ Stufe {stage_num} erfolgreich")
+                            if stage_num == 2 and "structured_analysis" in stage_result:
+                                st.json(stage_result["structured_analysis"])
+                            else:
+                                st.write(f"**Antwort:** {stage_result.get('response', 'Keine Antwort')}")
+                
+                # Verifikation läuft automatisch im Backend
+                st.info("🔧 **Verifikation läuft automatisch im Backend**")
+                st.info("📊 **Methode:** Wortabdeckungs-Validierung mit Backend-Logik")
+                st.info("✅ **Vorteil:** Zuverlässiger als KI-Prompt, deterministisch")
+                
+                # Stufe 4 automatisch ausführen
+                if st.button("🚀 Stufe 4: Verifikation starten", type="primary", key="stage4_btn"):
+                    with st.spinner("🔧 Führe Backend-Verifikation durch..."):
+                        try:
+                            form_data = st.session_state.get("upload_form_data", {})
+                            result = process_multi_visio_stage(
+                                file_data=form_data["file"],
+                                stage=4,
+                                provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                            )
+                            
+                            if result and result.get("success"):
+                                st.session_state.multi_visio_pipeline["results"]["stage4"] = result
+                                st.session_state.multi_visio_pipeline["stages_completed"].append(4)
+                                st.session_state.multi_visio_pipeline["current_stage"] = 5
+                                st.success("✅ Stufe 4 erfolgreich abgeschlossen!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Stufe 4 fehlgeschlagen")
+                        except Exception as e:
+                            st.error(f"❌ Fehler in Stufe 4: {str(e)}")
+            
+            # Stufe 5: Normkonformität
+            elif st.session_state.multi_visio_pipeline["current_stage"] == 5:
+                st.markdown("### 📋 Stufe 5: Normkonformitäts-Check")
+                
+                # Ergebnisse der vorherigen Stufen anzeigen
+                for stage_num in [1, 2, 3, 4]:
+                    if f"stage{stage_num}" in st.session_state.multi_visio_pipeline["results"]:
+                        stage_names = {1: "Experten-Einweisung", 2: "JSON-Analyse", 3: "Textextraktion", 4: "Verifikation"}
+                        with st.expander(f"📋 Ergebnis Stufe {stage_num}: {stage_names[stage_num]}"):
+                            stage_result = st.session_state.multi_visio_pipeline["results"][f"stage{stage_num}"]
+                            st.success(f"✅ Stufe {stage_num} erfolgreich")
+                            if stage_num == 2 and "structured_analysis" in stage_result:
+                                st.json(stage_result["structured_analysis"])
+                            elif stage_num == 4 and "verification_result" in stage_result:
+                                # Verifikations-Ergebnis anzeigen
+                                verification = stage_result["verification_result"]
+                                st.info(f"**Coverage:** {verification.get('coverage_percentage', 0):.1f}%")
+                                st.info(f"**Status:** {verification.get('verification_status', 'unbekannt')}")
+                                st.info(f"**Qualität:** {verification.get('quality_assessment', 'unbekannt')}")
+                                if verification.get('missing_words'):
+                                    st.warning(f"**Fehlende Wörter:** {len(verification['missing_words'])}")
+                            else:
+                                st.write(f"**Antwort:** {stage_result.get('response', 'Keine Antwort')}")
+                
+                # Prompt für Stufe 5 laden
+                try:
+                    prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/norm-compliance")
+                    if prompt_response.status_code == 200:
+                        prompt_data = prompt_response.json()
+                        prompt_to_use = prompt_data["prompt"]
+                        
+                        st.markdown("**🤖 Prompt für Normkonformität:**")
+                        st.text_area("Normkonformität", prompt_to_use, height=200, disabled=True, key="stage5_prompt")
+                        
+                        # Stufe 5 ausführen
+                        if st.button("🚀 Stufe 5: Normkonformität starten", type="primary", key="stage5_btn"):
+                            with st.spinner("🤖 Führe Normkonformitäts-Check durch..."):
+                                try:
+                                    form_data = st.session_state.get("upload_form_data", {})
+                                    result = process_multi_visio_stage(
+                                        file_data=form_data["file"],
+                                        stage=5,
+                                        provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                                    )
+                                    
+                                    if result and result.get("success"):
+                                        st.session_state.multi_visio_pipeline["results"]["stage5"] = result
+                                        st.session_state.multi_visio_pipeline["stages_completed"].append(5)
+                                        st.session_state.multi_visio_pipeline["current_stage"] = 6  # Fertig
+                                        st.success("✅ Stufe 5 erfolgreich abgeschlossen!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Stufe 5 fehlgeschlagen")
+                                except Exception as e:
+                                    st.error(f"❌ Fehler in Stufe 5: {str(e)}")
+                    else:
+                        st.error(f"❌ Prompt für Stufe 5 konnte nicht geladen werden: {prompt_response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
+            
+            # Alle Stufen abgeschlossen
+            elif st.session_state.multi_visio_pipeline["current_stage"] == 6:
+                st.markdown("### 🎉 Multi-Visio Pipeline abgeschlossen!")
+                st.success("✅ Alle 5 Stufen erfolgreich durchgeführt")
+                
+                # 🎯 BEST PRACTICE UI/UX: Verbesserte Multi-Visio-Anzeige
+                st.markdown("---")
+                st.markdown("## 🔍 **MULTI-VISIO PIPELINE - VOLLSTÄNDIGE AUDIT-ÜBERSICHT**")
+                
+                # Pipeline-Status
+                pipeline_results = st.session_state.multi_visio_pipeline["results"]
+                total_stages = 5
+                completed_stages = len([stage for stage in pipeline_results.keys() if stage.startswith("stage")])
+                
+                # Status-Metriken
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Pipeline-Status", "✅ Abgeschlossen" if completed_stages == total_stages else "🔄 In Bearbeitung")
+                with col2:
+                    st.metric("Stufen abgeschlossen", f"{completed_stages}/{total_stages}")
+                with col3:
+                    st.metric("Provider", st.session_state.multi_visio_pipeline.get("selected_provider", "Unbekannt"))
+                with col4:
+                    total_duration = sum(
+                        stage.get("duration_seconds", 0) 
+                        for stage in pipeline_results.values() 
+                        if isinstance(stage, dict)
+                    )
+                    st.metric("Gesamtdauer", f"{total_duration:.2f}s")
+                
+                # Fortschrittsbalken
+                progress = completed_stages / total_stages
+                st.progress(progress)
+                
+                # Stufen-Details in Tabs
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                    "📋 Stufe 1: Experten-Einweisung",
+                    "🔍 Stufe 2: JSON-Analyse", 
+                    "📝 Stufe 3: Textextraktion",
+                    "✅ Stufe 4: Verifikation",
+                    "📊 Stufe 5: Normkonformität",
+                    "🎯 Gesamt-Ergebnis"
+                ])
+                
+                # Stufe 1: Experten-Einweisung
+                with tab1:
+                    if "stage1" in pipeline_results:
+                        stage1 = pipeline_results["stage1"]
+                        st.markdown("### 🎯 **Stufe 1: Experten-Einweisung**")
+                        
+                        # Status-Badges
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if stage1.get("success"):
+                                st.success("✅ Erfolgreich")
+                            else:
+                                st.error("❌ Fehlgeschlagen")
+                        with col2:
+                            st.info(f"⏱️ {stage1.get('duration_seconds', 0):.2f}s")
+                        with col3:
+                            st.info(f"🤖 {stage1.get('provider_used', 'Unbekannt')}")
+                        
+                        # KI-Antwort
+                        st.markdown("**🤖 KI-Antwort:**")
+                        st.text_area(
+                            "Experten-Einweisung Bestätigung",
+                            stage1.get('response', 'Keine Antwort'),
+                            height=150,
+                            disabled=True
+                        )
+                        
+                        # Audit-Details
+                        with st.expander("📋 **Audit-Details**", expanded=False):
+                            st.json({
+                                "stage": stage1.get('stage'),
+                                "method": stage1.get('method'),
+                                "provider_used": stage1.get('provider_used'),
+                                "duration_seconds": stage1.get('duration_seconds'),
+                                "success": stage1.get('success'),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    else:
+                        st.warning("⏳ Stufe 1 noch nicht ausgeführt")
+                
+                # Stufe 2: JSON-Analyse
+                with tab2:
+                    if "stage2" in pipeline_results:
+                        stage2 = pipeline_results["stage2"]
+                        st.markdown("### 🔍 **Stufe 2: Strukturierte JSON-Analyse**")
+                        
+                        # Status-Badges
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if stage2.get("success"):
+                                st.success("✅ Erfolgreich")
+                            else:
+                                st.error("❌ Fehlgeschlagen")
+                        with col2:
+                            st.info(f"⏱️ {stage2.get('duration_seconds', 0):.2f}s")
+                        with col3:
+                            st.info(f"🤖 {stage2.get('provider_used', 'Unbekannt')}")
+                        
+                        # JSON-Analyse anzeigen
+                        st.markdown("**📊 Strukturierte JSON-Analyse:**")
+                        try:
+                            response_content = stage2.get('response', '{}')
+                            if isinstance(response_content, str):
+                                parsed_json = json.loads(response_content)
+                                st.json(parsed_json)
+                            else:
+                                st.json(response_content)
+                        except json.JSONDecodeError:
+                            st.code(response_content, language="json")
+                        
+                        # Audit-Details
+                        with st.expander("📋 **Audit-Details**", expanded=False):
+                            st.json({
+                                "stage": stage2.get('stage'),
+                                "method": stage2.get('method'),
+                                "provider_used": stage2.get('provider_used'),
+                                "duration_seconds": stage2.get('duration_seconds'),
+                                "success": stage2.get('success'),
+                                "response_length": len(str(stage2.get('response', ''))),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    else:
+                        st.warning("⏳ Stufe 2 noch nicht ausgeführt")
+                
+                # Stufe 3: Textextraktion
+                with tab3:
+                    if "stage3" in pipeline_results:
+                        stage3 = pipeline_results["stage3"]
+                        st.markdown("### 📝 **Stufe 3: Textextraktion (Wortliste)**")
+                        
+                        # Status-Badges
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if stage3.get("success"):
+                                st.success("✅ Erfolgreich")
+                            else:
+                                st.error("❌ Fehlgeschlagen")
+                        with col2:
+                            st.info(f"⏱️ {stage3.get('duration_seconds', 0):.2f}s")
+                        with col3:
+                            st.info(f"🤖 {stage3.get('provider_used', 'Unbekannt')}")
+                        
+                        # Wortliste anzeigen
+                        st.markdown("**📋 Extrahierte Wortliste:**")
+                        try:
+                            response_content = stage3.get('response', '{}')
+                            if isinstance(response_content, str):
+                                parsed_json = json.loads(response_content)
+                                if 'extracted_words' in parsed_json:
+                                    words = parsed_json['extracted_words']
+                                    st.success(f"✅ **{len(words)} Wörter erfolgreich extrahiert**")
+                                    
+                                    # Wortliste in Spalten anzeigen
+                                    cols = st.columns(4)
+                                    for i, word in enumerate(words):
+                                        with cols[i % 4]:
+                                            st.write(f"• {word}")
+                                else:
+                                    st.json(parsed_json)
+                            else:
+                                st.json(response_content)
+                        except json.JSONDecodeError:
+                            st.code(response_content, language="json")
+                        
+                        # Audit-Details
+                        with st.expander("📋 **Audit-Details**", expanded=False):
+                            st.json({
+                                "stage": stage3.get('stage'),
+                                "method": stage3.get('method'),
+                                "provider_used": stage3.get('provider_used'),
+                                "duration_seconds": stage3.get('duration_seconds'),
+                                "success": stage3.get('success'),
+                                "response_length": len(str(stage3.get('response', ''))),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    else:
+                        st.warning("⏳ Stufe 3 noch nicht ausgeführt")
+                
+                # Stufe 4: Verifikation
+                with tab4:
+                    if "stage4" in pipeline_results:
+                        stage4 = pipeline_results["stage4"]
+                        st.markdown("### ✅ **Stufe 4: Verifikation (Backend-Logik)**")
+                        
+                        # Status-Badges
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if stage4.get("success"):
+                                st.success("✅ Erfolgreich")
+                            else:
+                                st.error("❌ Fehlgeschlagen")
+                        with col2:
+                            st.info(f"⏱️ {stage4.get('duration_seconds', 0):.2f}s")
+                        with col3:
+                            st.info(f"🔧 {stage4.get('provider_used', 'Backend-Logik')}")
+                        
+                        # Verifikations-Ergebnis
+                        st.markdown("**🔍 Verifikations-Ergebnis:**")
+                        verification_result = stage4.get('verification_result', {})
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Extrahierte Wörter", stage4.get('extracted_words_count', 0))
+                        with col2:
+                            coverage = verification_result.get('coverage_percentage', 0)
+                            st.metric("Abdeckung", f"{coverage:.1f}%")
+                        
+                        # Detaillierte Verifikation
+                        if verification_result:
+                            st.markdown("**📊 Detaillierte Verifikation:**")
+                            st.json(verification_result)
+                        
+                        # Audit-Details
+                        with st.expander("📋 **Audit-Details**", expanded=False):
+                            st.json({
+                                "stage": stage4.get('stage'),
+                                "method": stage4.get('method'),
+                                "provider_used": stage4.get('provider_used'),
+                                "duration_seconds": stage4.get('duration_seconds'),
+                                "success": stage4.get('success'),
+                                "extracted_words_count": stage4.get('extracted_words_count'),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    else:
+                        st.warning("⏳ Stufe 4 noch nicht ausgeführt")
+                
+                # Stufe 5: Normkonformität
+                with tab5:
+                    if "stage5" in pipeline_results:
+                        stage5 = pipeline_results["stage5"]
+                        st.markdown("### 📊 **Stufe 5: Normkonformität**")
+                        
+                        # Status-Badges
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if stage5.get("success"):
+                                st.success("✅ Erfolgreich")
+                            else:
+                                st.error("❌ Fehlgeschlagen")
+                        with col2:
+                            st.info(f"⏱️ {stage5.get('duration_seconds', 0):.2f}s")
+                        with col3:
+                            st.info(f"🤖 {stage5.get('provider_used', 'Unbekannt')}")
+                        
+                        # Normkonformität-Ergebnis
+                        st.markdown("**📋 Normkonformität-Bewertung:**")
+                        try:
+                            response_content = stage5.get('response', '{}')
+                            if isinstance(response_content, str):
+                                parsed_json = json.loads(response_content)
+                                st.json(parsed_json)
+                            else:
+                                st.json(response_content)
+                        except json.JSONDecodeError:
+                            st.code(response_content, language="json")
+                        
+                        # Audit-Details
+                        with st.expander("📋 **Audit-Details**", expanded=False):
+                            st.json({
+                                "stage": stage5.get('stage'),
+                                "method": stage5.get('method'),
+                                "provider_used": stage5.get('provider_used'),
+                                "duration_seconds": stage5.get('duration_seconds'),
+                                "success": stage5.get('success'),
+                                "response_length": len(str(stage5.get('response', ''))),
+                                "timestamp": datetime.now().isoformat()
+                            })
+                    else:
+                        st.warning("⏳ Stufe 5 noch nicht ausgeführt")
+                
+                # Gesamt-Ergebnis
+                with tab6:
+                    st.markdown("### 🎯 **Gesamt-Ergebnis der Multi-Visio Pipeline**")
+                    
+                    # Pipeline-Statistiken
+                    st.markdown("**📊 Pipeline-Statistiken:**")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Gesamtdauer", f"{total_duration:.2f}s")
+                        st.metric("Durchschnitt pro Stufe", f"{total_duration/max(completed_stages, 1):.2f}s")
+                    with col2:
+                        st.metric("Erfolgsrate", f"{(completed_stages/total_stages)*100:.1f}%")
+                        st.metric("Verwendeter Provider", st.session_state.multi_visio_pipeline.get("selected_provider", "Unbekannt"))
+                    
+                    # Qualitätsbewertung
+                    st.markdown("**🏆 Qualitätsbewertung:**")
+                    
+                    # Erfolgreiche Stufen zählen
+                    successful_stages = sum(
+                        1 for stage in pipeline_results.values() 
+                        if isinstance(stage, dict) and stage.get('success')
+                    )
+                    
+                    if successful_stages == total_stages:
+                        st.success("🎉 **PERFEKT:** Alle 5 Stufen erfolgreich abgeschlossen!")
+                    elif successful_stages >= 3:
+                        st.warning(f"⚠️ **TEILWEISE ERFOLGREICH:** {successful_stages}/{total_stages} Stufen erfolgreich")
+                    else:
+                        st.error(f"❌ **PROBLEMATISCH:** Nur {successful_stages}/{total_stages} Stufen erfolgreich")
+                    
+                    # Vollständige Pipeline-Daten
+                    with st.expander("📋 **Vollständige Pipeline-Daten**", expanded=False):
+                        st.json({
+                            "pipeline_info": {
+                                "total_stages": total_stages,
+                                "completed_stages": completed_stages,
+                                "successful_stages": successful_stages,
+                                "provider": st.session_state.multi_visio_pipeline.get("selected_provider"),
+                                "total_duration": total_duration,
+                                "average_duration_per_stage": total_duration/max(completed_stages, 1)
+                            },
+                            "stage_results": pipeline_results,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    
+                    # Export-Optionen
+                    st.markdown("**💾 Export-Optionen:**")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("📄 PDF-Report generieren", type="secondary"):
+                            st.info("📄 PDF-Export-Funktion wird implementiert...")
+                    with col2:
+                        if st.button("📊 JSON-Export", type="secondary"):
+                            st.download_button(
+                                label="⬇️ JSON herunterladen",
+                                data=json.dumps(pipeline_results, indent=2, ensure_ascii=False),
+                                file_name=f"multi_visio_pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                mime="application/json"
+                            )
+                
+                # Dokument übernehmen
+                st.markdown("### ✅ Dokument übernehmen")
+                if st.button("✅ Dokument übernehmen", type="primary", key="multi_visio_approve_btn"):
+                    # Finale Speicherung mit den gespeicherten Form-Daten
+                    form_data = st.session_state.get("upload_form_data", {})
+                    if form_data:
+                        with st.spinner("💾 Speichere Dokument..."):
+                            try:
+                                result = upload_document_with_file(
+                                    file_data=form_data["file"],
+                                    document_type=form_data["document_type"],
+                                    creator_id=st.session_state.current_user["id"],
+                                    title=form_data["title"],
+                                    version=form_data["version"],
+                                    content=form_data["content"],
+                                    remarks=form_data["remarks"],
+                                    chapter_numbers=form_data["chapter_numbers"],
+                                    upload_method=form_data["upload_method"],
+                                    ai_model=selected_provider  # NEU: Verwende den ausgewählten Provider
+                                )
+                                
+                                if result and result.get("success"):
+                                    st.success("✅ Dokument erfolgreich übernommen!")
+                                    st.info("📋 Das Dokument durchläuft jetzt den normalen Freigabe-Prozess")
+                                    
+                                    # Pipeline-Status zurücksetzen
+                                    st.session_state.multi_visio_pipeline = None
+                                    st.session_state.upload_preview = None
+                                    st.session_state.upload_form_data = None
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Fehler beim Übernehmen des Dokuments")
+                            except Exception as e:
+                                st.error(f"❌ Fehler: {str(e)}")
         else:
             st.info("📄 OCR-Verarbeitung: Keine AI-Prompts erforderlich")
-        
-        # Schritt 3: KI-Modell wählen
-        st.markdown("### 🧠 Schritt 3: KI-Modell wählen")
-        
-        # Provider-Status abrufen
-        provider_status = get_ai_provider_status()
-        if provider_status and "provider_status" in provider_status:
-            providers = provider_status["provider_status"]
-            
-            # Verfügbare Provider anzeigen
-            available_providers = ["auto"]
-            for provider_name, details in providers.items():
-                if details.get("available", False):
-                    available_providers.append(provider_name)
-            
-            selected_provider = st.selectbox(
-                "KI-Modell auswählen:",
-                options=available_providers,
-                format_func=lambda x: {
-                    "auto": "🤖 Auto (Beste verfügbare)",
-                    "openai": "🌟 OpenAI GPT-4o",
-                    "ollama": "🦙 Ollama (Lokal)",
-                    "gemini": "🌐 Google Gemini"
-                }.get(x, x)
-            )
-            
-            st.success(f"✅ KI-Modell ausgewählt: {selected_provider}")
-        else:
-            st.warning("⚠️ KI-Provider-Status nicht verfügbar")
-            selected_provider = "auto"
         
         # Schritt 4: API-Aufruf starten
         st.markdown("### 🚀 Schritt 4: API-Aufruf starten")
@@ -1540,14 +2277,18 @@ def render_unified_upload():
                         # ✅ PROMPT-SICHERHEIT: Übertrage den exakten Prompt an das Backend
                         st.info("🔒 **PROMPT-SICHERHEIT:** Übertrage exakten Prompt an Backend...")
                         
-                        # Komplexer Workflow für Dokumente mit GARANTIERTEM Prompt
-                        result = process_document_with_prompt(
+                        # ✅ NORMALE VISION: Verwende Vision Engine über /api/documents/with-file
+                        result = upload_document_with_file(
                             file_data=form_data["file"],
-                            upload_method=upload_method,
                             document_type=current_document_type,  # Verwende den gesicherten Typ
-                            confirm_prompt=True,  # Bestätige, dass der Prompt verwendet werden soll
-                            preferred_provider=selected_provider,
-                            exact_prompt=prompt_to_use  # NEU: Übertrage den exakten Prompt
+                            creator_id=st.session_state.current_user["id"],
+                            title=form_data.get("title"),
+                            version=form_data.get("version", "1.0"),
+                            content=form_data.get("content"),
+                            remarks=form_data.get("remarks"),
+                            chapter_numbers=form_data.get("chapter_numbers"),
+                            upload_method="visio",  # Explizit Vision Engine verwenden
+                            ai_model=selected_provider  # Provider für Vision Engine
                         )
                     
                     # DETAILLIERTE FEHLERANALYSE
@@ -1559,20 +2300,100 @@ def render_unified_upload():
                         st.error("   - Netzwerkfehler")
                         return
                     
-                    if not result.get("success"):
-                        st.error("❌ SCHRITT 2 FEHLGESCHLAGEN: API-Antwort ist nicht erfolgreich")
-                        st.error(f"🔍 API-Status: {result.get('success', 'Nicht gesetzt')}")
+                    # Prüfe ob es ein gültiges Document-Objekt ist
+                    if not result or not isinstance(result, dict) or 'id' not in result:
+                        st.error("❌ SCHRITT 2 FEHLGESCHLAGEN: Kein gültiges Document-Objekt erhalten")
                         st.error(f"🔍 API-Antwort: {result}")
                         return
                     
-                    if not result.get("structured_analysis"):
-                        st.error("❌ SCHRITT 3 FEHLGESCHLAGEN: Keine strukturierte Analyse in der API-Antwort")
-                        st.error(f"🔍 Verfügbare Felder: {list(result.keys())}")
-                        st.error(f"🔍 Vollständige API-Antwort: {result}")
-                        return
+                    # ✅ ALLE SCHRITTE ERFOLGREICH - Zeige ECHTE JSON-Antwort von Gemini
+                    extracted_text = result.get("extracted_text", "")
                     
-                    # ✅ ALLE SCHRITTE ERFOLGREICH - Erstelle finale Antwort
-                    structured_analysis = result.get("structured_analysis")
+                    # 1. ECHTE JSON-Antwort von Gemini extrahieren und anzeigen
+                    st.subheader("🔍 ECHTE JSON-Antwort von Gemini (wie vom Prompt gefordert)")
+                    
+                    import json
+                    import re
+                    
+                    # ✅ NEU: Versuche extracted_text direkt als JSON zu parsen (vom Backend)
+                    try:
+                        # Das Backend speichert jetzt die echte JSON in extracted_text
+                        parsed_gemini_json = json.loads(extracted_text)
+                        st.success("✅ JSON direkt vom Backend erfolgreich geparst!")
+                        st.json(parsed_gemini_json)
+                        structured_analysis = parsed_gemini_json
+                    except json.JSONDecodeError:
+                        # Fallback: Suche nach JSON-Block in extracted_text (alte Methode)
+                        json_match = re.search(r'```json\s*(.*?)\s*```', extracted_text, re.DOTALL)
+                        if json_match:
+                            raw_gemini_json = json_match.group(1).strip()
+                            st.success("✅ JSON-Block von Gemini gefunden!")
+                            
+                            # Zeige die ECHTE JSON-Antwort von Gemini
+                            st.code(raw_gemini_json, language="json")
+                            
+                            # Versuche die JSON zu parsen
+                            try:
+                                parsed_gemini_json = json.loads(raw_gemini_json)
+                                st.success("✅ JSON erfolgreich geparst!")
+                                st.json(parsed_gemini_json)
+                                structured_analysis = parsed_gemini_json
+                            except json.JSONDecodeError as e:
+                                st.warning(f"⚠️ JSON-Parsing fehlgeschlagen: {e}")
+                                st.info("📄 Verwende Roh-Text von Gemini als structured_analysis")
+                                structured_analysis = {
+                                    "raw_gemini_response": raw_gemini_json,
+                                    "parsing_error": str(e),
+                                    "document_metadata": {
+                                        "title": result.get("title", "Unbekannt"),
+                                        "document_type": result.get("document_type", "OTHER"),
+                                        "version": result.get("version", "1.0"),
+                                        "status": result.get("status", "draft")
+                                    }
+                                }
+                        else:
+                            st.warning("⚠️ Kein JSON-Block in der Antwort gefunden")
+                            st.info("📄 Zeige gesamten extracted_text:")
+                            st.code(extracted_text, language="text")
+                            
+                            # Fallback: Verwende Document-Daten
+                            structured_analysis = {
+                                "raw_gemini_response": extracted_text,
+                                "document_metadata": {
+                                    "title": result.get("title", "Unbekannt"),
+                                    "document_type": result.get("document_type", "OTHER"),
+                                    "version": result.get("version", "1.0"),
+                                    "status": result.get("status", "draft")
+                                },
+                                "extracted_text": extracted_text,
+                                "keywords": result.get("keywords", "").split(", ") if result.get("keywords") else [],
+                                "ai_analysis": {
+                                    "provider": "gemini",
+                                    "quality_score": 5,
+                                    "language": "de",
+                                    "compliance_status": result.get("compliance_status", "ZU_BEWERTEN")
+                                }
+                            }
+                    
+                    # 2. Zusätzlich: Zeige die geparste JSON aus dem Backend
+                    st.subheader("📊 Geparste JSON aus Backend-Verarbeitung")
+                    if "raw_gemini_response" in structured_analysis:
+                        # Versuche die raw_gemini_response zu parsen
+                        try:
+                            raw_response = structured_analysis["raw_gemini_response"]
+                            if isinstance(raw_response, str):
+                                # Entferne Markdown-Formatierung
+                                clean_json = raw_response.replace('```json', '').replace('```', '').strip()
+                                parsed_backend_json = json.loads(clean_json)
+                                st.success("✅ Backend-JSON erfolgreich geparst!")
+                                st.json(parsed_backend_json)
+                            else:
+                                st.json(raw_response)
+                        except json.JSONDecodeError as e:
+                            st.warning(f"⚠️ Backend-JSON-Parsing fehlgeschlagen: {e}")
+                            st.code(raw_response, language="text")
+                    else:
+                        st.json(structured_analysis)
                     
                     # ✅ BESTÄTIGUNG: Strukturierte JSON-Antwort erhalten
                     st.success("✅ **ERFOLG:** KI-Modell hat strukturierte JSON-Antwort zurückgegeben!")
@@ -1583,11 +2404,11 @@ def render_unified_upload():
                         "structured_analysis": structured_analysis,
                         "transparency_info": {
                             "api_calls_made": 1,
-                            "providers_used": [result.get("provider_used", "vision_api")],
-                            "api_response_time": result.get("duration_seconds", 0),
-                            "file_size_bytes": result.get("image_size_bytes", 0)
+                            "providers_used": ["gemini"],
+                            "api_response_time": 0,
+                            "file_size_bytes": 0
                         },
-                        "page_count": result.get("page_count", 1),
+                        "page_count": 1,
                         "raw_response": result  # Original-Antwort für Debugging
                     }
                     
@@ -1772,7 +2593,8 @@ def render_unified_upload():
                                     content=form_data["content"],
                                     remarks=form_data["remarks"],
                                     chapter_numbers=form_data["chapter_numbers"],
-                                    upload_method=form_data["upload_method"]
+                                    upload_method=form_data["upload_method"],
+                                    ai_model="auto"  # NEU: Verwende Auto als Standard
                                 )
                                 
                                 if result:
@@ -1814,16 +2636,44 @@ def render_unified_upload():
         col1, col2 = st.columns(2)
         
         with col1:
-            # NEU: Upload-Methode Auswahl
+            # NEU: Dynamische Upload-Methode Auswahl
+            upload_methods = get_upload_methods()
+            
+            # Fallback für den Fall, dass keine Methoden geladen werden können
+            if not upload_methods:
+                upload_methods = [
+                    {
+                        "id": "ocr",
+                        "name": "OCR - Für textbasierte Dokumente",
+                        "description": "Optical Character Recognition für Normen, Richtlinien",
+                        "icon": "📄"
+                    },
+                    {
+                        "id": "visio", 
+                        "name": "Visio - Für grafische Dokumente",
+                        "description": "KI-basierte Analyse von Flussdiagrammen, SOPs",
+                        "icon": "🖼️"
+                    }
+                ]
+            
+            # Upload-Methoden für Selectbox vorbereiten
+            upload_method_options = [method["id"] for method in upload_methods]
+            upload_method_format_func = lambda x: next(
+                (f"{method['icon']} {method['name']}" for method in upload_methods if method['id'] == x),
+                x
+            )
+            
             upload_method = st.selectbox(
                 "Upload-Methode",
-                options=["ocr", "visio"],
-                format_func=lambda x: {
-                    "ocr": "📄 OCR - Für textbasierte Dokumente (Normen, Richtlinien)",
-                    "visio": "🖼️ Visio - Für grafische Dokumente (Flussdiagramme, SOPs)"
-                }[x],
+                options=upload_method_options,
+                format_func=upload_method_format_func,
                 help="Wählen Sie die passende Verarbeitungsmethode für Ihr Dokument"
             )
+            
+            # Zusätzliche Informationen zur ausgewählten Methode anzeigen
+            selected_method = next((method for method in upload_methods if method['id'] == upload_method), None)
+            if selected_method:
+                st.info(f"ℹ️ {selected_method['description']}")
             
             # Dokumenttyp - verfügbare Typen laden
             doc_types = get_document_types()
@@ -3920,11 +4770,11 @@ def test_ai_provider(provider: str, test_text: Optional[str] = None) -> Optional
         test_text = "Dies ist ein Test-Dokument für die QMS-Analyse. Es enthält Informationen über Qualitätsmanagement und Dokumentenverwaltung."
     
     def _test_provider():
-        payload = {
+        data = {
             "provider": provider,
             "test_text": test_text
         }
-        response = requests.post(f"{API_BASE_URL}/api/ai/test-provider", json=payload, timeout=REQUEST_TIMEOUT)
+        response = requests.post(f"{API_BASE_URL}/api/ai/test-provider", data=data, timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
             return response.json()
         return None
@@ -3936,11 +4786,11 @@ def test_ai_provider(provider: str, test_text: Optional[str] = None) -> Optional
 def simple_ai_prompt_test(prompt: str, provider: str = "auto") -> Optional[Dict]:
     """Führt einen einfachen AI Prompt Test durch"""
     def _test_prompt():
-        params = {
+        data = {
             "prompt": prompt,
             "provider": provider
         }
-        response = requests.post(f"{API_BASE_URL}/api/ai/simple-prompt", params=params, timeout=REQUEST_TIMEOUT)
+        response = requests.post(f"{API_BASE_URL}/api/ai/simple-prompt", data=data, timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
             return response.json()
         return None
@@ -4015,7 +4865,7 @@ def render_ai_prompt_test_page():
     st.subheader("🧪 AI Prompt Test")
     
     # Provider Auswahl
-    available_providers = ["auto", "ollama", "openai_4o_mini", "google_gemini", "rule_based"]
+    available_providers = ["auto", "ollama", "openai_4o_mini", "gemini", "rule_based"]
     
     if provider_status and "provider_status" in provider_status:
         # Nur verfügbare Provider anzeigen

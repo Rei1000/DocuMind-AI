@@ -42,6 +42,8 @@ tiktoken==0.8.0
 pytesseract
 Pillow
 PyMuPDF>=1.23.0
+fuzzywuzzy
+python-Levenshtein  # Für bessere Performance bei fuzzywuzzy
 
 # Data Processing - Nur tatsächlich verwendete
 pandas==2.2.3

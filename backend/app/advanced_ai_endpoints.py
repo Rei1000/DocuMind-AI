@@ -459,7 +459,7 @@ async def advanced_ai_health_check():
                 "automatic_citations",
                 "follow_up_generation"
             ],
-            "ai_providers": ["ollama", "google_gemini", "huggingface"],
+            "ai_providers": ["ollama", "gemini", "huggingface"],
             "vector_database": "qdrant_persistent",
             "embedding_model": "all-MiniLM-L6-v2"
         }

@@ -65,11 +65,11 @@ class OllamaProvider:
                 return self._parse_analysis_result(result.get("response", ""))
             else:
                 logger.error(f"Ollama API Fehler: {response.status_code}")
-                return self._fallback_analysis(content)
+                raise Exception(f"Ollama API Fehler: {response.status_code}")
                 
         except Exception as e:
             logger.error(f"Ollama Analyse Fehler: {e}")
-            return self._fallback_analysis(content)
+            raise Exception(f"Ollama Analyse Fehler: {e}")
     
     def _parse_analysis_result(self, response: str) -> Dict[str, Any]:
         """Parst KI-Antwort zu strukturiertem Ergebnis"""
@@ -156,7 +156,8 @@ class OpenAI4oMiniProvider:
         """Analysiert Dokument mit OpenAI 4o-mini"""
         try:
             if not self.api_key:
-                return self._fallback_analysis(content)
+                logger.error("❌ OpenAI API Key fehlt - 🚨 KEIN FALLBACK für Auditierbarkeit!")
+                raise Exception("OpenAI API Key nicht konfiguriert")
             
             prompt = f"""
             Analysiere dieses QMS-Dokument und gib eine strukturierte Antwort in folgendem JSON-Format:
@@ -179,7 +180,11 @@ class OpenAI4oMiniProvider:
             {content[:2000]}...
             """
             
-            response = await openai.ChatCompletion.acreate(
+            # Neue OpenAI API v1.x
+            from openai import OpenAI
+            client = OpenAI(api_key=self.api_key)
+            
+            response = client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "Du bist ein QMS-Experte für ISO 13485 und EU MDR. Analysiere Dokumente präzise und strukturiert."},
@@ -211,15 +216,49 @@ class OpenAI4oMiniProvider:
                 
         except Exception as e:
             logger.error(f"OpenAI 4o-mini Fehler: {e}")
-            return self._fallback_analysis(content)
+            raise Exception(f"OpenAI 4o-mini Fehler: {e}")
     
+    async def simple_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Einfacher Prompt für AI Test Interface"""
+        try:
+            if not self.api_key:
+                return {"ai_summary": "OpenAI API Key nicht verfügbar", "response": "API Key fehlt"}
+            
+            # Neue OpenAI API v1.x
+            from openai import OpenAI
+            client = OpenAI(api_key=self.api_key)
+            
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            
+            ai_response = response.choices[0].message.content
+            return {
+                "ai_summary": ai_response,
+                "response": ai_response,
+                "provider": "openai_4o_mini"
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI simple_prompt Fehler: {e}")
+            return {"ai_summary": f"OpenAI Fehler: {str(e)}", "response": f"Fehler: {str(e)}"}
+
     async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generiert OpenAI Embeddings"""
         try:
             if not self.api_key:
                 raise ValueError("OpenAI API Key fehlt")
             
-            response = await openai.Embedding.acreate(
+            # Neue OpenAI API v1.x
+            from openai import OpenAI
+            client = OpenAI(api_key=self.api_key)
+            
+            response = client.embeddings.create(
                 model=self.embedding_model,
                 input=texts
             )
@@ -327,8 +366,10 @@ class GoogleGeminiProvider:
     
     async def analyze_document(self, content: str, document_type: str = "unknown") -> Dict[str, Any]:
         """Analysiert mit Google Gemini Flash (kostenlos!)"""
+        logger.info(f"🔍 Gemini API Key verfügbar: {bool(self.api_key)}")
         if not self.api_key:
-            return self._fallback_analysis(content)
+            logger.error("❌ Gemini API Key fehlt - 🚨 KEIN FALLBACK für Auditierbarkeit!")
+            raise Exception("Google Gemini API Key nicht konfiguriert")
             
         try:
             prompt = f"""
@@ -369,21 +410,24 @@ class GoogleGeminiProvider:
             
             response = requests.post(url, json=payload, headers=headers, timeout=30)
             
+            logger.info(f"🔍 Gemini Response Status: {response.status_code}")
+            logger.info(f"🔍 Gemini Response: {response.text[:200]}...")
+            
             if response.status_code == 200:
                 result = response.json()
                 if "candidates" in result and result["candidates"]:
                     text_response = result["candidates"][0]["content"]["parts"][0]["text"]
                     return self._parse_gemini_response(text_response, content)
                 else:
-                    logger.warning("Keine Antwort von Gemini erhalten")
-                    return self._fallback_analysis(content)
+                    logger.error("Keine Antwort von Gemini erhalten - 🚨 KEIN FALLBACK für Auditierbarkeit!")
+                    raise Exception("Google Gemini API lieferte keine Antwort")
             else:
                 logger.error(f"Gemini API Fehler: {response.status_code} - {response.text}")
-                return self._fallback_analysis(content)
+                raise Exception(f"Google Gemini API Fehler: {response.status_code}")
                 
         except Exception as e:
             logger.error(f"Google Gemini Fehler: {e}")
-            return self._fallback_analysis(content)
+            raise Exception(f"Google Gemini Fehler: {e}")
     
     def _parse_gemini_response(self, response: str, original_content: str) -> Dict[str, Any]:
         """Parst Gemini JSON-Response"""
@@ -413,7 +457,7 @@ class GoogleGeminiProvider:
                 "norm_references": parsed.get("norm_references", []),
                 "risk_level": parsed.get("risk_level", "mittel"),
                 "missing_elements": parsed.get("missing_elements", []),
-                "provider": "google_gemini",
+                "provider": "gemini",
                 "enhanced": True
             }
             
@@ -426,7 +470,7 @@ class GoogleGeminiProvider:
                 "quality_score": 8,
                 "compliance_relevant": True,
                 "ai_summary": f"Google Gemini Analyse (Parse-Fehler): {response[:200]}",
-                "provider": "google_gemini",
+                "provider": "gemini",
                 "enhanced": True
             }
     

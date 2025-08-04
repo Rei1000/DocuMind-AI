@@ -1,0 +1,119 @@
+# Multi-Visio Pipeline - Stufe 2: Strukturierte JSON-Analyse
+# Datei: 02_structured_analysis.txt
+# Version: 1.0
+# Beschreibung: Strukturierte Analyse des Dokuments mit JSON-Output
+
+Basierend auf deiner Experten-Einweisung als QM-Experte, analysiere das vorliegende Dokument systematisch und erstelle eine strukturierte JSON-Analyse.
+
+## Analyse-Anweisungen:
+
+### 1. Dokumenttyp-Erkennung
+Identifiziere den Dokumenttyp basierend auf dem Inhalt:
+- QM_MANUAL: QM-Handbuch
+- SOP: Standard Operating Procedure
+- WORK_INSTRUCTION: Arbeitsanweisung
+- FORM: Formular
+- USER_MANUAL: Benutzerhandbuch
+- SERVICE_MANUAL: Servicehandbuch
+- RISK_ASSESSMENT: Risikoanalyse
+- VALIDATION_PROTOCOL: Validierungsprotokoll
+- CALIBRATION_PROCEDURE: Kalibrierverfahren
+- AUDIT_REPORT: Audit-Bericht
+- CAPA_DOCUMENT: CAPA-Dokumentation
+- TRAINING_MATERIAL: Schulungsunterlagen
+- SPECIFICATION: Spezifikation
+- STANDARD_NORM: Norm/Standard
+- REGULATION: Regulatorisches Dokument
+- GUIDANCE_DOCUMENT: Leitfaden
+- PROCESS: Prozess/Flussdiagramm
+- OTHER: Sonstiges
+
+### 2. Metadaten-Extraktion
+Extrahiere alle sichtbaren Metadaten:
+- Titel des Dokuments
+- Dokumentnummer/Referenz
+- Version und Revisionsstand
+- Erstellungsdatum
+- Verantwortliche Personen/Abteilungen
+- Genehmigungsstatus
+
+### 3. Inhaltsanalyse
+Analysiere den dokumentierten Inhalt:
+- Hauptprozesse/Verfahren
+- Verantwortlichkeiten
+- Eingaben und Ausgaben
+- Kontrollpunkte
+- Dokumentationsanforderungen
+
+### 4. Normen-Referenzen
+Identifiziere alle erwähnten Normen und Standards:
+- ISO-Normen
+- EN-Standards
+- DIN-Normen
+- MDR-Artikel
+- Andere regulatorische Referenzen
+
+### 5. Qualitätsindikatoren
+Erkenne QM-relevante Elemente:
+- Kontrollpunkte
+- Validierungsanforderungen
+- Risikobewertungen
+- Korrekturmaßnahmen
+- Überwachungsmechanismen
+
+## JSON-Output-Format:
+
+```json
+{
+  "document_analysis": {
+    "detected_type": "SOP",
+    "confidence": 0.95,
+    "title": "Extrahierter Titel",
+    "document_number": "SOP-001",
+    "version": "1.0",
+    "revision_date": "2024-01-15",
+    "responsible_person": "Max Mustermann",
+    "department": "Qualitätsmanagement"
+  },
+  "content_structure": {
+    "main_processes": [
+      "Prozess 1",
+      "Prozess 2"
+    ],
+    "responsibilities": [
+      "Verantwortlichkeit 1",
+      "Verantwortlichkeit 2"
+    ],
+    "control_points": [
+      "Kontrollpunkt 1",
+      "Kontrollpunkt 2"
+    ]
+  },
+  "norm_references": [
+    {
+      "norm": "ISO 13485",
+      "section": "4.2.3",
+      "relevance": "Dokumentenlenkung"
+    }
+  ],
+  "quality_indicators": {
+    "has_validation_requirements": true,
+    "has_risk_assessment": false,
+    "has_corrective_actions": true,
+    "has_monitoring_mechanisms": true
+  },
+  "extracted_text": "Vollständiger extrahierter Text aus dem Dokument",
+  "analysis_confidence": 0.92,
+  "processing_timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+## Wichtige Regeln:
+
+1. **Vollständigkeit**: Alle sichtbaren Textelemente müssen erfasst werden
+2. **Strukturierung**: Logische Gruppierung der Informationen
+3. **Präzision**: Exakte Wiedergabe aller Texte
+4. **Kontext**: QM-Relevanz berücksichtigen
+5. **JSON-Validität**: Nur gültiges JSON ausgeben
+
+Analysiere das Dokument jetzt und gib die strukturierte JSON-Analyse zurück. 

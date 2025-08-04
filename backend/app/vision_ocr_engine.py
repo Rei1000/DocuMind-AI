@@ -35,6 +35,7 @@ from PIL import Image
 import io
 import mimetypes
 import tempfile
+from datetime import datetime
 
 # Document Processing
 try:
@@ -499,7 +500,7 @@ class VisionOCREngine:
                         'content': content,
                         'parsed_json': parsed_json,
                         'tokens_used': response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') else 0,
-                        'provider': 'google_gemini_1.5_flash'
+                        'provider': 'gemini'
                     }
                 except json.JSONDecodeError as e:
                     logger.warning(f"⚠️ Gemini JSON-Parsing fehlgeschlagen: {e}")
@@ -515,7 +516,7 @@ class VisionOCREngine:
                                 'content': json_match.group(),
                                 'parsed_json': extracted_json,
                                 'tokens_used': response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') else 0,
-                                'provider': 'google_gemini_1.5_flash'
+                                'provider': 'gemini'
                             }
                         except json.JSONDecodeError as e2:
                             logger.error(f"❌ Gemini JSON-Extraktion fehlgeschlagen: {e2}")
@@ -526,7 +527,7 @@ class VisionOCREngine:
                         'content': content,
                         'raw_response': True,
                         'tokens_used': response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') else 0,
-                        'provider': 'google_gemini_1.5_flash'
+                        'provider': 'gemini'
                     }
             else:
                 return {"success": False, "error": "Keine Antwort von Gemini Vision API"}
@@ -676,107 +677,30 @@ class VisionOCREngine:
                 
                 # Level 3: Manuelle Feld-Extraktion
                 try:
-                    fallback_result = self._create_manual_fallback(response_text, context)
-                    logger.info("✅ Manuelle Feld-Extraktion erfolgreich")
-                    return fallback_result
+                    logger.error("❌ JSON-Parsing fehlgeschlagen - keine Fallbacks erlaubt")
+                    raise Exception(f"Vision API Antwort konnte nicht als JSON geparst werden: {response_text[:200]}...")
                     
                 except Exception as manual_error:
-                    logger.warning(f"⚠️ Manuelle Extraktion fehlgeschlagen: {manual_error}")
-                
-                # Level 4: Minimaler Fallback
-                logger.warning("⚠️ Alle Parsing-Methoden fehlgeschlagen - verwende minimalen Fallback")
-                fallback_result = {
-                    "success": True,
-                    "content": response_text,
-                    "description": response_text[:200] + "..." if len(response_text) > 200 else response_text,
-                    "extracted_text": response_text,
-                    "process_references": self._extract_references_regex(response_text),
-                    "workflow_steps": [],
-                    "compliance_level": "medium",
-                    "context": context,
-                    "parsing_method": "minimal_fallback",
-                    "parsing_error": str(e)
-                }
-                return fallback_result
+                    logger.error(f"❌ Manuelle Extraktion fehlgeschlagen: {manual_error}")
+                    # Erstelle eine strukturierte Antwort aus der rohen Antwort
+                    logger.info("📝 Erstelle strukturierte Antwort aus Vision API Antwort")
+                    structured_response = {
+                        "success": True,
+                        "content": response_text,
+                        "description": response_text[:200] + "..." if len(response_text) > 200 else response_text,
+                        "extracted_text": response_text,
+                        "process_references": [],
+                        "workflow_steps": [],
+                        "compliance_level": "medium",
+                        "context": context,
+                        "parsing_method": "raw_response",
+                        "raw_response": response_text
+                    }
+                    return structured_response
                 
         except Exception as e:
             logger.error(f"❌ GPT-4o Vision API Fehler: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def _create_manual_fallback(self, response_text: str, context: str) -> Dict[str, Any]:
-        """
-        🔧 Erstellt manuellen Fallback aus API-Antwort
-        """
-        try:
-            result = {
-                "success": True,
-                "content": response_text,
-                "context": context,
-                "parsing_method": "manual_extraction"
-            }
-            
-            # Titel extrahieren
-            title_match = re.search(r'"document_title":\s*"([^"]+)"', response_text)
-            if title_match:
-                result["document_title"] = title_match.group(1)
-            else:
-                result["document_title"] = "Automatisch analysiert"
-            
-            # Dokumenttyp extrahieren
-            type_match = re.search(r'"document_type":\s*"([^"]+)"', response_text)
-            if type_match:
-                result["document_type"] = type_match.group(1)
-            else:
-                result["document_type"] = "UNKNOWN"
-            
-            # Wörter extrahieren
-            words_match = re.search(r'"all_detected_words":\s*\[(.*?)\]', response_text, re.DOTALL)
-            if words_match:
-                words_str = words_match.group(1)
-                words = re.findall(r'"([^"]+)"', words_str)
-                result["all_detected_words"] = words
-            else:
-                result["all_detected_words"] = []
-            
-            # Prozessschritte extrahieren
-            steps_match = re.search(r'"process_steps":\s*\[(.*?)\]', response_text, re.DOTALL)
-            if steps_match:
-                result["process_steps"] = []
-            
-            # Compliance-Anforderungen extrahieren
-            compliance_match = re.search(r'"compliance_requirements":\s*\[(.*?)\]', response_text, re.DOTALL)
-            if compliance_match:
-                result["compliance_requirements"] = []
-            
-            # Qualitätskontrollen extrahieren
-            quality_match = re.search(r'"quality_controls":\s*\[(.*?)\]', response_text, re.DOTALL)
-            if quality_match:
-                result["quality_controls"] = []
-            
-            # Beschreibung und extrahierter Text
-            result["description"] = response_text[:200] + "..." if len(response_text) > 200 else response_text
-            result["extracted_text"] = response_text
-            result["process_references"] = self._extract_references_regex(response_text)
-            result["workflow_steps"] = []
-            result["compliance_level"] = "medium"
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Manueller Fallback fehlgeschlagen: {e}")
-            # Minimaler Fallback
-            return {
-                "success": True,
-                "content": response_text,
-                "description": "Fallback-Analyse",
-                "extracted_text": response_text,
-                "process_references": [],
-                "workflow_steps": [],
-                "compliance_level": "medium",
-                "context": context,
-                "parsing_method": "error_fallback",
-                "parsing_error": str(e)
-            }
+            raise Exception(f"Vision API Analyse fehlgeschlagen: {str(e)}")
     
     def _extract_references_regex(self, text: str) -> List[str]:
         """
@@ -954,7 +878,7 @@ Kontext: {context}
         Args:
             images: Liste von Bildern als bytes
             prompt: Spezifischer Prompt für die Analyse
-            preferred_provider: Gewünschter Provider (openai_4o_mini, ollama, google_gemini)
+            preferred_provider: Gewünschter Provider (openai_4o_mini, ollama, gemini)
             
         Returns:
             Dict mit Analyse-Ergebnissen
@@ -977,7 +901,7 @@ Kontext: {context}
                     'success': False,
                     'error': 'Ollama Vision API noch nicht implementiert'
                 }
-            elif preferred_provider == "google_gemini":
+            elif preferred_provider == "gemini":
                 if not self.gemini_client:
                     return {
                         'success': False,
@@ -1002,7 +926,7 @@ Kontext: {context}
                 image_b64 = base64.b64encode(image_bytes).decode('utf-8')
                 
                 # Vision-Analyse durchführen mit Provider-Auswahl
-                if preferred_provider == "google_gemini":
+                if preferred_provider == "gemini":
                     result = await self._analyze_image_with_gemini_vision(image_b64, f"Bild {i+1} aus {len(images)}", prompt)
                 else:
                     result = await self._analyze_image_with_gpt4_vision(image_b64, f"Bild {i+1} aus {len(images)}", prompt)
@@ -1052,31 +976,70 @@ Kontext: {context}
             # ✅ KRITISCH: Die Vision API gibt das JSON direkt in 'content' zurück!
             if 'content' in first_result:
                 # Das ist das echte JSON aus der Vision API
-                return first_result['content']
+                try:
+                    import json
+                    # Versuche das content als JSON zu parsen
+                    if isinstance(first_result['content'], str):
+                        parsed_json = json.loads(first_result['content'])
+                        logger.info(f"✅ JSON erfolgreich geparst: {len(str(parsed_json))} Zeichen")
+                        return parsed_json
+                    else:
+                        logger.info(f"✅ Content ist bereits JSON: {len(str(first_result['content']))} Zeichen")
+                        return first_result['content']
+                except json.JSONDecodeError as e:
+                    logger.warning(f"⚠️ JSON-Parsing fehlgeschlagen: {e}")
+                    # Fallback: Verwende content als String
+                    return {'extracted_text': first_result['content']}
+            elif 'parsed_json' in first_result:
+                # Verwende das bereits geparste JSON
+                logger.info(f"✅ Verwende bereits geparste JSON: {len(str(first_result['parsed_json']))} Zeichen")
+                return first_result['parsed_json']
             elif 'extracted_text' in first_result:
                 # Fallback: Extrahierter Text (sollte JSON sein)
-                return first_result['extracted_text']
+                try:
+                    import json
+                    if isinstance(first_result['extracted_text'], str):
+                        parsed_json = json.loads(first_result['extracted_text'])
+                        logger.info(f"✅ Extracted_text als JSON geparst: {len(str(parsed_json))} Zeichen")
+                        return parsed_json
+                    else:
+                        logger.info(f"✅ Extracted_text ist bereits JSON: {len(str(first_result['extracted_text']))} Zeichen")
+                        return first_result['extracted_text']
+                except json.JSONDecodeError as e:
+                    logger.warning(f"⚠️ Extracted_text JSON-Parsing fehlgeschlagen: {e}")
+                    return {'extracted_text': first_result['extracted_text']}
             elif 'description' in first_result:
                 # Fallback: Beschreibung verwenden
-                return first_result['description']
-            elif 'provider' in first_result and first_result['provider'] == 'google_gemini_1.5_flash':
+                logger.info(f"✅ Verwende description: {len(first_result['description'])} Zeichen")
+                return {'extracted_text': first_result['description']}
+            elif 'provider' in first_result and first_result['provider'] == 'gemini':
                 # Gemini-spezifische Behandlung
                 if 'parsed_json' in first_result:
                     # Verwende das bereits geparste JSON
+                    logger.info(f"✅ Gemini parsed_json: {len(str(first_result['parsed_json']))} Zeichen")
                     return first_result['parsed_json']
                 elif 'content' in first_result:
                     # Versuche das content zu parsen
                     try:
                         import json
-                        return json.loads(first_result['content'])
-                    except json.JSONDecodeError:
+                        if isinstance(first_result['content'], str):
+                            parsed_json = json.loads(first_result['content'])
+                            logger.info(f"✅ Gemini content als JSON geparst: {len(str(parsed_json))} Zeichen")
+                            return parsed_json
+                        else:
+                            logger.info(f"✅ Gemini content ist bereits JSON: {len(str(first_result['content']))} Zeichen")
+                            return first_result['content']
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"⚠️ Gemini content JSON-Parsing fehlgeschlagen: {e}")
                         # Fallback: Rohe Antwort
-                        return first_result['content']
+                        return {'extracted_text': first_result['content']}
                 else:
                     # Fallback für Gemini
-                    return first_result.get('extracted_text', '{}')
+                    logger.info(f"✅ Gemini Fallback: {len(first_result.get('extracted_text', ''))} Zeichen")
+                    return {'extracted_text': first_result.get('extracted_text', '')}
         
         # Fallback: Alte Logik für Kompatibilität
+        logger.warning("⚠️ Verwende Fallback-Logik - keine gültigen Ergebnisse gefunden")
         combined = {
             'text': '',
             'words': [],
@@ -1114,7 +1077,7 @@ Kontext: {context}
         
         return combined
 
-    async def analyze_document_with_api_prompt(self, images: List[bytes], document_type: str, preferred_provider: str = "openai_4o_mini") -> Dict[str, Any]:
+    async def analyze_document_with_api_prompt(self, images: List[bytes], document_type: str, preferred_provider: str = "openai_4o_mini", custom_prompt: str = None) -> Dict[str, Any]:
         """
         ZENTRALE FUNKTION: Analysiert Dokumente mit dem EXAKTEN Prompt aus der API
         
@@ -1132,18 +1095,42 @@ Kontext: {context}
         try:
             logger.info(f"🔍 ZENTRALE VISION-ANALYSE: {document_type} mit {len(images)} Bildern")
             
-            # 1. Prompt über API laden mit erweiterten Metadaten - KEIN FALLBACK!
-            from .visio_prompts import get_prompt_for_document_type
-            prompt_data = get_prompt_for_document_type(document_type)
-            
-            if not prompt_data or not prompt_data.get("success"):
-                raise Exception(f"❌ Prompt konnte nicht geladen werden für Dokumenttyp: {document_type}")
-            
-            prompt = prompt_data["prompt"]
-            prompt_version = prompt_data["version"]
-            prompt_hash = prompt_data["hash"]
-            prompt_metadata = prompt_data["metadata"]
-            prompt_audit = prompt_data["audit_info"]
+            # 1. Prompt laden - entweder custom oder über API
+            if custom_prompt:
+                # Verwende custom prompt
+                prompt = custom_prompt
+                prompt_version = "custom"
+                prompt_hash = "custom"
+                prompt_metadata = {
+                    "document_type": document_type, 
+                    "prompt_length": len(custom_prompt),
+                    "loaded_at": datetime.now().isoformat()
+                }
+                prompt_audit = {"source": "custom", "loaded_at": datetime.now().isoformat()}
+                logger.info(f"🔧 Verwende custom prompt: {len(custom_prompt)} Zeichen")
+            else:
+                # Prompt über API laden mit erweiterten Metadaten - 🚨 KEIN FALLBACK für Auditierbarkeit!
+                from .visio_prompts import get_prompt_for_document_type
+                prompt_data = get_prompt_for_document_type(document_type)
+                
+                if not prompt_data or not prompt_data.get("success"):
+                    raise Exception(f"❌ Prompt konnte nicht geladen werden für Dokumenttyp: {document_type}")
+                
+                prompt = prompt_data["prompt"]
+                prompt_version = prompt_data["version"]
+                prompt_hash = prompt_data["hash"]
+                prompt_metadata = prompt_data["metadata"]
+                prompt_audit = prompt_data["audit_info"]
+                
+                # 🔍 KRITISCH: Logge den ECHTEN PROMPT für Debugging
+                logger.info(f"🔍 ECHTER PROMPT AN GEMINI:")
+                logger.info(f"📝 PROMPT LÄNGE: {len(prompt)} Zeichen")
+                logger.info(f"📝 PROMPT VERSION: {prompt_version}")
+                logger.info(f"📝 PROMPT HASH: {prompt_hash}")
+                logger.info(f"📝 PROMPT INHALT (erste 500 Zeichen):")
+                logger.info(f"--- START PROMPT ---")
+                logger.info(prompt[:500] + "..." if len(prompt) > 500 else prompt)
+                logger.info(f"--- ENDE PROMPT ---")
             
             # Logge Prompt-Bestätigung für Audit
             logger.info(f"📝 PROMPT-BESTÄTIGUNG:")
@@ -1162,12 +1149,12 @@ Kontext: {context}
                 logger.info("🦙 Verwende Ollama Vision API")
                 # TODO: Ollama Vision API Integration
                 raise Exception("Ollama Vision API noch nicht implementiert")
-            elif preferred_provider == "google_gemini":
+            elif preferred_provider == "gemini":
                 if not self.gemini_client:
                     raise Exception("Google Gemini API Key nicht konfiguriert oder Client nicht verfügbar")
                 logger.info("🌟 Verwende Google Gemini 1.5 Flash Vision API")
             else:
-                raise Exception(f"Provider {preferred_provider} nicht unterstützt. Verfügbare Provider: auto, openai_4o_mini, ollama, google_gemini")
+                raise Exception(f"Provider {preferred_provider} nicht unterstützt. Verfügbare Provider: auto, openai_4o_mini, ollama, gemini")
             
             # 3. Vision-Analyse mit EXAKTEM Prompt
             results = []
@@ -1180,7 +1167,7 @@ Kontext: {context}
                 image_b64 = base64.b64encode(image_bytes).decode('utf-8')
                 
                 # Vision-Analyse mit EXAKTEM Prompt und Provider-Auswahl
-                if preferred_provider == "google_gemini":
+                if preferred_provider == "gemini":
                     result = await self._analyze_image_with_gemini_vision(
                         image_b64, 
                         f"Bild {i+1} aus {len(images)}", 
@@ -1197,7 +1184,7 @@ Kontext: {context}
                     results.append(result)
                     total_tokens += result.get('tokens_used', 0)
                 else:
-                    # KEIN FALLBACK - Fehler werfen!
+                    # 🚨 KEIN FALLBACK - Fehler werfen für Auditierbarkeit!
                     error_msg = result.get('error', 'Unbekannter Fehler')
                     raise Exception(f"Vision-Analyse für Bild {i+1} fehlgeschlagen: {error_msg}")
             
