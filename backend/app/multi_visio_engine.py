@@ -40,8 +40,9 @@ class MultiVisioEngine:
         # Word Extraction Engine
         self.word_engine = WordExtractionEngine()
         
-        # Prompts laden
-        self.prompts_dir = Path(__file__).parent / "multi_visio_prompts"
+        # Prompts laden (konfigurierbar)
+        from .config import get_prompts_dir
+        self.prompts_dir = get_prompts_dir()
         self.prompts = self._load_prompts()
         
         # Cache für Bilder und Datei-Hashes
@@ -51,7 +52,61 @@ class MultiVisioEngine:
         logger.info("🔍 Multi-Visio Engine v4.0 (5-Stufen Prompt-Chain) initialisiert")
     
     def _load_prompts(self) -> Dict[str, str]:
-        """Lädt alle Multi-Visio Prompts"""
+        """
+        Lädt alle Multi-Visio Prompts DYNAMISCH - wie bei normaler Visio!
+        
+        Verwendet das neue multi_visio_prompts Management System für:
+        - Automatische Updates bei Datei-Änderungen
+        - Versionierung und Audit-Trail
+        - Konsistente API wie visio_prompts
+        """
+        prompts = {}
+        
+        try:
+            # ✅ NEUES SYSTEM: Dynamisches Laden wie bei visio_prompts
+            from .multi_visio_prompts import get_multi_visio_prompt
+            
+            # Stufe 1: Experten-Einweisung
+            stage1_data = get_multi_visio_prompt("expert_induction")
+            prompts['context_setup'] = stage1_data["prompt"]
+            logger.info(f"📝 Stage 1 geladen: {stage1_data['version']} ({len(stage1_data['prompt'])} Zeichen)")
+            
+            # Stufe 2: Strukturierte Analyse
+            stage2_data = get_multi_visio_prompt("structured_analysis")
+            prompts['structured_analysis'] = stage2_data["prompt"]
+            logger.info(f"📝 Stage 2 geladen: {stage2_data['version']} ({len(stage2_data['prompt'])} Zeichen)")
+            
+            # Stufe 3: Textextraktion
+            stage3_data = get_multi_visio_prompt("word_coverage")
+            prompts['text_extraction'] = stage3_data["prompt"]
+            logger.info(f"📝 Stage 3 geladen: {stage3_data['version']} ({len(stage3_data['prompt'])} Zeichen)")
+            
+            # Stufe 4: Verifikation (Backend-Logik)
+            stage4_data = get_multi_visio_prompt("verification")
+            prompts['verification'] = stage4_data["prompt"]
+            logger.info(f"📝 Stage 4: Backend-Verifikation ({stage4_data['version']})")
+            
+            # Stufe 5: Normkonformität
+            stage5_data = get_multi_visio_prompt("norm_compliance")
+            prompts['norm_compliance'] = stage5_data["prompt"]
+            logger.info(f"📝 Stage 5 geladen: {stage5_data['version']} ({len(stage5_data['prompt'])} Zeichen)")
+            
+            # ✅ AUDIT-TRAIL: Logge alle geladenen Versionen
+            logger.info("🎯 MULTI-VISIO PROMPTS AUDIT:")
+            for stage in ["expert_induction", "structured_analysis", "word_coverage", "verification", "norm_compliance"]:
+                data = get_multi_visio_prompt(stage)
+                logger.info(f"   {stage}: v{data['version']} ({data['metadata']['prompt_hash']})")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim dynamischen Laden der Multi-Visio Prompts: {e}")
+            # Fallback auf altes System
+            logger.warning("⚡ Fallback: Verwende direktes Datei-Laden")
+            prompts = self._load_prompts_fallback()
+        
+        return prompts
+    
+    def _load_prompts_fallback(self) -> Dict[str, str]:
+        """Fallback: Direktes Laden aus Dateien (alte Methode)"""
         prompts = {}
         
         try:
@@ -60,53 +115,31 @@ class MultiVisioEngine:
             if context_prompt_path.exists():
                 with open(context_prompt_path, 'r', encoding='utf-8') as f:
                     prompts['context_setup'] = f.read()
-                logger.info("📝 Prompt geladen: 01_expert_induction.txt")
+                logger.info("📝 Fallback: 01_expert_induction.txt")
             
             # Stufe 2: Strukturierte Analyse
             structured_analysis_prompt_path = self.prompts_dir / "02_structured_analysis.txt"
             if structured_analysis_prompt_path.exists():
                 with open(structured_analysis_prompt_path, 'r', encoding='utf-8') as f:
-                    file_content = f.read()
-                    # Extrahiere den Prompt aus der Variable PROMPT_PROCESS_ANALYSE_EXTENDED
-                    if 'PROMPT_PROCESS_ANALYSE_EXTENDED = """' in file_content:
-                        start_marker = 'PROMPT_PROCESS_ANALYSE_EXTENDED = """'
-                        start_idx = file_content.find(start_marker) + len(start_marker)
-                        
-                        # Finde das schließende """ aber ignoriere das erste (nach dem start_marker)
-                        remaining_content = file_content[start_idx:]
-                        end_idx = remaining_content.find('"""')
-                        
-                        if end_idx > 0:
-                            extracted_prompt = remaining_content[:end_idx].strip()
-                            prompts['structured_analysis'] = extracted_prompt
-                            logger.info(f"✅ PROMPT_PROCESS_ANALYSE_EXTENDED extrahiert: {len(extracted_prompt)} Zeichen")
-                        else:
-                            prompts['structured_analysis'] = file_content
-                            logger.warning("⚠️ Konnte PROMPT_PROCESS_ANALYSE_EXTENDED nicht extrahieren - verwende ganze Datei")
-                    else:
-                        prompts['structured_analysis'] = file_content
-                        logger.warning("⚠️ PROMPT_PROCESS_ANALYSE_EXTENDED nicht gefunden - verwende ganze Datei")
-                logger.info("📝 Prompt geladen: 02_structured_analysis.txt")
+                    prompts['structured_analysis'] = f.read()
+                logger.info("📝 Fallback: 02_structured_analysis.txt")
             
             # Stufe 3: Textextraktion
             text_extraction_prompt_path = self.prompts_dir / "03_word_coverage.txt"
             if text_extraction_prompt_path.exists():
                 with open(text_extraction_prompt_path, 'r', encoding='utf-8') as f:
                     prompts['text_extraction'] = f.read()
-                logger.info("📝 Prompt geladen: 03_word_coverage.txt")
-            
-            # Stufe 4: Verifikation (Backend-Logik - kein Prompt nötig)
-            logger.info("📝 Stufe 4: Verifikation verwendet Backend-Logik")
+                logger.info("📝 Fallback: 03_word_coverage.txt")
             
             # Stufe 5: Normkonformität
             norm_compliance_prompt_path = self.prompts_dir / "05_norm_compliance.txt"
             if norm_compliance_prompt_path.exists():
                 with open(norm_compliance_prompt_path, 'r', encoding='utf-8') as f:
                     prompts['norm_compliance'] = f.read()
-                logger.info("📝 Prompt geladen: 05_norm_compliance.txt")
+                logger.info("📝 Fallback: 05_norm_compliance.txt")
                 
         except Exception as e:
-            logger.error(f"❌ Fehler beim Laden der Prompts: {e}")
+            logger.error(f"❌ Auch Fallback fehlgeschlagen: {e}")
         
         return prompts
     

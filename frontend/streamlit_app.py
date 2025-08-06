@@ -1509,7 +1509,10 @@ def render_unified_upload():
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     st.markdown("**🤖 Dynamischer Prompt vom Backend:**")
-                    st.text_area("Prompt", prompt_to_use, height=200, disabled=True, key="prompt_display")
+                    # Cache-buster: Zeitstempel für dynamischen Key
+                    import time
+                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                    st.text_area("Prompt", prompt_to_use, height=200, disabled=True, key=f"prompt_display_{cache_buster}")
                 
                 with col2:
                     st.markdown("**📊 Prompt-Info:**")
@@ -1583,13 +1586,39 @@ def render_unified_upload():
                 
                 # Prompt für Stufe 1 laden
                 try:
+                    # Cache-buster: Zeitstempel für dynamischen Key
+                    import time
+                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                    
                     prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/expert-induction")
                     if prompt_response.status_code == 200:
                         prompt_data = prompt_response.json()
                         prompt_to_use = prompt_data["prompt"]
                         
+                        # Debug-Info für Auditierbarkeit
                         st.markdown("**🤖 Prompt für Experten-Einweisung:**")
-                        st.text_area("Experten-Einweisung", prompt_to_use, height=150, disabled=True, key="stage1_prompt")
+                        col_info, col_clear = st.columns([3, 1])
+                        with col_info:
+                            st.caption(f"🔍 Prompt-Länge: {len(prompt_to_use)} Zeichen | Version: {prompt_data.get('version', 'unbekannt')} | API: ✅")
+                        with col_clear:
+                            if st.button("🔄 Cache leeren", help="Lädt den Prompt neu vom Server", key="clear_cache_stage1"):
+                                st.rerun()
+                        
+                        # Verwende dynamischen Key um Streamlit-Caching zu umgehen
+                        st.text_area("Experten-Einweisung", prompt_to_use, height=150, disabled=True, key=f"stage1_prompt_{cache_buster}")
+                        
+                        # Erweiterte Audit Trail Informationen
+                        with st.expander("📈 Audit Trail Details", expanded=False):
+                            st.json({
+                                "stufe": "1 - Experten-Einweisung",
+                                "prompt_quelle": "01_expert_induction.txt",
+                                "api_endpoint": "/api/multi-visio-prompts/expert-induction",
+                                "prompt_laenge": len(prompt_to_use),
+                                "version": prompt_data.get('version', 'unbekannt'),
+                                "hash": prompt_data.get('hash', 'unbekannt'),
+                                "timestamp": prompt_data.get('timestamp', 'unbekannt'),
+                                "cache_buster": cache_buster
+                            })
                         
                         # KI-Modell-Info anzeigen
                         st.success(f"✅ KI-Modell ausgewählt: {st.session_state.multi_visio_pipeline['selected_provider']}")
@@ -1653,13 +1682,39 @@ def render_unified_upload():
                 
                 # Prompt für Stufe 2 laden
                 try:
+                    # Cache-buster: Zeitstempel für dynamischen Key
+                    import time
+                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                    
                     prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/structured-analysis")
                     if prompt_response.status_code == 200:
                         prompt_data = prompt_response.json()
                         prompt_to_use = prompt_data["prompt"]
                         
+                        # Debug-Info für Auditierbarkeit
                         st.markdown("**🤖 Prompt für JSON-Analyse:**")
-                        st.text_area("JSON-Analyse", prompt_to_use, height=200, disabled=True, key="stage2_prompt")
+                        col_info, col_clear = st.columns([3, 1])
+                        with col_info:
+                            st.caption(f"🔍 Prompt-Länge: {len(prompt_to_use)} Zeichen | Version: {prompt_data.get('version', 'unbekannt')} | API: ✅")
+                        with col_clear:
+                            if st.button("🔄 Cache leeren", help="Lädt den Prompt neu vom Server", key="clear_cache_stage2"):
+                                st.rerun()
+                        
+                        # Verwende dynamischen Key um Streamlit-Caching zu umgehen
+                        st.text_area("JSON-Analyse", prompt_to_use, height=200, disabled=True, key=f"stage2_prompt_{cache_buster}")
+                        
+                        # Erweiterte Audit Trail Informationen
+                        with st.expander("📈 Audit Trail Details", expanded=False):
+                            st.json({
+                                "stufe": "2 - Strukturierte Analyse",
+                                "prompt_quelle": "02_structured_analysis.txt",
+                                "api_endpoint": "/api/multi-visio-prompts/structured-analysis",
+                                "prompt_laenge": len(prompt_to_use),
+                                "version": prompt_data.get('version', 'unbekannt'),
+                                "hash": prompt_data.get('hash', 'unbekannt'),
+                                "timestamp": prompt_data.get('timestamp', 'unbekannt'),
+                                "cache_buster": cache_buster
+                            })
                         
                         # Prompt-Informationen anzeigen
                         col1, col2 = st.columns(2)
@@ -1715,13 +1770,39 @@ def render_unified_upload():
                 
                 # Prompt für Stufe 3 laden
                 try:
+                    # Cache-buster: Zeitstempel für dynamischen Key
+                    import time
+                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                    
                     prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/word-coverage")
                     if prompt_response.status_code == 200:
                         prompt_data = prompt_response.json()
                         prompt_to_use = prompt_data["prompt"]
                         
+                        # Debug-Info für Auditierbarkeit
                         st.markdown("**🤖 Prompt für Textextraktion:**")
-                        st.text_area("Textextraktion", prompt_to_use, height=150, disabled=True, key="stage3_prompt")
+                        col_info, col_clear = st.columns([3, 1])
+                        with col_info:
+                            st.caption(f"🔍 Prompt-Länge: {len(prompt_to_use)} Zeichen | Version: {prompt_data.get('version', 'unbekannt')} | API: ✅")
+                        with col_clear:
+                            if st.button("🔄 Cache leeren", help="Lädt den Prompt neu vom Server", key="clear_cache_stage3"):
+                                st.rerun()
+                        
+                        # Verwende dynamischen Key um Streamlit-Caching zu umgehen
+                        st.text_area("Textextraktion", prompt_to_use, height=150, disabled=True, key=f"stage3_prompt_{cache_buster}")
+                        
+                        # Erweiterte Audit Trail Informationen
+                        with st.expander("📈 Audit Trail Details", expanded=False):
+                            st.json({
+                                "stufe": "3 - Textextraktion",
+                                "prompt_quelle": "03_word_coverage.txt",
+                                "api_endpoint": "/api/multi-visio-prompts/word-coverage",
+                                "prompt_laenge": len(prompt_to_use),
+                                "version": prompt_data.get('version', 'unbekannt'),
+                                "hash": prompt_data.get('hash', 'unbekannt'),
+                                "timestamp": prompt_data.get('timestamp', 'unbekannt'),
+                                "cache_buster": cache_buster
+                            })
                         
                         # Stufe 3 ausführen
                         if st.button("🚀 Stufe 3: Textextraktion starten", type="primary", key="stage3_btn"):
@@ -1805,26 +1886,87 @@ def render_unified_upload():
                             st.success(f"✅ Stufe {stage_num} erfolgreich")
                             if stage_num == 2 and "structured_analysis" in stage_result:
                                 st.json(stage_result["structured_analysis"])
-                            elif stage_num == 4 and "verification_result" in stage_result:
-                                # Verifikations-Ergebnis anzeigen
-                                verification = stage_result["verification_result"]
-                                st.info(f"**Coverage:** {verification.get('coverage_percentage', 0):.1f}%")
-                                st.info(f"**Status:** {verification.get('verification_status', 'unbekannt')}")
-                                st.info(f"**Qualität:** {verification.get('quality_assessment', 'unbekannt')}")
-                                if verification.get('missing_words'):
-                                    st.warning(f"**Fehlende Wörter:** {len(verification['missing_words'])}")
+                            elif stage_num == 4 and "verification" in stage_result:
+                                # Verifikations-Ergebnis anzeigen  
+                                verification = stage_result["verification"]
+                                
+                                # Hauptmetriken
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("📊 Wortabdeckung", f"{verification.get('coverage_percentage', 0):.1f}%")
+                                with col2:
+                                    st.metric("📝 Erkannte Wörter", verification.get('total_detected', 0))
+                                with col3:
+                                    st.metric("🔍 JSON-Wörter", verification.get('total_in_json', 0))
+                                
+                                # Status und Qualität
+                                status = verification.get('verification_status', 'unbekannt')
+                                quality = verification.get('quality_assessment', 'unbekannt')
+                                if status == 'verifiziert':
+                                    st.success(f"✅ **Status:** {status} | **Qualität:** {quality}")
+                                else:
+                                    st.warning(f"⚠️ **Status:** {status} | **Qualität:** {quality}")
+                                
+                                # Fehlende Wörter
+                                missing_words = verification.get('missing_words', [])
+                                if missing_words:
+                                    st.warning(f"⚠️ **{len(missing_words)} Wörter fehlen in der JSON-Analyse:**")
+                                    # Zeige bis zu 10 fehlende Wörter
+                                    shown_words = missing_words[:10]
+                                    st.code(", ".join(shown_words))
+                                    if len(missing_words) > 10:
+                                        st.caption(f"... und {len(missing_words) - 10} weitere")
+                                else:
+                                    st.success("✅ **Alle erkannten Wörter sind in der JSON-Analyse enthalten**")
+                                
+                                # Empfehlungen
+                                recommendations = verification.get('recommendations', [])
+                                if recommendations:
+                                    st.subheader("💡 Empfehlungen:")
+                                    for rec in recommendations:
+                                        st.info(f"• {rec}")
+                                
+                                # Debug-Details
+                                with st.expander("🔧 Technische Details"):
+                                    st.json(verification)
                             else:
                                 st.write(f"**Antwort:** {stage_result.get('response', 'Keine Antwort')}")
                 
                 # Prompt für Stufe 5 laden
                 try:
+                    # Cache-buster: Zeitstempel für dynamischen Key
+                    import time
+                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                    
                     prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/norm-compliance")
                     if prompt_response.status_code == 200:
                         prompt_data = prompt_response.json()
                         prompt_to_use = prompt_data["prompt"]
                         
+                        # Debug-Info für Auditierbarkeit
                         st.markdown("**🤖 Prompt für Normkonformität:**")
-                        st.text_area("Normkonformität", prompt_to_use, height=200, disabled=True, key="stage5_prompt")
+                        col_info, col_clear = st.columns([3, 1])
+                        with col_info:
+                            st.caption(f"🔍 Prompt-Länge: {len(prompt_to_use)} Zeichen | Version: {prompt_data.get('version', 'unbekannt')} | API: ✅")
+                        with col_clear:
+                            if st.button("🔄 Cache leeren", help="Lädt den Prompt neu vom Server", key="clear_cache_stage5"):
+                                st.rerun()
+                        
+                        # Verwende dynamischen Key um Streamlit-Caching zu umgehen
+                        st.text_area("Normkonformität", prompt_to_use, height=200, disabled=True, key=f"stage5_prompt_{cache_buster}")
+                        
+                        # Erweiterte Audit Trail Informationen
+                        with st.expander("📈 Audit Trail Details", expanded=False):
+                            st.json({
+                                "stufe": "5 - Normkonformität",
+                                "prompt_quelle": "05_norm_compliance.txt",
+                                "api_endpoint": "/api/multi-visio-prompts/norm-compliance",
+                                "prompt_laenge": len(prompt_to_use),
+                                "version": prompt_data.get('version', 'unbekannt'),
+                                "hash": prompt_data.get('hash', 'unbekannt'),
+                                "timestamp": prompt_data.get('timestamp', 'unbekannt'),
+                                "cache_buster": cache_buster
+                            })
                         
                         # Stufe 5 ausführen
                         if st.button("🚀 Stufe 5: Normkonformität starten", type="primary", key="stage5_btn"):
@@ -4865,7 +5007,15 @@ def render_ai_prompt_test_page():
     st.subheader("🧪 AI Prompt Test")
     
     # Provider Auswahl
-    available_providers = ["auto", "ollama", "openai_4o_mini", "gemini", "rule_based"]
+    # Provider aus Backend-Konfiguration laden
+    try:
+        import sys
+        sys.path.append('../backend')
+        from app.config import get_available_providers
+        available_providers = ["auto"] + get_available_providers()
+    except ImportError:
+        # Fallback falls Backend nicht verfügbar
+        available_providers = ["auto", "ollama", "openai_4o_mini", "gemini", "rule_based"]
     
     if provider_status and "provider_status" in provider_status:
         # Nur verfügbare Provider anzeigen

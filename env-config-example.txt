@@ -1,0 +1,81 @@
+# DocuMind-AI Konfiguration
+# Kopiere diese Datei zu .env und passe die Werte an
+
+# =============================================================================
+# 🔧 SYSTEM-PFADE
+# =============================================================================
+
+# Upload-Verzeichnis (Standard: backend/uploads)
+UPLOADS_DIR=backend/uploads
+
+# Prompt-Verzeichnis (Standard: automatisch erkannt)
+# PROMPTS_DIR=custom/prompts/path
+
+# Log-Verzeichnis (Standard: logs)
+LOGS_DIR=logs
+
+# =============================================================================
+# 🤖 AI-PROVIDER KONFIGURATION
+# =============================================================================
+
+# Verfügbare AI-Provider (kommasepariert, Reihenfolge = Priorität)
+# Neue Reihenfolge: Gemini vor Ollama für bessere Performance
+AI_PROVIDERS=openai_4o_mini,gemini,ollama,rule_based
+
+# Standard-Provider (wenn nicht spezifiziert)
+DEFAULT_AI_PROVIDER=openai_4o_mini
+
+# Token-Limits sind auf Maximum gesetzt:
+# - OpenAI 4o-mini: 16,384 Tokens (erhöht von 4,096)
+# - Gemini: 32,768 Tokens (erhöht von 8,192) 
+# - Ollama: 8,192 Tokens (erhöht von 2,048)
+
+# =============================================================================
+# 📊 QUALITÄTSSCHWELLEN
+# =============================================================================
+
+# Qualitätsschwellen für Verifikation (in Prozent)
+QUALITY_THRESHOLD_HIGH=95.0
+QUALITY_THRESHOLD_MEDIUM=85.0
+QUALITY_THRESHOLD_LOW=70.0
+
+# Fuzzy-Matching Schwelle für OCR-Korrektur (0-100)
+FUZZY_THRESHOLD=85
+
+# =============================================================================
+# 🌍 UMGEBUNG
+# =============================================================================
+
+# Umgebung (development/production)
+ENVIRONMENT=development
+
+# Debug-Level (DEBUG/INFO/WARNING/ERROR)
+DEBUG_LEVEL=INFO
+
+# =============================================================================
+# 🔧 MULTI-VISIO PROMPTS (Optional - überschreibt Standard-Dateien)
+# =============================================================================
+
+# Prompt-Dateien überschreiben (falls abweichende Namen gewünscht)
+# PROMPT_FILE_EXPERT_INDUCTION=custom_expert_prompt.txt
+# PROMPT_FILE_STRUCTURED_ANALYSIS=custom_analysis_prompt.txt
+# PROMPT_FILE_WORD_COVERAGE=custom_word_prompt.txt
+# PROMPT_FILE_NORM_COMPLIANCE=custom_norm_prompt.txt
+
+# =============================================================================
+# 🚀 ANWENDUNGSBEISPIELE
+# =============================================================================
+
+# Für Docker-Deployment:
+# UPLOADS_DIR=/app/data/uploads
+# LOGS_DIR=/app/logs
+
+# Für Test-Umgebung:
+# AI_PROVIDERS=rule_based,ollama
+# DEFAULT_AI_PROVIDER=rule_based
+# QUALITY_THRESHOLD_HIGH=80.0
+
+# Für Produktionsumgebung:
+# ENVIRONMENT=production
+# DEBUG_LEVEL=WARNING
+# AI_PROVIDERS=openai_4o_mini,gemini

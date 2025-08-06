@@ -115,6 +115,7 @@ Last Updated: 2024-12-20
 """
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Query
+from .config import get_uploads_dir, get_prompts_dir, get_available_providers, get_default_provider, get_provider_fallback_chain, get_quality_threshold, get_prompt_filename
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
@@ -2943,7 +2944,7 @@ async def process_document_with_prompt(
                 png_filename = f"{timestamp}_{original_filename}_preview.png"
                 
                 # Speichere PNG im uploads Ordner mit Dokumenttyp-Unterordner
-                uploads_dir = Path("backend/uploads") / document_type
+                uploads_dir = get_uploads_dir() / document_type
                 png_path_local = uploads_dir / png_filename
                 
                 # Stelle sicher, dass der uploads Ordner existiert
@@ -3533,11 +3534,14 @@ async def _validate_word_coverage(detected_words: List[str], structured_data: Di
             missing_words = detected_words_normalized - json_words
             coverage_percentage = ((len(detected_words_normalized) - len(missing_words)) / len(detected_words_normalized)) * 100
         
-        # 4. Qualitätsbewertung
-        if coverage_percentage >= 95:
+        # 4. Qualitätsbewertung (konfigurierbare Schwellen)
+        high_threshold = get_quality_threshold("high_quality")
+        medium_threshold = get_quality_threshold("medium_quality")
+        
+        if coverage_percentage >= high_threshold:
             verification_status = "verifiziert"
             quality_assessment = "hoch"
-        elif coverage_percentage >= 85:
+        elif coverage_percentage >= medium_threshold:
             verification_status = "verifiziert"
             quality_assessment = "mittel"
         else:
@@ -3546,11 +3550,11 @@ async def _validate_word_coverage(detected_words: List[str], structured_data: Di
         
         # 5. Empfehlungen
         recommendations = []
-        if coverage_percentage < 95:
+        if coverage_percentage < high_threshold:
             recommendations.append(f"Wortabdeckung nur {coverage_percentage:.1f}% - Manuelle Überprüfung empfohlen")
         if len(missing_words) > 0:
             recommendations.append(f"{len(missing_words)} Wörter fehlen in der Analyse")
-        if coverage_percentage >= 95:
+        if coverage_percentage >= high_threshold:
             recommendations.append("Hohe Wortabdeckung - Analyse ist zuverlässig")
         
         return {
@@ -3889,37 +3893,91 @@ async def get_upload_methods():
 # === MULTI-VISIO PROMPT ENDPOINTS ===
 @app.get("/api/multi-visio-prompts/{prompt_type}", tags=["Multi-Visio Prompts"])
 async def get_multi_visio_prompt(prompt_type: str):
-    """Lädt Multi-Visio-Prompts für die 4-Stufen-Pipeline"""
+    """
+    Lädt Multi-Visio-Prompts DYNAMISCH - wie bei normaler Visio!
+    
+    Verwendet das neue multi_visio_prompts Management System für:
+    - Automatische Updates bei Datei-Änderungen ✅
+    - Versionierung und Audit-Trail ✅
+    - Konsistente API wie visio_prompts ✅
+    """
     try:
-        prompt_file_map = {
-            "expert-induction": "01_expert_induction.txt",
-            "structured-analysis": "02_structured_analysis.txt", 
-            "word-coverage": "03_word_coverage.txt",
-            "norm-compliance": "05_norm_compliance.txt"
+        # ✅ NEUES SYSTEM: Dynamisches Laden wie bei visio_prompts
+        from .multi_visio_prompts import get_multi_visio_prompt as load_prompt
+        
+        # Mapping API-Parameter zu internen Stage-Namen
+        stage_mapping = {
+            "expert-induction": "expert_induction",
+            "structured-analysis": "structured_analysis", 
+            "word-coverage": "word_coverage",
+            "verification": "verification",
+            "norm-compliance": "norm_compliance"
         }
         
-        if prompt_type not in prompt_file_map:
+        if prompt_type not in stage_mapping:
             raise HTTPException(status_code=404, detail=f"Prompt-Typ '{prompt_type}' nicht gefunden")
         
-        prompt_file = prompt_file_map[prompt_type]
-        prompt_path = f"app/multi_visio_prompts/{prompt_file}"
+        # Lade Prompt dynamisch mit vollem Audit-Trail
+        stage_name = stage_mapping[prompt_type]
+        prompt_data = load_prompt(stage_name)
         
-        if not os.path.exists(prompt_path):
-            raise HTTPException(status_code=404, detail=f"Prompt-Datei '{prompt_file}' nicht gefunden")
-        
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            prompt_content = f.read()
-        
-        return {
-            "prompt": prompt_content,
+        # API-kompatible Response
+        response = {
+            "prompt": prompt_data["prompt"],
             "type": prompt_type,
-            "version": "1.0",
-            "description": f"Multi-Visio Prompt für {prompt_type}"
+            "version": prompt_data["version"],
+            "description": prompt_data["metadata"]["description"],
+            "metadata": {
+                "stage": stage_name,
+                "filename": prompt_data["metadata"].get("filename", "unknown"),
+                "prompt_length": prompt_data["metadata"]["prompt_length"],
+                "prompt_hash": prompt_data["hash"],
+                "loaded_at": prompt_data["metadata"]["loaded_at"],
+                "system_version": prompt_data["metadata"]["system_version"]
+            },
+            "audit_info": prompt_data["audit_info"]
         }
         
+        # ✅ AUDIT-LOG für Transparenz
+        logger.info(f"🔍 MULTI-VISIO PROMPT API: {prompt_type} → {stage_name}")
+        logger.info(f"   📝 Version: {prompt_data['version']}")
+        logger.info(f"   📏 Länge: {prompt_data['metadata']['prompt_length']} Zeichen")
+        logger.info(f"   🔐 Hash: {prompt_data['hash']}")
+        
+        return response
+        
     except Exception as e:
-        logger.error(f"Fehler beim Laden des Multi-Visio-Prompts: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Fehler beim Laden des Prompts: {str(e)}")
+        logger.error(f"❌ Fehler beim dynamischen Laden des Multi-Visio-Prompts '{prompt_type}': {str(e)}")
+        
+        # ⚡ FALLBACK: Altes System
+        logger.warning(f"⚡ Fallback für {prompt_type}: Direktes Datei-Laden")
+        try:
+            prompt_file_map = {
+                "expert-induction": "01_expert_induction.txt",
+                "structured-analysis": "02_structured_analysis.txt", 
+                "word-coverage": "03_word_coverage.txt",
+                "norm-compliance": "05_norm_compliance.txt"
+            }
+            
+            prompt_file = prompt_file_map.get(prompt_type, f"{prompt_type}.txt")
+            prompt_path = get_prompts_dir() / prompt_file
+            
+            if not os.path.exists(prompt_path):
+                raise HTTPException(status_code=404, detail=f"Prompt-Datei '{prompt_file}' nicht gefunden")
+            
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_content = f.read()
+            
+            return {
+                "prompt": prompt_content,
+                "type": prompt_type,
+                "version": "1.0",
+                "description": f"Multi-Visio Prompt für {prompt_type} (Fallback)"
+            }
+            
+        except Exception as fallback_error:
+            logger.error(f"❌ Auch Fallback fehlgeschlagen: {fallback_error}")
+            raise HTTPException(status_code=500, detail=f"Fehler beim Laden des Prompts: {str(e)}")
 
 # === AI PROVIDER STATUS ===
 @app.get("/api/ai/free-providers-status", tags=["AI Providers"])
@@ -4412,7 +4470,7 @@ async def create_document_with_file(
                         png_filename = f"{timestamp}_{original_filename}_preview.png"
                         
                         # Speichere PNG im uploads Ordner mit Dokumenttyp-Unterordner
-                        uploads_dir = Path("backend/uploads") / document_type
+                        uploads_dir = get_uploads_dir() / document_type
                         png_path_local = uploads_dir / png_filename
                         
                         # Stelle sicher, dass der uploads Ordner existiert
@@ -4437,15 +4495,15 @@ async def create_document_with_file(
                     
                     # 2. ZENTRALE VISION-ANALYSE: Verwende NUR die API-Prompt-Funktion - KEIN FALLBACK!
                     # Provider-Mapping für Vision Engine
-                    vision_provider = "openai_4o_mini"  # Default
+                    vision_provider = get_default_provider()  # Konfigurierbar
                     if ai_model == "gemini":
                         vision_provider = "gemini"
                     elif ai_model == "openai" or ai_model == "openai_4o_mini":
-                        vision_provider = "openai_4o_mini"
+                        vision_provider = get_default_provider()
                     elif ai_model == "ollama":
                         vision_provider = "ollama"
                     elif ai_model == "auto":
-                        vision_provider = "openai_4o_mini"  # Auto = OpenAI als Standard
+                        vision_provider = get_default_provider()  # Auto = OpenAI als Standard
                     
                     analysis_result = await vision_engine.analyze_document_with_api_prompt(
                         images=images,
@@ -4477,7 +4535,7 @@ async def create_document_with_file(
                         png_filename = f"{timestamp}_{original_filename}_preview.png"
                         
                         # Speichere PNG im backend/uploads Ordner mit Dokumenttyp-Unterordner
-                        uploads_dir = Path("backend/uploads") / document_type
+                        uploads_dir = get_uploads_dir() / document_type
                         png_path_local = uploads_dir / png_filename
                         
                         # Stelle sicher, dass der uploads Ordner existiert

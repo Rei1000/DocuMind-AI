@@ -18,6 +18,7 @@ from typing import Dict, List, Tuple, Optional, Union, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
+from .config import get_provider_fallback_chain
 from pathlib import Path
 from datetime import datetime
 
@@ -1085,7 +1086,7 @@ class AdvancedAIEngine:
         
         # Provider-Priorisierung basierend auf Auswahl
         if preferred_provider == "auto":
-            provider_chain = ["openai_4o_mini", "ollama", "gemini", "rule_based"]
+            provider_chain = get_provider_fallback_chain()
         elif preferred_provider == "rule_based":
             provider_chain = ["rule_based"]  # Direkt zu Rule-based
         else:
@@ -1228,7 +1229,7 @@ class AdvancedAIEngine:
         
         # Auto-Selection: OpenAI 4o-mini first
         if preferred_provider == "auto" or not preferred_provider:
-            provider_chain = ["openai_4o_mini", "ollama", "gemini", "rule_based"]
+            provider_chain = get_provider_fallback_chain()
         else:
             # Bevorzugter Provider zuerst, dann Standard-Fallbacks
             provider_chain = [preferred_provider, "openai_4o_mini", "ollama", "gemini", "rule_based"]

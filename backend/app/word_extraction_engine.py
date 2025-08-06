@@ -41,7 +41,9 @@ class WordExtractionEngine:
     def __init__(self):
         """Initialisiert die Word Extraction Engine"""
         self.min_word_length = 3
-        self.fuzzy_threshold = 85
+        # Fuzzy-Matching Schwelle (konfigurierbar über Umgebungsvariable)
+        import os
+        self.fuzzy_threshold = int(os.getenv('FUZZY_THRESHOLD', '85'))
         
         # Kritische Begriffe für QMS-Dokumente
         self.critical_terms = [
