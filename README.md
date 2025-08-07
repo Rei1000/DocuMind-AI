@@ -7,15 +7,15 @@
 **Intelligente Dokumentenverwaltung für medizinische Qualitätsmanagementsysteme**
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.31+-red.svg)](https://streamlit.io)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.5-green.svg)](https://fastapi.tiangolo.com)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.40.2-red.svg)](https://streamlit.io)
 [![SQLite](https://img.shields.io/badge/SQLite-3.x-lightgrey.svg)](https://sqlite.org)
 [![ISO 13485](https://img.shields.io/badge/ISO_13485-compliant-blue.svg)](https://www.iso.org/standard/59752.html)
 [![MDR](https://img.shields.io/badge/EU_MDR-ready-yellow.svg)](https://ec.europa.eu/health/md_sector/new-regulations_en)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-3.6.0-orange.svg)](https://github.com/Rei1000/DocuMind-AI/releases)
+[![Version](https://img.shields.io/badge/Version-3.7.0-orange.svg)](https://github.com/Rei1000/DocuMind-AI/releases)
 
-**Version 3.6.0** | **Multi-Visio Pipeline** | **ISO 13485 & MDR konforme Dokumentenlenkung** | **KI-gestütztes QMS**
+**Version 3.7.0** | **Multi-Visio Pipeline** | **ISO 13485 & MDR konforme Dokumentenlenkung** | **KI-gestütztes QMS**
 
 [🚀 Quick Start](#-quick-start) • [📋 Features](#-features) • [🧠 Multi-Visio](#-multi-visio-pipeline-5-stufen-ki-analyse) • [🏗️ Architektur](#️-architektur) • [📊 API Docs](#-api-dokumentation)
 
@@ -40,10 +40,11 @@
 - **🏢 13 Stakeholder-orientierte Interessengruppen** für granulare Berechtigungen
 - **📋 25+ QMS-spezifische Dokumenttypen** (SOPs, Risikoanalysen, Validierungsprotokolle)
 - **🤖 Intelligente Dokumentenerkennung** mit automatischer Klassifizierung
-- **🎯 Zentrale Prompt-Verwaltung** mit hierarchischen Templates
+- **🎯 Zentrale Prompt-Verwaltung** mit hierarchischen Templates (Version 3.0)
 - **✅ ISO 13485 & MDR-konforme** Workflows und Freigabeprozesse
 - **🔍 KI-powered Text-Extraktion** für RAG-ready Dokumentenindexierung
 - **⚙️ Equipment-Management** mit automatischer Kalibrierungsüberwachung
+- **👥 Erweiterte Benutzerverwaltung** mit dynamischen Abteilungszuordnungen
 - **🌐 RESTful API** mit vollständiger OpenAPI 3.0-Dokumentation
 
 ---
@@ -86,6 +87,7 @@ cd DocuMind-AI
 - **🔍 Enhanced OCR Engine** für komplexe Dokumente mit Bildern und Flussdiagrammen
 - **🎯 Triple Upload-Methoden** - OCR, Visio & Multi-Visio für optimale Dokumentenverarbeitung
 - **🧠 Multi-Visio Pipeline** - 5-stufige KI-Analyse mit Verifikation und Qualitätssicherung
+- **📝 Prompt Version 3.0** - Erweiterte Texterfassung für normalen Visio-Workflow
 
 #### 👥 **13 Kern-Interessengruppen**
 ```
@@ -107,6 +109,14 @@ cd DocuMind-AI
 │ 13. IT-Abteilung (it_department)        - Software-Validierung  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+#### 👥 **Erweiterte Benutzerverwaltung**
+- **Dynamische Abteilungszuordnungen** aus 13 offiziellen Interessensgruppen
+- **Mehrfache Abteilungsmitgliedschaften** mit individuellen Approval-Levels
+- **Automatische Level-Anzeige** (höchstes Level aus allen Mitgliedschaften)
+- **Konsistente Datenquellen** - user_group_memberships als Single Source of Truth
+- **Verbesserte UI** - Abteilungen mit Level-Anzeige in Sidebar und Profil
+- **Cache-Validierung** für Profile-Seite und Benutzerverwaltung
 
 #### 🔧 **Equipment-Management**
 - **Asset-Tracking** mit eindeutigen Seriennummern
@@ -240,10 +250,52 @@ workflow_executions (id, workflow_id, template_id, trigger_message,
 - **Features**: OpenAI, Ollama, Gemini, Rule-based Fallback
 - **Provider-Priorität**: OpenAI 4o-mini → Ollama → Gemini → Rule-based
 
+#### **✅ Prompt Management System**
+- **Status**: ✅ AKTIV - Versionierte Prompt-Verwaltung
+- **Features**: 
+  - **Process Prompt v3.0** - Erweiterte Texterfassung für normalen Visio-Workflow
+  - **Multi-Visio Prompts** - 5-stufige Pipeline mit spezialisierten Prompts
+  - **Rollback-System** - Einfaches Zurückwechseln zu älteren Versionen
+  - **Dynamisches Laden** - Prompts werden zur Laufzeit aktualisiert
+- **Performance**: Sofortige Prompt-Updates ohne Service-Neustart
+
 #### **✅ JSON Validation Engine**
 - **Status**: ✅ AKTIV - Enterprise-Grade JSON-Parsing
 - **Features**: 5-Layer Fallback-System, Pydantic Schema-Validierung, Provider-spezifische Anpassungen
 - **Robustheit**: 99.8% Erfolgsrate bei fehlerhaften KI-Antworten
+
+---
+
+## 🆕 **NEUESTE UPDATES (Version 3.7.0)**
+
+### **🔧 User Management Overhaul**
+- **Datenbank-Bereinigung**: Inkonsistente Abteilungen (Controlling/Logistik) → offizielle Interessensgruppen
+- **Dynamische Abteilungsanzeige**: Frontend lädt Abteilungen aus `user_group_memberships` API
+- **Level-Optimierung**: Zeigt höchstes Level aus allen Mitgliedschaften an
+- **UI-Verbesserungen**: Abteilungen mit Level-Anzeige in Sidebar und Benutzerverwaltung
+- **Cache-Validierung**: Profile-Seite lädt Daten korrekt und aktualisiert bei Änderungen
+
+### **📝 Prompt System Enhancement**
+- **Process Prompt v3.0**: Erweiterte Texterfassung für normalen Visio-Workflow
+- **Basiert auf**: Multi-Visio `02_structured_analysis.txt` Prompt
+- **3-teilige Struktur**: Strukturierte Analyse + Vollständige Texterfassung + JSON-Schema
+- **Rollback-System**: Alte Prompts (v2.9.1, v2.8.0) auskommentiert für einfaches Zurückwechseln
+- **Erweiterte JSON-Struktur**: Mit `technical_details` und `detailed_instructions`
+
+### **🔧 Backend & Frontend Optimierungen**
+- **Neue API-Endpoints**: User Group Memberships, erweiterte Profile-Funktionen
+- **Verbesserte Fehlerbehandlung**: Robustere User Management Operationen
+- **Performance-Optimierung**: Einmalige API-Calls für Benutzerdaten
+- **Konsistente Datenflüsse**: `user_group_memberships` als Single Source of Truth
+
+### **🛠️ Tech Stack Updates**
+- **FastAPI**: 0.104.1 → 0.115.5 (Performance & Security Updates)
+- **Streamlit**: 1.31+ → 1.40.2 (UI/UX Verbesserungen)
+- **SQLAlchemy**: 2.0.23 → 2.0.36 (Database Optimierungen)
+- **Pydantic**: v2.4.2 → 2.9.2 (Enhanced Validation)
+- **Pandas**: 2.1+ → 2.2.3 (Performance & Features)
+- **Plotly**: 5.17+ → 5.24.1 (Visualization Updates)
+- **Neue Dependencies**: NumPy 2.0.2, Qdrant 1.7.0, PyMuPDF ≥1.23.0
 
 ---
 
@@ -662,23 +714,24 @@ Das System ist **sehr robust** und kann auch mit fehlerhaften oder unvollständi
 
 ## 🛠️ Technologie-Stack
 
-### **Backend (Python 3.12+)**
+### **Backend (Python 3.12.4)**
 
 | Technologie | Version | Zweck |
 |-------------|---------|-------|
-| **[FastAPI](https://fastapi.tiangolo.com/)** | 0.104.1 | Moderne, schnelle Web-API |
-| **[SQLAlchemy](https://sqlalchemy.org/)** | 2.0.23 | ORM für Datenbank-Operations |
-| **[Pydantic](https://docs.pydantic.dev/)** | v2.4.2 | Datenvalidierung und Serialisierung |
+| **[FastAPI](https://fastapi.tiangolo.com/)** | 0.115.5 | Moderne, schnelle Web-API |
+| **[SQLAlchemy](https://sqlalchemy.org/)** | 2.0.36 | ORM für Datenbank-Operations |
+| **[Pydantic](https://docs.pydantic.dev/)** | 2.9.2 | Datenvalidierung und Serialisierung |
 | **[SQLite](https://sqlite.org/)** | 3.x | Embedded Datenbank |
-| **[Uvicorn](https://uvicorn.org/)** | 0.24.0 | ASGI Server für Produktion |
+| **[Uvicorn](https://uvicorn.org/)** | 0.32.1 | ASGI Server für Produktion |
 
 ### **Frontend (Python/Streamlit)**
 
 | Technologie | Version | Zweck |
 |-------------|---------|-------|
-| **[Streamlit](https://streamlit.io/)** | 1.31+ | Rapid Prototyping für Web-Interfaces |
-| **[Pandas](https://pandas.pydata.org/)** | 2.1+ | Datenmanipulation und -analyse |
-| **[Plotly](https://plotly.com/)** | 5.17+ | Interaktive Datenvisualisierung |
+| **[Streamlit](https://streamlit.io/)** | 1.40.2 | Rapid Prototyping für Web-Interfaces |
+| **[Pandas](https://pandas.pydata.org/)** | 2.2.3 | Datenmanipulation und -analyse |
+| **[Plotly](https://plotly.com/)** | 5.24.1 | Interaktive Datenvisualisierung |
+| **[NumPy](https://numpy.org/)** | 2.0.2 | Numerische Berechnungen |
 
 ### **KI & AI Provider**
 
@@ -687,6 +740,18 @@ Das System ist **sehr robust** und kann auch mit fehlerhaften oder unvollständi
 | **[OpenAI GPT-4o-mini](https://openai.com/)** | ✅ **Aktiv** | Niedrig | Hauptprovider für Textanalyse |
 | **[Google Gemini Flash](https://ai.google.dev/)** | ✅ **Aktiv** | 1500 Anfragen/Tag kostenlos | Alternative AI Provider |
 | **[Ollama](https://ollama.ai/)** | ✅ **Aktiv** | Völlig kostenlos | Lokaler AI Provider (Mistral 7B) |
+
+### **AI/ML & Document Processing**
+
+| Technologie | Version | Zweck |
+|-------------|---------|-------|
+| **[OpenAI](https://openai.com/)** | 1.55.3 | OpenAI API Client |
+| **[Qdrant](https://qdrant.tech/)** | 1.7.0 | Vector Database für RAG |
+| **[Tiktoken](https://github.com/openai/tiktoken)** | 0.8.0 | Token-Counting für OpenAI |
+| **[PyTesseract](https://github.com/madmaze/pytesseract)** | Latest | OCR Engine |
+| **[Pillow](https://pillow.readthedocs.io/)** | Latest | Bildverarbeitung |
+| **[PyMuPDF](https://pymupdf.readthedocs.io/)** | ≥1.23.0 | PDF Processing |
+| **[FuzzyWuzzy](https://github.com/seatgeek/fuzzywuzzy)** | Latest | Fuzzy String Matching |
 
 ---
 
@@ -752,7 +817,7 @@ curl -X GET "http://localhost:8000/api/documents" \
 
 | Komponente | Minimum | Empfohlen |
 |------------|---------|-----------|
-| **Python** | 3.12.0 | 3.12.4+ |
+| **Python** | 3.12.0 | 3.12.4 |
 | **RAM** | 4 GB | 8 GB |
 | **Festplatte** | 2 GB | 10 GB |
 | **CPU** | 2 Cores | 4+ Cores |
@@ -899,6 +964,6 @@ Dieses Projekt ist unter der [MIT License](LICENSE) lizenziert - siehe die LICEN
 
 <div align="center">
 
-**Made with ❤️ by the DocuMind-AI Team** | **Version 3.6.0** | **Last Updated: 2025-08-03**
+**Made with ❤️ by the DocuMind-AI Team** | **Version 3.7.0** | **Last Updated: 2025-08-08**
 
 </div>
