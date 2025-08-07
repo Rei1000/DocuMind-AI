@@ -2660,11 +2660,11 @@ async def preview_document_processing(
                 prompt_data = get_prompt_for_document_type(document_type)
                 prompt1 = prompt_data["prompt"]
                 
-                # 2. Zu Bildern konvertieren (NUR PNG-VORSCHAU - OHNE OPENAI API)
+                # 2. Zu Bildern konvertieren (MIT CACHING - SCHNELLE PNG-VORSCHAU)
                 logger.info(f"🖼️ Erstelle PNG-Vorschau für {file.filename}")
                 
-                # NEU: Keine OpenAI API Key Prüfung - nur PNG-Vorschau
-                images = await vision_engine.convert_document_to_images(tmp_path)
+                # ✅ NEU: Verwende Cached Image Conversion für bessere Performance
+                images = await vision_engine._get_or_convert_images(tmp_path)
                 if not images:
                     raise HTTPException(status_code=500, detail="Dokument konnte nicht zu PNG konvertiert werden")
                 
@@ -2745,7 +2745,7 @@ async def preview_document_processing(
                 vision_engine = VisionOCREngine()
                 
                 logger.info(f"🖼️ Erstelle PNG-Vorschau für Multi-Visio: {file.filename}")
-                images = await vision_engine.convert_document_to_images(tmp_path)
+                images = await vision_engine._get_or_convert_images(tmp_path)
                 if not images:
                     raise HTTPException(status_code=500, detail="Dokument konnte nicht zu PNG konvertiert werden")
                 
@@ -2923,8 +2923,8 @@ async def process_document_with_prompt(
                 images = [image_bytes]
                 upload_logger.info(f"✅ Bild-Datei direkt verwendet: {len(image_bytes)} Bytes")
             else:
-                # Für Dokumente: Konvertieren
-                images = await vision_engine.convert_document_to_images(tmp_path)
+                # Für Dokumente: Konvertieren (mit Caching)
+                images = await vision_engine._get_or_convert_images(tmp_path)
                 if not images:
                     raise HTTPException(status_code=500, detail="Keine Bilder erstellt")
                 upload_logger.info(f"✅ Dokument konvertiert: {len(images)} Bilder")
@@ -3736,8 +3736,8 @@ async def test_simple_vision(
                             "content": response_text
                         }
                 else:
-                    # PDF konvertieren
-                    images = await vision_engine.convert_document_to_images(tmp_path)
+                    # PDF konvertieren (mit Caching)
+                    images = await vision_engine._get_or_convert_images(tmp_path)
                     if not images:
                         raise HTTPException(status_code=500, detail="Keine Bilder erstellt")
                     
@@ -4555,8 +4555,8 @@ async def create_document_with_file(
                     
                     vision_engine = VisionOCREngine()
                     
-                    # 1. Dokument zu Bildern konvertieren
-                    images = await vision_engine.convert_document_to_images(Path(upload_result.file_path))
+                    # 1. Dokument zu Bildern konvertieren (mit Caching)
+                    images = await vision_engine._get_or_convert_images(Path(upload_result.file_path))
                     if not images:
                         raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
                     
@@ -5372,7 +5372,11 @@ async def create_document(document: DocumentCreate, db: Session = Depends(get_db
             detail=f"Benutzer mit ID {document.creator_id} existiert nicht"
         )
     
-    db_document = DocumentModel(**document.dict())
+    # ✅ WICHTIG: document_number automatisch generieren!
+    document_data = document.dict()
+    document_data["document_number"] = generate_document_number(document.document_type)
+    
+    db_document = DocumentModel(**document_data)
     db.add(db_document)
     db.commit()
     db.refresh(db_document)

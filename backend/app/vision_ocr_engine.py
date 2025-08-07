@@ -100,6 +100,10 @@ class VisionOCREngine:
                 logger.warning(f"⚠️ Gemini Initialisierung fehlgeschlagen: {e}")
                 self.gemini_client = None
         
+        # ✅ NEU: IMAGE CACHING - verhindert redundante LibreOffice-Aufrufe
+        self.cached_images = None
+        self.cached_file_hash = None
+        
         # Feature Flags
         self.pymupdf_available = PYMUPDF_AVAILABLE
         self.pillow_available = PILLOW_AVAILABLE
@@ -111,6 +115,7 @@ class VisionOCREngine:
         logger.info(f"💻 Win32: {'✅' if self.win32_available else '❌'}")
         logger.info(f"🤖 OpenAI Vision: {'✅' if self.client else '❌'}")
         logger.info(f"🌟 Google Gemini Vision: {'✅' if self.gemini_client else '❌'}")
+        logger.info(f"🏎️ Image Caching: ✅ AKTIVIERT")
 
     def _get_openai_key(self) -> Optional[str]:
         """OpenAI API Key aus Umgebung laden"""
@@ -121,6 +126,45 @@ class VisionOCREngine:
         """Google Gemini API Key aus Umgebung laden"""
         import os
         return os.getenv('GOOGLE_AI_API_KEY')
+
+    async def _get_or_convert_images(self, file_path: Path, dpi: int = 300) -> List[bytes]:
+        """
+        ⚡ Cached Image Conversion - verhindert doppelte LibreOffice-Aufrufe
+        
+        Args:
+            file_path: Pfad zur Datei
+            dpi: Bildauflösung (Standard: 300)
+            
+        Returns:
+            Liste der konvertierten Bilder (aus Cache oder neu konvertiert)
+        """
+        import hashlib
+        import os
+        
+        # Berechne Datei-Hash für Cache-Validierung
+        try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+                current_hash = hashlib.sha256(file_content).hexdigest()
+        except Exception as e:
+            logger.warning(f"⚠️ Kann Datei-Hash nicht berechnen: {e}")
+            current_hash = f"{file_path}_{os.path.getmtime(file_path)}"
+        
+        # Prüfe Cache
+        if self.cached_images and self.cached_file_hash == current_hash:
+            logger.info(f"♻️ Verwende gecachte Bilder für {file_path.name} (Hash: {current_hash[:8]}...)")
+            return self.cached_images
+        
+        # Konvertiere neu und cache
+        logger.info(f"🔄 Konvertiere Datei zu Bildern: {file_path.name}")
+        images = await self.convert_document_to_images(file_path, dpi)
+        
+        if images:
+            self.cached_images = images
+            self.cached_file_hash = current_hash
+            logger.info(f"📸 {len(images)} Bilder konvertiert und gecacht (Hash: {current_hash[:8]}...)")
+        
+        return images
 
     async def convert_document_to_images(self, file_path: Path, dpi: int = 300) -> List[bytes]:
         """

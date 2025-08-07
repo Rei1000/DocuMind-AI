@@ -254,6 +254,80 @@ def get_document_types() -> List[str]:
     # VERBESSERTER FALLBACK: Nur die wichtigsten Typen
     return result if result else ["OTHER", "SOP", "WORK_INSTRUCTION"]
 
+def render_unified_workflow_buttons(upload_method: str, selected_provider: str):
+    """
+    🔄 Unified Workflow-Buttons für alle Upload-Methoden
+    
+    Args:
+        upload_method: "visio", "multi-visio", oder "ocr"
+        selected_provider: Ausgewählter AI-Provider
+    """
+    # ✅ ENTFERNT: Workflow-Optionen sind nicht nötig
+    # Die Buttons werden jetzt direkt in "Schritt 4: API-Aufruf starten" angezeigt
+    pass
+
+def save_analyzed_document(
+    document_type: str = "OTHER", 
+    creator_id: int = 2, 
+    title: Optional[str] = None,
+    version: str = "1.0",
+    content: Optional[str] = None,
+    remarks: Optional[str] = None,
+    chapter_numbers: Optional[str] = None,
+    upload_method: str = "visio"
+) -> Optional[Dict]:
+    """
+    Speichert ein bereits analysiertes Dokument OHNE neue KI-Analyse - SCHNELL!
+    """
+    def _save():
+        # Form-Daten vorbereiten (OHNE Datei!)
+        form_data = {
+            "title": title or "Dokument",  # DocumentCreate erwartet title!
+            "creator_id": creator_id,  # int, nicht str!
+            "version": version,
+            "document_type": document_type
+        }
+        
+        # Optionale Felder nur hinzufügen wenn vorhanden
+        if title and title.strip():
+            form_data["title"] = title.strip()
+        if content and content.strip():
+            form_data["content"] = content.strip()
+        if remarks and remarks.strip():
+            form_data["remarks"] = remarks.strip()
+        if chapter_numbers and chapter_numbers.strip():
+            form_data["chapter_numbers"] = chapter_numbers.strip()
+        
+        logger.info(f"💾 Speichere bereits analysiertes Dokument: {form_data}")
+        
+        # API-Aufruf - OHNE Datei, nur Daten!
+        url = f"{API_BASE_URL}/api/documents"
+        logger.info(f"🚀 Sende Speicher-Request an: {url}")
+        
+        response = requests.post(
+            url,
+            json=form_data,  # JSON statt Form-Data
+            timeout=30  # Kürzeres Timeout, da keine KI-Analyse
+        )
+        
+        logger.info(f"📡 Response Status: {response.status_code}")
+        
+        if response.status_code == 200 or response.status_code == 201:
+            result = response.json()
+            logger.info(f"✅ Dokument erfolgreich gespeichert: ID {result.get('id')}")
+            return result
+        else:
+            try:
+                error_data = response.json()
+                error_detail = error_data.get('detail', response.text)
+            except:
+                error_detail = response.text
+            
+            logger.error(f"❌ Speicherung fehlgeschlagen: {response.status_code} - {error_detail}")
+            raise Exception(f"Speicherung fehlgeschlagen (Status {response.status_code}): {error_detail}")
+    
+    return safe_api_call(_save)
+
 def upload_document_with_file(
     file_data, 
     document_type: str = "OTHER", 
@@ -1323,12 +1397,19 @@ def render_unified_upload():
             st.rerun()
         return
     
+    # ✅ GLOBALE UPLOAD-METHODE DEFINIEREN (für alle Blöcke verfügbar)
+    upload_method = "ocr"  # Standard-Wert
+    
     # Vorschau anzeigen (wenn vorhanden)
     if st.session_state.get("upload_preview"):
         preview_data = st.session_state.upload_preview
+        
+        # ✅ Upload-Methode aus preview_data holen
+        upload_method = preview_data.get("upload_method", "ocr")
+        
         st.markdown("### 👁️ Dokument-Vorschau")
         
-        if preview_data.get("upload_method") == "ocr":
+        if upload_method == "ocr":
             # OCR-Vorschau
             st.info(f"📄 **OCR-Verarbeitung**: {preview_data.get('message', '')}")
             
@@ -1398,8 +1479,7 @@ def render_unified_upload():
             # Tab4 wurde entfernt (Validierung)
             
             with tab3:
-                # Upload-Methode prüfen
-                upload_method = preview_data.get("upload_method", "ocr")
+                # Upload-Methode bereits oben definiert - keine weitere Definition nötig
                 
                 if upload_method == "visio":
                     # IMMER Prompt dynamisch über API vom Backend laden
@@ -1485,7 +1565,6 @@ def render_unified_upload():
         
         # Schritt 3: Prompt anzeigen
         st.markdown("### 🤖 Schritt 3: Dynamischer Prompt")
-        upload_method = preview_data.get("upload_method", "ocr")
         
         if upload_method == "visio":
             # ✅ KORREKT: Lade und zeige den Prompt dynamisch vom Backend
@@ -1544,24 +1623,28 @@ def render_unified_upload():
             except Exception as e:
                 st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
                 st.stop()
+            
+            # ✅ UNIFIED WORKFLOW: Verwende einheitliche Workflow-Buttons
+            render_unified_workflow_buttons(upload_method, selected_provider)
+        
         elif upload_method == "multi-visio":
             # === MULTI-VISIO 5-STUFEN-PIPELINE ===
             st.success("🔍 **Multi-Visio 5-Stufen-Pipeline** aktiviert")
             st.info("📋 **Workflow:** Experten-Einweisung → JSON-Analyse → Textextraktion → Verifikation (Backend) → Normkonformität")
-            
+        
             # Multi-Visio Pipeline-Status initialisieren
             if "multi_visio_pipeline" not in st.session_state:
                 st.session_state.multi_visio_pipeline = {
                     "current_stage": 1,
                     "stages_completed": [],
                     "results": {},
-                    "selected_provider": selected_provider  # Verwende die ausgewählte Provider
+                    "selected_provider": selected_provider
                 }
             else:
                 # Provider aktualisieren
                 st.session_state.multi_visio_pipeline["selected_provider"] = selected_provider
             
-            # Fortschrittsanzeige
+            # ✅ NUR FÜR MULTI-VISIO: Pipeline-Fortschritt anzeigen
             st.markdown("### 📊 Pipeline-Fortschritt")
             stages = ["1️⃣ Experten-Einweisung", "2️⃣ JSON-Analyse", "3️⃣ Textextraktion", "4️⃣ Verifikation", "5️⃣ Normkonformität"]
             progress = len(st.session_state.multi_visio_pipeline["stages_completed"]) / 5
@@ -2336,7 +2419,166 @@ def render_unified_upload():
                 # Dokument übernehmen
                 st.markdown("### ✅ Dokument übernehmen")
                 if st.button("✅ Dokument übernehmen", type="primary", key="multi_visio_approve_btn"):
-                    # Finale Speicherung mit den gespeicherten Form-Daten
+                    # ✅ OPTIMIERT: Verwende bereits analysierte Multi-Visio Ergebnisse
+                    form_data = st.session_state.get("upload_form_data", {})
+                    if form_data and "multi_visio_pipeline" in st.session_state:
+                        with st.spinner("💾 Speichere bereits analysiertes Multi-Visio Dokument..."):
+                            try:
+                                # Verwende das bereits analysierte Multi-Visio Ergebnis
+                                pipeline_results = st.session_state.multi_visio_pipeline["results"]
+                                
+                                # Extrahiere das finale Ergebnis (Stage 5 oder Stage 2 als Fallback)
+                                final_result = None
+                                if "stage5" in pipeline_results:
+                                    final_result = pipeline_results["stage5"]
+                                elif "stage2" in pipeline_results:
+                                    final_result = pipeline_results["stage2"]
+                                
+                                if final_result:
+                                    # Erstelle eine kurze Zusammenfassung für das content Feld
+                                    extracted_text = final_result.get("extracted_text", "")
+                                    if extracted_text:
+                                        try:
+                                            import json
+                                            data = json.loads(extracted_text)
+                                            if "document_metadata" in data and "title" in data["document_metadata"]:
+                                                doc_title = data["document_metadata"]["title"]
+                                                process_steps_count = len(data.get("process_steps", []))
+                                                content_summary = f"Multi-Visio Prozess: {doc_title} - {process_steps_count} Schritte extrahiert"
+                                            else:
+                                                content_summary = "Multi-Visio Prozessdokument erfolgreich analysiert"
+                                        except:
+                                            content_summary = "Multi-Visio Prozessdokument erfolgreich analysiert"
+                                    else:
+                                        content_summary = "Multi-Visio Dokument erfolgreich verarbeitet"
+                                    
+                                    # ✅ SCHNELL: Verwende save_analyzed_document OHNE KI-Analyse
+                                    result = save_analyzed_document(
+                                        document_type=form_data["document_type"],
+                                        creator_id=st.session_state.current_user["id"],
+                                        title=form_data["title"],
+                                        version=form_data["version"],
+                                        content=content_summary,  # Kurze Zusammenfassung
+                                        remarks=form_data["remarks"],
+                                        chapter_numbers=form_data["chapter_numbers"]
+                                    )
+                                    
+                                    if result:
+                                        st.success("✅ Multi-Visio Dokument erfolgreich übernommen!")
+                                        st.info("📋 Das Dokument durchläuft jetzt den normalen Freigabe-Prozess")
+                                        
+                                        # Pipeline-Status zurücksetzen
+                                        st.session_state.multi_visio_pipeline = None
+                                        st.session_state.upload_preview = None
+                                        st.session_state.upload_form_data = None
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Fehler beim Speichern des Multi-Visio Dokuments")
+                                else:
+                                    st.error("❌ Keine Multi-Visio Analyseergebnisse gefunden")
+                            except Exception as e:
+                                st.error(f"❌ Fehler beim Speichern: {str(e)}")
+                    else:
+                        st.warning("⚠️ Keine Multi-Visio Daten verfügbar. Bitte führen Sie zuerst die Multi-Visio Analyse durch.")
+        else:
+            st.info("📄 OCR-Verarbeitung: Keine AI-Prompts erforderlich")
+        
+        # ✅ Schritt 4: API-Aufruf starten - NUR für normale Visio, NICHT für Multi-Visio
+        if upload_method != "multi-visio":
+            st.markdown("### 🚀 Schritt 4: API-Aufruf starten")
+        
+            # ✅ PERMANENTE BUTTONS: Immer sichtbar, auch während und nach der Analyse
+            col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+        
+        with col1:
+            analyze_button = st.button("🚀 Dokument mit KI analysieren", type="primary", key="analyze_btn")
+        
+        with col2:
+            if st.button("❌ Abbrechen", key="cancel_btn_step4"):
+                # Workflow-spezifische Keys löschen
+                keys_to_delete = ["upload_preview", "upload_form_data"]
+                for key in keys_to_delete:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.warning("🔄 Workflow abgebrochen")
+                st.rerun()
+        
+        with col3:
+            if st.button("🔄 Neuer Workflow", key="new_workflow_btn_step4"):
+                # Nur Ergebnisse löschen, Upload-Daten behalten
+                keys_to_delete = ["visio_processing_result", "visio_workflow_completed"]
+                for key in keys_to_delete:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.info("🔄 Bereit für neuen Workflow")
+                st.rerun()
+        
+        with col4:
+            if st.button("📊 Ergebnisse", key="show_results_btn_step4"):
+                if "visio_processing_result" in st.session_state:
+                    st.success("✅ Ergebnisse verfügbar")
+                else:
+                    st.info("⏳ Noch keine Ergebnisse verfügbar")
+        
+        with col5:
+            if st.button("✅ Übernehmen", key="approve_btn_step4", type="primary"):
+                # ✅ OPTIMIERT: Prüfe ob bereits analysiert wurde
+                if "visio_processing_result" in st.session_state:
+                    # Dokument bereits analysiert - nur speichern
+                    with st.spinner("💾 Speichere bereits analysiertes Dokument..."):
+                        try:
+                            # Verwende das bereits analysierte Ergebnis
+                            existing_result = st.session_state.visio_processing_result
+                            
+                            # Erstelle ein neues Dokument basierend auf dem bestehenden
+                            form_data = st.session_state.get("upload_form_data", {})
+                            
+                            # ✅ SCHNELL: Verwende neue Funktion OHNE KI-Analyse
+                            # ✅ SCHNELL: Verwende neue Funktion OHNE KI-Analyse
+                            # Erstelle eine kurze Zusammenfassung für das content Feld
+                            extracted_text = existing_result.get("extracted_text", "")
+                            if extracted_text:
+                                # Extrahiere nur die wichtigsten Informationen
+                                try:
+                                    import json
+                                    data = json.loads(extracted_text)
+                                    if "document_metadata" in data and "title" in data["document_metadata"]:
+                                        doc_title = data["document_metadata"]["title"]
+                                        process_steps_count = len(data.get("process_steps", []))
+                                        content_summary = f"Prozess: {doc_title} - {process_steps_count} Schritte extrahiert"
+                                    else:
+                                        content_summary = "Prozessdokument erfolgreich analysiert"
+                                except:
+                                    content_summary = "Prozessdokument erfolgreich analysiert"
+                            else:
+                                content_summary = "Dokument erfolgreich verarbeitet"
+                            
+                            result = save_analyzed_document(
+                                document_type=form_data["document_type"],
+                                creator_id=st.session_state.current_user["id"],
+                                title=form_data["title"],  # ✅ Echter Titel vom Benutzer!
+                                version=form_data["version"],
+                                content=content_summary,  # Kurze Zusammenfassung
+                                remarks=form_data["remarks"],
+                                chapter_numbers=form_data["chapter_numbers"]
+                            )
+                            
+                            if result:
+                                st.success("✅ Dokument erfolgreich übernommen!")
+                                st.session_state.upload_success = result
+                                st.session_state.upload_preview = None
+                                st.session_state.upload_form_data = None
+                                st.session_state.workflow_step = None
+                                st.session_state.final_result = None
+                                st.session_state.visio_processing_result = None  # Cleanup
+                                st.rerun()
+                            else:
+                                st.error("❌ Fehler beim Speichern des Dokuments")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Fehler beim Speichern: {str(e)}")
+                else:
+                    # Keine Analyse vorhanden - normale Verarbeitung
                     form_data = st.session_state.get("upload_form_data", {})
                     if form_data:
                         with st.spinner("💾 Speichere Dokument..."):
@@ -2351,29 +2593,25 @@ def render_unified_upload():
                                     remarks=form_data["remarks"],
                                     chapter_numbers=form_data["chapter_numbers"],
                                     upload_method=form_data["upload_method"],
-                                    ai_model=selected_provider  # NEU: Verwende den ausgewählten Provider
+                                    ai_model="auto"
                                 )
                                 
-                                if result and result.get("success"):
-                                    st.success("✅ Dokument erfolgreich übernommen!")
-                                    st.info("📋 Das Dokument durchläuft jetzt den normalen Freigabe-Prozess")
-                                    
-                                    # Pipeline-Status zurücksetzen
-                                    st.session_state.multi_visio_pipeline = None
+                                if result:
+                                    st.session_state.upload_success = result
                                     st.session_state.upload_preview = None
                                     st.session_state.upload_form_data = None
+                                    st.session_state.workflow_step = None
+                                    st.session_state.final_result = None
                                     st.rerun()
                                 else:
-                                    st.error("❌ Fehler beim Übernehmen des Dokuments")
+                                    st.error("❌ Fehler beim Speichern des Dokuments")
+                                    
                             except Exception as e:
-                                st.error(f"❌ Fehler: {str(e)}")
-        else:
-            st.info("📄 OCR-Verarbeitung: Keine AI-Prompts erforderlich")
+                                st.error(f"❌ Fehler beim Speichern: {str(e)}")
+                    else:
+                        st.warning("⚠️ Keine Dokumentdaten verfügbar. Bitte führen Sie zuerst die Analyse durch.")
         
-        # Schritt 4: API-Aufruf starten
-        st.markdown("### 🚀 Schritt 4: API-Aufruf starten")
-        
-        if st.button("🚀 Dokument mit KI analysieren", type="primary", key="analyze_btn"):
+        if analyze_button:
             with st.spinner("🤖 Analysiere Dokument mit KI..."):
                 try:
                     # API-Aufruf durchführen
@@ -2559,6 +2797,8 @@ def render_unified_upload():
                     }
                     
                     st.session_state.final_result = final_result
+                    # ✅ WICHTIG: Setze visio_processing_result für schnelles Übernehmen
+                    st.session_state.visio_processing_result = result
                     st.rerun()
                         
                 except Exception as e:
@@ -2704,57 +2944,6 @@ def render_unified_upload():
                         st.rerun()
         else:
             st.info("ℹ️ Führen Sie Schritt 4 aus, um die strukturierte Analyse zu erhalten")
-            
-            # Freigabe-Buttons
-            st.markdown("---")
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            with col1:
-                if st.button("🔄 Neuer Workflow", key="new_workflow_btn", use_container_width=True):
-                    st.session_state.workflow_step = "prompt_review"
-                    st.session_state.final_result = None
-                    st.rerun()
-            
-            with col2:
-                if st.button("❌ Abbrechen", key="cancel_btn", use_container_width=True):
-                    st.session_state.upload_preview = None
-                    st.session_state.upload_form_data = None
-                    st.session_state.workflow_step = None
-                    st.session_state.final_result = None
-                    st.rerun()
-            
-            with col3:
-                if st.button("✅ Freigeben & Speichern", key="approve_btn", type="primary", use_container_width=True):
-                    # Finale Speicherung mit den gespeicherten Form-Daten
-                    form_data = st.session_state.get("upload_form_data", {})
-                    if form_data:
-                        with st.spinner("💾 Speichere Dokument..."):
-                            try:
-                                result = upload_document_with_file(
-                                    file_data=form_data["file"],
-                                    document_type=form_data["document_type"],
-                                    creator_id=st.session_state.current_user["id"],
-                                    title=form_data["title"],
-                                    version=form_data["version"],
-                                    content=form_data["content"],
-                                    remarks=form_data["remarks"],
-                                    chapter_numbers=form_data["chapter_numbers"],
-                                    upload_method=form_data["upload_method"],
-                                    ai_model="auto"  # NEU: Verwende Auto als Standard
-                                )
-                                
-                                if result:
-                                    st.session_state.upload_success = result
-                                    st.session_state.upload_preview = None
-                                    st.session_state.upload_form_data = None
-                                    st.session_state.workflow_step = None
-                                    st.session_state.final_result = None
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Fehler beim Speichern des Dokuments")
-                                    
-                            except Exception as e:
-                                st.error(f"❌ Fehler beim Speichern: {str(e)}")
         
         return  # Verhindere das Anzeigen des Upload-Formulars
     
@@ -2972,6 +3161,11 @@ def render_unified_upload():
                         
                 except Exception as e:
                     st.error(f"❌ Fehler bei der Vorschau-Generierung: {str(e)}")
+            
+            # ✅ UNIFIED WORKFLOW: Workflow-Buttons für Multi-Visio
+            render_unified_workflow_buttons(upload_method, selected_provider)
+        
+        # ✅ ENDE der Bedingung für "Schritt 4" (nur für normale Visio)
 
 def render_documents_page():
     """Rendert die Dokumentenverwaltung"""
