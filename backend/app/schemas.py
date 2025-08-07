@@ -320,6 +320,7 @@ class UserGroupMembershipBase(BaseModel):
     """
     user_id: int = Field(description="Referenz auf User")
     interest_group_id: int = Field(description="Referenz auf InterestGroup")
+    approval_level: int = Field(1, ge=1, le=5, description="Freigabe-Level in dieser Gruppe (1-5)")
     is_active: bool = Field(True, description="Aktiv-Status der Zuordnung")
 
 class UserGroupMembershipCreate(UserGroupMembershipBase):
@@ -334,7 +335,6 @@ class UserGroupMembership(UserGroupMembershipBase):
     Inklusive Relationships für vollständige API-Responses.
     """
     id: int = Field(description="Eindeutige Zuordnungs-ID")
-    joined_at: datetime = Field(description="Zeitpunkt des Beitritts")
     role_in_group: Optional[str] = Field(None, description="Rolle in der Gruppe")
     user: Optional['User'] = Field(None, description="Vollständige User-Daten")
     interest_group: Optional['InterestGroup'] = Field(None, description="Vollständige Group-Daten")

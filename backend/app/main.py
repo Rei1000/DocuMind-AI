@@ -1005,6 +1005,7 @@ async def get_current_user_info(
         organizational_unit=current_user.organizational_unit,
         is_department_head=current_user.is_department_head,
         approval_level=current_user.approval_level,
+        is_active=current_user.is_active,  # ✅ HINZUGEFÜGT: Account-Status
         groups=user_groups,
         permissions=user_permissions
     )
@@ -1036,6 +1037,52 @@ async def logout():
     return {
         "message": "Successfully logged out",
         "logged_out_at": datetime.utcnow().isoformat() + "Z"
+    }
+
+@app.put("/api/auth/change-password", response_model=dict, tags=["Authentication"])
+async def change_password(
+    password_change: PasswordChangeRequest,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Benutzer ändert sein eigenes Passwort.
+    
+    DSGVO-konforme Passwort-Änderung mit Validierung des aktuellen Passworts.
+    Das neue Passwort muss den Sicherheitsanforderungen entsprechen.
+    
+    Args:
+        password_change: PasswordChangeRequest mit current_password, new_password, confirm_password
+        current_user: Aktuell angemeldeter Benutzer
+        db: Datenbankverbindung
+        
+    Returns:
+        dict: Bestätigung der Passwort-Änderung
+        
+    Raises:
+        HTTPException: 400 bei Validierungsfehlern, 401 bei falschem aktuellen Passwort
+    """
+    from .auth import verify_password, get_password_hash
+    
+    # Aktuelles Passwort validieren
+    if not verify_password(password_change.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Aktuelles Passwort ist falsch")
+    
+    # Neues Passwort validieren
+    if password_change.new_password != password_change.confirm_password:
+        raise HTTPException(status_code=400, detail="Neues Passwort und Bestätigung stimmen nicht überein")
+    
+    # Passwort-Sicherheit prüfen (mindestens 8 Zeichen)
+    if len(password_change.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Neues Passwort muss mindestens 8 Zeichen lang sein")
+    
+    # Passwort ändern
+    current_user.hashed_password = get_password_hash(password_change.new_password)
+    db.commit()
+    
+    return {
+        "message": "Passwort erfolgreich geändert",
+        "changed_at": datetime.utcnow().isoformat() + "Z"
     }
 
 # === INTEREST GROUPS API ===
@@ -2131,6 +2178,61 @@ async def create_membership(
     db.refresh(db_membership)
     return db_membership
 
+@app.put("/api/user-group-memberships/{membership_id}", response_model=dict, tags=["User Group Memberships"])
+async def update_user_group_membership(
+    membership_id: int,
+    membership_update: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Benutzer-Gruppen-Zuordnung aktualisieren.
+    
+    Ändert die Level-Berechtigung eines Benutzers in einer Interessensgruppe.
+    
+    Args:
+        membership_id (int): ID der zu aktualisierenden Zuordnung
+        membership_update (dict): Neue Level-Daten {"approval_level": int}
+        db (Session): Datenbankverbindung (automatisch injiziert)
+        
+    Returns:
+        dict: Bestätigung der Aktualisierung
+        
+    Raises:
+        HTTPException: 404 wenn Membership nicht gefunden
+        HTTPException: 500 bei Datenbankfehlern
+    """
+    membership = db.query(UserGroupMembershipModel).filter(UserGroupMembershipModel.id == membership_id).first()
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Benutzer-Gruppen-Zuordnung mit ID {membership_id} nicht gefunden"
+        )
+    
+    # Level aktualisieren
+    new_level = membership_update.get("approval_level")
+    if new_level is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="approval_level ist erforderlich"
+        )
+    
+    if not (1 <= new_level <= 5):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="approval_level muss zwischen 1 und 5 liegen"
+        )
+    
+    membership.approval_level = new_level
+    
+    db.commit()
+    
+    return {
+        "message": f"Level erfolgreich auf {new_level} geändert",
+        "success": True,
+        "membership_id": membership_id,
+        "new_level": membership.approval_level
+    }
+
 @app.delete("/api/user-group-memberships/{membership_id}", response_model=GenericResponse, tags=["User Group Memberships"])
 async def delete_user_group_membership(membership_id: int, db: Session = Depends(get_db)):
     """
@@ -2183,6 +2285,77 @@ async def delete_user_group_membership(membership_id: int, db: Session = Depends
     return GenericResponse(message=f"Benutzer '{user.full_name}' wurde aus Interessensgruppe '{group.name}' entfernt")
 
 # === HELPER ENDPOINTS ===
+
+@app.get("/api/users/{user_id}/memberships", response_model=List[UserGroupMembership], tags=["User Group Memberships"])
+async def get_user_memberships(user_id: int, db: Session = Depends(get_db)):
+    """
+    Alle User-Group-Memberships eines Benutzers abrufen.
+    
+    Zeigt alle Interessensgruppen-Zuordnungen eines spezifischen
+    Benutzers mit Level-Informationen. Für Sidebar und Profil-Anzeige.
+    
+    Args:
+        user_id (int): Eindeutige ID des Benutzers
+        db (Session): Datenbankverbindung (automatisch injiziert)
+        
+    Returns:
+        List[UserGroupMembership]: Liste aller Memberships des Benutzers
+        
+    Raises:
+        HTTPException: 404 wenn Benutzer nicht gefunden
+        HTTPException: 500 bei Datenbankfehlern
+    """
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Benutzer mit ID {user_id} nicht gefunden"
+        )
+    
+    # Alle Memberships für diesen User mit Group-Details
+    memberships = db.query(UserGroupMembershipModel).filter(
+        UserGroupMembershipModel.user_id == user_id
+    ).all()
+    
+    result = []
+    for membership in memberships:
+        group = db.query(InterestGroupModel).filter(
+            InterestGroupModel.id == membership.interest_group_id
+        ).first()
+        
+        if group:
+            result.append(UserGroupMembership(
+                id=membership.id,
+                user_id=membership.user_id,
+                interest_group_id=membership.interest_group_id,
+                approval_level=membership.approval_level,
+                user=User(
+                    id=user.id,
+                    email=user.email,
+                    full_name=user.full_name,
+                    employee_id=user.employee_id,
+                    organizational_unit=user.organizational_unit,
+                    individual_permissions=user.individual_permissions,
+                    is_department_head=user.is_department_head,
+                    approval_level=user.approval_level,
+                    is_active=user.is_active,
+                    created_at=user.created_at
+                ),
+                interest_group=InterestGroup(
+                    id=group.id,
+                    name=group.name,
+                    code=group.code,
+                    description=group.description,
+                    permissions=group.group_permissions,
+                    ai_functionality=group.ai_functionality,
+                    typical_tasks=group.typical_tasks,
+                    is_external=group.is_external,
+                    is_active=group.is_active,
+                    created_at=group.created_at
+                )
+            ))
+    
+    return result
 
 @app.get("/api/users/{user_id}/groups", response_model=List[InterestGroup], tags=["User Group Memberships"])
 async def get_user_groups(user_id: int, db: Session = Depends(get_db)):
@@ -6959,8 +7132,8 @@ def _is_system_admin(user: UserModel) -> bool:
     """
     # ✅ SPEZIAL: QMS Admin hat IMMER System Admin Rechte
     if (user.email == "qms.admin@company.com" and 
-        user.approval_level == 4 and
-        user.employee_id == "QMS001"):
+        user.approval_level >= 4 and  # Korrigiert: >= 4 statt == 4
+        user.employee_id in ["QMS001", "ADMIN001"]):  # Korrigiert: Beide Employee IDs akzeptieren
         return True
     
     try:

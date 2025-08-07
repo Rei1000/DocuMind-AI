@@ -909,13 +909,15 @@ def get_user_departments(user_id: int) -> List[Dict]:
             return []
         
         headers = {"Authorization": f"Bearer {token}"}
+        # ✅ KORRIGIERT: Verwende den neuen spezifischen Backend-Endpoint
         response = requests.get(
-            f"{API_BASE_URL}/api/users/{user_id}/departments",
+            f"{API_BASE_URL}/api/users/{user_id}/memberships",
             headers=headers,
             timeout=REQUEST_TIMEOUT
         )
         if response.status_code == 200:
-            return response.json()
+            memberships = response.json()
+            return memberships
         elif response.status_code == 401:
             # Token ungültig - User abmelden
             st.session_state.authenticated = False
@@ -928,9 +930,18 @@ def get_user_departments(user_id: int) -> List[Dict]:
 def add_user_department(user_id: int, department_data: Dict, token: str = "") -> Optional[Dict]:
     """Fügt einem User eine neue Abteilung hinzu (nur System Admin)"""
     def _add_department():
+        # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
+        membership_data = {
+            "user_id": user_id,
+            "interest_group_id": department_data.get("interest_group_id"),
+            "approval_level": department_data.get("approval_level", 1),
+            "role_in_group": department_data.get("role_in_group", "MEMBER"),
+            "notes": department_data.get("notes", "")
+        }
+        
         response = requests.post(
-            f"{API_BASE_URL}/api/users/{user_id}/departments",
-            json=department_data,
+            f"{API_BASE_URL}/api/user-group-memberships",
+            json=membership_data,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
@@ -948,8 +959,9 @@ def add_user_department(user_id: int, department_data: Dict, token: str = "") ->
 def update_user_department(user_id: int, membership_id: int, update_data: Dict, token: str = "") -> Optional[Dict]:
     """Aktualisiert User-Abteilungszuordnung (nur System Admin)"""
     def _update_department():
+        # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
         response = requests.put(
-            f"{API_BASE_URL}/api/users/{user_id}/departments/{membership_id}",
+            f"{API_BASE_URL}/api/user-group-memberships/{membership_id}",
             json=update_data,
             headers={
                 "Authorization": f"Bearer {token}",
@@ -968,8 +980,9 @@ def update_user_department(user_id: int, membership_id: int, update_data: Dict, 
 def remove_user_department(user_id: int, membership_id: int, token: str = "") -> bool:
     """Entfernt User aus Abteilung (nur System Admin)"""
     def _remove_department():
+        # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
         response = requests.delete(
-            f"{API_BASE_URL}/api/users/{user_id}/departments/{membership_id}",
+            f"{API_BASE_URL}/api/user-group-memberships/{membership_id}",
             headers={"Authorization": f"Bearer {token}"},
             timeout=REQUEST_TIMEOUT
         )
@@ -1024,8 +1037,10 @@ def get_my_profile(token: str = "") -> Optional[Dict]:
             return None
         
         try:
+            # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
+            # Das Backend hat nur /api/auth/me, nicht /api/users/me/profile
             response = requests.get(
-                f"{API_BASE_URL}/api/users/me/profile",
+                f"{API_BASE_URL}/api/auth/me",
                 headers={"Authorization": f"Bearer {auth_token}"},
                 timeout=REQUEST_TIMEOUT
             )
@@ -1061,8 +1076,10 @@ def change_my_password(current_password: str, new_password: str, confirm_passwor
     def _change_password():
         auth_token = token if token else st.session_state.auth_token
         
+        # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
+        # Das Backend hat nur /api/auth/change-password, nicht /api/users/me/password
         response = requests.put(
-            f"{API_BASE_URL}/api/users/me/password",
+            f"{API_BASE_URL}/api/auth/change-password",
             headers={"Authorization": f"Bearer {auth_token}"},
             json={
                 "current_password": current_password,
@@ -1091,17 +1108,20 @@ def admin_reset_user_password(user_id: int, reset_reason: str, temporary_passwor
     def _admin_reset():
         auth_token = token if token else st.session_state.auth_token
         
+        # ✅ KORRIGIERT: Verwende den richtigen Backend-Endpoint
+        # Das Backend hat nur /api/users/{user_id}/temp-password (POST)
+        # und generiert automatisch ein temporäres Passwort
+        # Das Backend akzeptiert nur reset_reason als Parameter
+        
         request_data = {
-            "user_id": user_id,  # Backend braucht user_id im Request Body
-            "reset_reason": reset_reason,
-            "force_change_on_login": True
+            "reset_reason": reset_reason
         }
         
-        if temporary_password:
-            request_data["temporary_password"] = temporary_password
+        # HINWEIS: Das Backend generiert automatisch ein sicheres Passwort
+        # Ein eigenes temporäres Passwort wird nicht unterstützt
         
-        response = requests.put(
-            f"{API_BASE_URL}/api/users/{user_id}/password/admin-reset",
+        response = requests.post(
+            f"{API_BASE_URL}/api/users/{user_id}/temp-password",
             headers={"Authorization": f"Bearer {auth_token}"},
             json=request_data,
             timeout=REQUEST_TIMEOUT
@@ -1290,11 +1310,12 @@ def render_sidebar():
         except:
             perms = []
     
-    if "system_administration" in perms:
-        # System Administrator - DYNAMISCH, keine API-Aufrufe!
-        st.sidebar.markdown("🏢 **System Administration**")
-        st.sidebar.markdown("⭐ Level 4")
-        st.sidebar.markdown("🔧 **System Administrator**")
+    # ✅ KORRIGIERT: QMS Admin spezielle Behandlung
+    if user.get('email') == 'qms.admin@company.com' or "system_administration" in perms:
+        # QMS System Administrator - DYNAMISCH, keine API-Aufrufe!
+        st.sidebar.markdown("🏢 **QMS.Admin**")
+        st.sidebar.markdown("⭐ Level 5")
+        st.sidebar.markdown("🔧 **QMS System Administrator**")
     else:
         # Normale User - lade Abteilungen von API
         try:
@@ -1304,11 +1325,12 @@ def render_sidebar():
                 st.sidebar.markdown("**🏢 Abteilungen:**")
                 
                 for dept in user_departments:
-                    dept_name = dept.get("interest_group_name", "Unbekannt")
+                    # ✅ KORRIGIERT: Verwende die korrekte Struktur aus dem neuen API
+                    dept_name = dept.get("interest_group", {}).get("name", "Unbekannt")
                     approval_level = dept.get("approval_level", 1)
                     
                     # Emoji basierend auf Level
-                    level_emoji = ["👤", "👥", "👑", "⭐"][approval_level - 1] if 1 <= approval_level <= 4 else "❓"
+                    level_emoji = ["👤", "👥", "👑", "⭐", "🌟"][approval_level - 1] if 1 <= approval_level <= 5 else "❓"
                     
                     st.sidebar.markdown(f"• **{dept_name}**")
                     st.sidebar.markdown(f"  {level_emoji} Level {approval_level}")
@@ -3674,8 +3696,21 @@ def render_users_page():
                     with col1:
                         st.write(f"**ID:** {user['id']}")
                         st.write(f"**Mitarbeiter-ID:** {user.get('employee_id', 'N/A')}")
-                        st.write(f"**Abteilung:** {user.get('organizational_unit', 'N/A')}")
-                        st.write(f"**Level:** {user.get('approval_level', 1)}")
+                                                # ✅ KORRIGIERT: Lade Abteilungen dynamisch aus User Group Memberships
+                        user_departments = get_user_departments(user.get('id', 0))
+                        if user_departments and len(user_departments) > 0:
+                            dept_info = []
+                            max_level = 1
+                            for dept in user_departments:
+                                dept_name = dept.get("interest_group", {}).get("name", "Unbekannt")
+                                dept_level = dept.get("approval_level", 1)
+                                dept_info.append(f"{dept_name} (Level {dept_level})")
+                                max_level = max(max_level, dept_level)
+                            st.write(f"**Abteilungen:** {', '.join(dept_info)}")
+                            st.write(f"**Level:** {max_level}")
+                        else:
+                            st.write(f"**Abteilung:** {user.get('organizational_unit', 'N/A')}")
+                            st.write(f"**Level:** {user.get('approval_level', 1)}")
                     
                     with col2:
                         st.write(f"**Abteilungsleiter:** {'✅' if user.get('is_department_head') else '❌'}")
@@ -3765,7 +3800,12 @@ def render_users_page():
                                     col_dept, col_level, col_action = st.columns([3, 2, 1])
                                     
                                     with col_dept:
-                                        st.text(dept.get("interest_group_name", "Unbekannt"))
+                                        # ✅ KORRIGIERT: Verwende die richtigen Felder aus User Group Memberships
+                                        interest_group = dept.get("interest_group", {})
+                                        if interest_group:
+                                            st.text(interest_group.get("name", "Unbekannt"))
+                                        else:
+                                            st.text("Unbekannt")
                                     
                                     with col_level:
                                         current_level = dept.get("approval_level", 1)
@@ -3861,7 +3901,15 @@ def render_users_page():
                         else:
                             user_departments = get_user_departments(user['id'])
                             if user_departments:
-                                dept_names = [dept.get("interest_group_name", "Unbekannt") for dept in user_departments]
+                                # ✅ KORRIGIERT: Verwende die richtigen Felder aus User Group Memberships
+                                dept_names = []
+                                for dept in user_departments:
+                                    # Hole den Interest Group Namen aus der verknüpften Tabelle
+                                    interest_group = dept.get("interest_group", {})
+                                    if interest_group:
+                                        dept_names.append(interest_group.get("name", "Unbekannt"))
+                                    else:
+                                        dept_names.append("Unbekannt")
                                 st.text(f"🏢 {len(dept_names)} Abteilung(en)")
                                 # Zeige alle Abteilungen, aber verwende Columns für bessere Darstellung bei vielen Abteilungen
                                 if len(dept_names) <= 3:
@@ -4112,7 +4160,12 @@ def render_users_page():
                 level_counts[level] = level_counts.get(level, 0) + 1
             
             for level in sorted(level_counts.keys()):
-                level_name = ['Mitarbeiter', 'Teamleiter', 'Abteilungsleiter', 'QM-Manager'][level-1]
+                # ✅ SICHERE INDEXIERUNG: Erweitere Liste und verwende sicheren Zugriff
+                level_names = ['Mitarbeiter', 'Teamleiter', 'Abteilungsleiter', 'QM-Manager', 'System Administrator']
+                if 1 <= level <= len(level_names):
+                    level_name = level_names[level-1]
+                else:
+                    level_name = f"Level {level} (Unbekannt)"
                 st.write(f"**Level {level} ({level_name}):** {level_counts[level]} Benutzer")
 
 def render_profile_page():
@@ -4163,8 +4216,19 @@ def render_profile_page():
         with st.spinner("📄 Lade aktuelle Profil-Daten..."):
             profile = get_my_profile()
             if profile:
-                st.session_state["my_profile"] = profile
-                st.success("✅ Profil erfolgreich aktualisiert!")
+                # ✅ CACHE VALIDIERUNG: Prüfe ob Cache zum aktuellen User passt
+                current_user_email = st.session_state.current_user.get('email', '')
+                if profile.get('email') == current_user_email:
+                    st.session_state["my_profile"] = profile
+                    st.success("✅ Profil erfolgreich aktualisiert!")
+                else:
+                    # Cache ist veraltet - löschen und neu laden
+                    st.session_state["my_profile"] = None
+                    st.warning("⚠️ Cache veraltet - lade aktuelle Daten...")
+                    profile = get_my_profile()
+                    if profile:
+                        st.session_state["my_profile"] = profile
+                        st.success("✅ Profil erfolgreich aktualisiert!")
         
         if profile:
             # DEBUG: Zeige rohe API-Daten
@@ -4237,16 +4301,20 @@ def render_profile_page():
             
             # Interessensgruppen - VERBESSERTE ANZEIGE
             st.markdown("#### 🏢 Meine Interessensgruppen")
-            interest_groups = profile.get('interest_groups', [])
+            
+            # ✅ KORRIGIERT: Lade Interessensgruppen separat
+            user_departments = get_user_departments(profile.get('id', 0))
             
             # DEBUG: Zeige rohe Daten
-            st.caption(f"🔧 Debug: interest_groups = {interest_groups} (Typ: {type(interest_groups)})")
+            st.caption(f"🔧 Debug: user_departments = {user_departments} (Typ: {type(user_departments)})")
             
-            if interest_groups and len(interest_groups) > 0:
+            if user_departments and len(user_departments) > 0:
                 st.markdown("**Zugeordnete Gruppen:**")
-                for group in interest_groups:
-                    st.markdown(f"• 🏢 {group}")
-                st.success(f"✅ {len(interest_groups)} Interessensgruppen zugeordnet")
+                for dept in user_departments:
+                    dept_name = dept.get("interest_group", {}).get("name", "Unbekannt")
+                    approval_level = dept.get("approval_level", 1)
+                    st.markdown(f"• 🏢 **{dept_name}** (Level {approval_level})")
+                st.success(f"✅ {len(user_departments)} Interessensgruppen zugeordnet")
             else:
                 st.warning("**Interessensgruppen:** Keine Zuordnungen")
                 st.caption("Wenn Sie Interessensgruppen haben sollten, wenden Sie sich an den Administrator.")
@@ -5918,28 +5986,12 @@ def get_organizational_units() -> List[Dict]:
         response = requests.get(f"{API_BASE_URL}/api/interest-groups", timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
             groups = response.json()
-            # Mapping zu deutschen Namen für UI
-            unit_mapping = {
-                "procurement": "Einkauf",
-                "quality_management": "Qualitätsmanagement", 
-                "development": "Entwicklung",
-                "production": "Produktion",
-                "service_support": "Service & Support",
-                "sales": "Vertrieb",
-                "regulatory_affairs": "Regulatorische Angelegenheiten",
-                "clinical_affairs": "Klinische Angelegenheiten",
-                "post_market_surveillance": "Post-Market Surveillance",
-                "risk_management": "Risikomanagement",
-                "supplier_management": "Lieferantenmanagement",
-                "training": "Schulung",
-                "audit": "Audit"
-            }
-            
+            # Verwende die tatsächlichen Namen aus der Datenbank
             return [
                 {
-                    "name": unit_mapping.get(group.get("name", ""), group.get("name", "Unbekannt")),
+                    "name": group.get("name", "Unbekannt"),
                     "id": group.get("id", 0),
-                    "original_name": group.get("name", "")
+                    "original_name": group.get("code", "")
                 }
                 for group in groups
             ]

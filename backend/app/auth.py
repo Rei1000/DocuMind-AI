@@ -361,6 +361,7 @@ class UserInfo(BaseModel):
     organizational_unit: Optional[str]
     is_department_head: bool
     approval_level: int
+    is_active: bool  # ✅ HINZUGEFÜGT: Account-Status
     groups: List[str]
     permissions: List[str]
     
