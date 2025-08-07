@@ -4208,13 +4208,29 @@ async def simple_ai_prompt_test(
         }
 
 # === MULTI-VISIO STAGE EXECUTION ===
+
+# 📋 IN-MEMORY CACHE für Pipeline-Ergebnisse (verhindert redundante AI-Calls)
+_multi_visio_cache = {}
+
+def _get_file_hash(file_path: str) -> str:
+    """Erstellt einen Hash für die Datei zur Cache-Identifikation"""
+    import hashlib
+    with open(file_path, 'rb') as f:
+        content = f.read()
+    return hashlib.md5(content).hexdigest()
+
 @app.post("/api/multi-visio/stage/{stage_number}", tags=["Multi-Visio Pipeline"])
 async def execute_multi_visio_stage(
     stage_number: int,
     file: UploadFile = File(...),
     provider: str = Form("auto")
 ):
-    """Führt eine einzelne Stufe der Multi-Visio-Pipeline aus"""
+    """
+    Führt eine einzelne Stufe der Multi-Visio-Pipeline aus.
+    
+    WICHTIG: Für Stages 3+4 wird die komplette Pipeline bis zur gewünschten Stage ausgeführt,
+    um redundante AI-Calls zu vermeiden und Pipeline-Abhängigkeiten zu berücksichtigen.
+    """
     try:
         if stage_number not in [1, 2, 3, 4, 5]:
             raise HTTPException(status_code=400, detail=f"Ungültige Stufe: {stage_number}. Nur Stufen 1-5 sind erlaubt.")
@@ -4229,38 +4245,112 @@ async def execute_multi_visio_stage(
         # Multi-Visio Engine initialisieren
         multi_visio_engine = MultiVisioEngine()
         
-        # Bilder für Multi-Visio Engine vorbereiten
-        from .vision_ocr_engine import VisionOCREngine
-        vision_engine = VisionOCREngine()
-        images = await vision_engine.convert_document_to_images(Path(file_path))
+        # 🚀 EINMALIGE Bildkonvertierung mit Cache (verhindert LibreOffice Pop-ups)
+        images = await multi_visio_engine._get_or_convert_images(file_path)
+        
         if not images:
             raise HTTPException(status_code=500, detail="Dokument konnte nicht zu Bildern konvertiert werden")
         
-        # Stufe ausführen
+        logger.info(f"🔄 Multi-Visio Stage {stage_number} - Bilder gecacht, starte optimierte Pipeline...")
+        
+        # 📋 OPTIMIERTE PIPELINE: Ausführung bis zur gewünschten Stage
         if stage_number == 1:
+            # Stage 1: Kontext-Setup (Bild an AI)
             result = await multi_visio_engine._stage1_context_setup(images, "OTHER", provider)
+            
         elif stage_number == 2:
-            result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+            # Stage 2: Strukturierte Analyse (Bild an AI) mit Cache
+            file_hash = _get_file_hash(file_path)
+            cache_key = f"{file_hash}_stage2_{provider}"
+            
+            if cache_key in _multi_visio_cache:
+                logger.info("✅ Cache HIT: Stage 2 bereits berechnet")
+                result = _multi_visio_cache[cache_key]
+            else:
+                logger.info("🔄 Cache MISS: Stage 2 Strukturierte Analyse (Bild an AI)")
+                result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+                if result.get("success"):
+                    _multi_visio_cache[cache_key] = result
+            
         elif stage_number == 3:
-            # Für Stufe 3 brauchen wir das JSON aus Stufe 2
-            stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+            # Stage 3: BACKEND-ONLY Processing (KEIN Bild an AI)
+            logger.info("🔄 Stage 3 - Backend-Processing: Stage 2 → Text-Extraktion (KEIN AI-Call)")
+            
+            # 📋 CACHE-OPTIMIERUNG: Stage 2 nur einmal pro Datei
+            file_hash = _get_file_hash(file_path)
+            cache_key = f"{file_hash}_stage2_{provider}"
+            
+            if cache_key in _multi_visio_cache:
+                logger.info("✅ Cache HIT: Stage 2 Ergebnis aus Cache geladen")
+                stage2_result = _multi_visio_cache[cache_key]
+            else:
+                logger.info("🔄 Cache MISS: Stage 2 wird ausgeführt und gecacht")
+                stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+                if stage2_result.get("success"):
+                    _multi_visio_cache[cache_key] = stage2_result
+            
             if not stage2_result.get("success"):
-                raise HTTPException(status_code=500, detail="Stufe 2 muss vor Stufe 3 ausgeführt werden")
-            structured_json = stage2_result.get("json_data", {})
-            result = await multi_visio_engine._stage3_text_extraction(images, "OTHER", provider)
+                raise HTTPException(status_code=500, detail="Stage 2 fehlgeschlagen - erforderlich für Stage 3")
+            
+            # Backend-Processing ohne AI-Calls
+            result = await multi_visio_engine._stage3_text_extraction_from_stage2(stage2_result)
+            
         elif stage_number == 4:
-            # Für Stufe 4 brauchen wir Stufe 2 und 3
-            stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
-            stage3_result = await multi_visio_engine._stage3_text_extraction(images, "OTHER", provider)
-            if not stage2_result.get("success") or not stage3_result.get("success"):
-                raise HTTPException(status_code=500, detail="Stufe 2 und 3 müssen vor Stufe 4 ausgeführt werden")
-            structured_json = stage2_result.get("json_data", {})
-            result = await multi_visio_engine._stage4_verification_backend(stage3_result, structured_json)
-        elif stage_number == 5:
-            # Für Stufe 5 brauchen wir das JSON aus Stufe 2
-            stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+            # Stage 4: BACKEND-ONLY Verifikation (KEIN Bild an AI)
+            logger.info("🔍 Stage 4 - Backend-Verifikation: Stage 2 → Stage 3 → Hybrid-Validation (KEIN AI-Call)")
+            
+            # 📋 CACHE-OPTIMIERUNG: Stage 2 + 3 aus Cache oder berechnen
+            file_hash = _get_file_hash(file_path)
+            stage2_cache_key = f"{file_hash}_stage2_{provider}"
+            stage3_cache_key = f"{file_hash}_stage3_{provider}"
+            
+            # Stage 2 aus Cache oder neu berechnen
+            if stage2_cache_key in _multi_visio_cache:
+                logger.info("✅ Cache HIT: Stage 2 aus Cache")
+                stage2_result = _multi_visio_cache[stage2_cache_key]
+            else:
+                logger.info("🔄 Cache MISS: Stage 2 wird berechnet")
+                stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+                if stage2_result.get("success"):
+                    _multi_visio_cache[stage2_cache_key] = stage2_result
+            
             if not stage2_result.get("success"):
-                raise HTTPException(status_code=500, detail="Stufe 2 muss vor Stufe 5 ausgeführt werden")
+                raise HTTPException(status_code=500, detail="Stage 2 fehlgeschlagen - erforderlich für Stage 4")
+            
+            # Stage 3 aus Cache oder neu berechnen (Backend-only)
+            if stage3_cache_key in _multi_visio_cache:
+                logger.info("✅ Cache HIT: Stage 3 aus Cache")
+                stage3_result = _multi_visio_cache[stage3_cache_key]
+            else:
+                logger.info("🔄 Cache MISS: Stage 3 Backend-Processing")
+                stage3_result = await multi_visio_engine._stage3_text_extraction_from_stage2(stage2_result)
+                if stage3_result.get("success"):
+                    _multi_visio_cache[stage3_cache_key] = stage3_result
+            
+            if not stage3_result.get("success"):
+                raise HTTPException(status_code=500, detail="Stage 3 Backend-Processing fehlgeschlagen")
+            
+            # Backend-Verifikation ohne AI-Calls
+            result = await multi_visio_engine._stage4_verification_hybrid(stage3_result, stage2_result)
+        elif stage_number == 5:
+            # Stage 5: Norm-Compliance (mit Stage 2 Cache)
+            logger.info("🔄 Stage 5 - Norm-Compliance: Stage 2 → Text-Analyse")
+            
+            file_hash = _get_file_hash(file_path)
+            stage2_cache_key = f"{file_hash}_stage2_{provider}"
+            
+            # Stage 2 aus Cache oder neu berechnen
+            if stage2_cache_key in _multi_visio_cache:
+                logger.info("✅ Cache HIT: Stage 2 für Stage 5 aus Cache")
+                stage2_result = _multi_visio_cache[stage2_cache_key]
+            else:
+                logger.info("🔄 Cache MISS: Stage 2 für Stage 5 wird berechnet")
+                stage2_result = await multi_visio_engine._stage2_structured_analysis(images, "OTHER", provider)
+                if stage2_result.get("success"):
+                    _multi_visio_cache[stage2_cache_key] = stage2_result
+            
+            if not stage2_result.get("success"):
+                raise HTTPException(status_code=500, detail="Stage 2 fehlgeschlagen - erforderlich für Stage 5")
             structured_json = stage2_result.get("json_data", {})
             result = await multi_visio_engine._stage5_norm_compliance(images, structured_json, "OTHER", provider)
         
@@ -4269,6 +4359,19 @@ async def execute_multi_visio_stage(
     except Exception as e:
         logger.error(f"Fehler in Multi-Visio Stufe {stage_number}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Fehler in Stufe {stage_number}: {str(e)}")
+
+@app.post("/api/multi-visio/clear-cache", tags=["Multi-Visio Pipeline"])
+async def clear_multi_visio_cache():
+    """Leert den Multi-Visio Pipeline Cache (für neue Dokumente oder Debugging)"""
+    global _multi_visio_cache
+    cache_size = len(_multi_visio_cache)
+    _multi_visio_cache.clear()
+    logger.info(f"🗑️ Multi-Visio Cache geleert: {cache_size} Einträge entfernt")
+    return {
+        "success": True,
+        "message": f"Cache geleert: {cache_size} Einträge entfernt",
+        "cache_entries_removed": cache_size
+    }
 
 @app.post("/api/multi-visio/full-pipeline", tags=["Multi-Visio Pipeline"])
 async def execute_full_multi_visio_pipeline(

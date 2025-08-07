@@ -1750,9 +1750,9 @@ def render_unified_upload():
                 except Exception as e:
                     st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
             
-            # Stufe 3: Textextraktion
+            # Stufe 3: HYBRID - Backend Text-Processing
             elif st.session_state.multi_visio_pipeline["current_stage"] == 3:
-                st.markdown("### 📝 Stufe 3: Textextraktion")
+                st.markdown("### 🔄 Stufe 3: Hybrid Text-Processing (Backend)")
                 
                 # Ergebnisse der vorherigen Stufen anzeigen
                 if "stage1" in st.session_state.multi_visio_pipeline["results"]:
@@ -1768,76 +1768,80 @@ def render_unified_upload():
                         if "structured_analysis" in stage2_result:
                             st.json(stage2_result["structured_analysis"])
                 
-                # Prompt für Stufe 3 laden
-                try:
-                    # Cache-buster: Zeitstempel für dynamischen Key
-                    import time
-                    cache_buster = int(time.time() // 10)  # Erneuert alle 10 Sekunden
+                # Backend-Processing Info anzeigen
+                st.info("🔄 **Hybrid-Ansatz:** Diese Stufe verwendet die `all_extracted_texts` aus Stufe 2 für effiziente Backend-Verarbeitung (keine AI-Kosten)")
+                
+                # Zeige Stage 2 Daten als Quelle
+                if "stage2" in st.session_state.multi_visio_pipeline["results"]:
+                    stage2_result = st.session_state.multi_visio_pipeline["results"]["stage2"]
                     
-                    prompt_response = requests.get(f"{API_BASE_URL}/api/multi-visio-prompts/word-coverage")
-                    if prompt_response.status_code == 200:
-                        prompt_data = prompt_response.json()
-                        prompt_to_use = prompt_data["prompt"]
+                    # Versuche all_extracted_texts zu extrahieren
+                    stage2_response = stage2_result.get("response", {})
+                    if isinstance(stage2_response, str):
+                        try:
+                            import json
+                            stage2_response = json.loads(stage2_response)
+                        except:
+                            stage2_response = {}
+                    
+                    all_extracted_texts = stage2_response.get("all_extracted_texts", [])
+                    
+                    if all_extracted_texts:
+                        st.markdown("**📝 Quell-Daten aus Stufe 2:**")
+                        st.info(f"✅ {len(all_extracted_texts)} Texte aus Stage 2 `all_extracted_texts` verfügbar")
                         
-                        # Debug-Info für Auditierbarkeit
-                        st.markdown("**🤖 Prompt für Textextraktion:**")
-                        col_info, col_clear = st.columns([3, 1])
-                        with col_info:
-                            st.caption(f"🔍 Prompt-Länge: {len(prompt_to_use)} Zeichen | Version: {prompt_data.get('version', 'unbekannt')} | API: ✅")
-                        with col_clear:
-                            if st.button("🔄 Cache leeren", help="Lädt den Prompt neu vom Server", key="clear_cache_stage3"):
-                                st.rerun()
-                        
-                        # Verwende dynamischen Key um Streamlit-Caching zu umgehen
-                        st.text_area("Textextraktion", prompt_to_use, height=150, disabled=True, key=f"stage3_prompt_{cache_buster}")
-                        
-                        # Erweiterte Audit Trail Informationen
-                        with st.expander("📈 Audit Trail Details", expanded=False):
-                            st.json({
-                                "stufe": "3 - Textextraktion",
-                                "prompt_quelle": "03_word_coverage.txt",
-                                "api_endpoint": "/api/multi-visio-prompts/word-coverage",
-                                "prompt_laenge": len(prompt_to_use),
-                                "version": prompt_data.get('version', 'unbekannt'),
-                                "hash": prompt_data.get('hash', 'unbekannt'),
-                                "timestamp": prompt_data.get('timestamp', 'unbekannt'),
-                                "cache_buster": cache_buster
-                            })
-                        
-                        # Stufe 3 ausführen
-                        if st.button("🚀 Stufe 3: Textextraktion starten", type="primary", key="stage3_btn"):
-                            with st.spinner("🤖 Führe Textextraktion durch..."):
-                                try:
-                                    form_data = st.session_state.get("upload_form_data", {})
-                                    result = process_multi_visio_stage(
-                                        file_data=form_data["file"],
-                                        stage=3,
-                                        provider=st.session_state.multi_visio_pipeline["selected_provider"]
-                                    )
-                                    
-                                    if result and result.get("success"):
-                                        st.session_state.multi_visio_pipeline["results"]["stage3"] = result
-                                        st.session_state.multi_visio_pipeline["stages_completed"].append(3)
-                                        st.session_state.multi_visio_pipeline["current_stage"] = 4
-                                        st.success("✅ Stufe 3 erfolgreich abgeschlossen!")
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Stufe 3 fehlgeschlagen")
-                                except Exception as e:
-                                    st.error(f"❌ Fehler in Stufe 3: {str(e)}")
+                        with st.expander("🔍 Vorschau der Quell-Texte (erste 10)", expanded=False):
+                            for i, text in enumerate(all_extracted_texts[:10]):
+                                st.write(f"{i+1}. {text}")
+                            if len(all_extracted_texts) > 10:
+                                st.caption(f"... und {len(all_extracted_texts) - 10} weitere Texte")
                     else:
-                        st.error(f"❌ Prompt für Stufe 3 konnte nicht geladen werden: {prompt_response.status_code}")
-                except Exception as e:
-                    st.error(f"❌ Fehler beim Laden des Prompts: {str(e)}")
+                        st.error("❌ Keine `all_extracted_texts` in Stage 2 gefunden")
+                
+                # Audit Trail für Backend-Processing
+                with st.expander("📈 Audit Trail Details", expanded=False):
+                    st.json({
+                        "stufe": "3 - Hybrid Text-Processing",
+                        "methode": "backend_tokenization",
+                        "quelle": "stage2_all_extracted_texts",
+                        "ai_kosten": "❌ Keine (Backend-only)",
+                        "verarbeitung": ["Tokenisierung", "Bereinigung", "Duplikat-Entfernung", "Normalisierung"],
+                        "vorteile": ["Schnell", "Zuverlässig", "Kostenlos", "Audit-gerecht"]
+                    })
+                
+                # Stufe 3 ausführen
+                if st.button("🚀 Stufe 3: Backend Text-Processing starten", type="primary", key="stage3_btn"):
+                    with st.spinner("🔄 Führe Backend Text-Processing durch..."):
+                        try:
+                            form_data = st.session_state.get("upload_form_data", {})
+                            result = process_multi_visio_stage(
+                                file_data=form_data["file"],
+                                stage=3,
+                                provider=st.session_state.multi_visio_pipeline["selected_provider"]
+                            )
+                            
+                            if result and result.get("success"):
+                                st.session_state.multi_visio_pipeline["results"]["stage3"] = result
+                                st.session_state.multi_visio_pipeline["stages_completed"].append(3)
+                                st.session_state.multi_visio_pipeline["current_stage"] = 4
+                                st.success("✅ Stufe 3 (Backend Text-Processing) erfolgreich abgeschlossen!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Stufe 3 fehlgeschlagen")
+                        except Exception as e:
+                            st.error(f"❌ Fehler in Stufe 3: {str(e)}")
             
-            # Stufe 4: Verifikation (Backend-Logik)
+            # Stufe 4: HYBRID - Verifikation (Stage 2 Referenz)
             elif st.session_state.multi_visio_pipeline["current_stage"] == 4:
-                st.markdown("### 🔍 Stufe 4: Verifikation (Backend-Logik)")
+                st.markdown("### 🔍 Stufe 4: Hybrid-Verifikation (Stage 2 Referenz)")
+                
+                # Info über neue Hybrid-Verifikation
+                st.info("🎯 **Neue Logik:** Stage 2 `all_extracted_texts` = 100% Referenz | Stage 3 Backend-Processing = Qualitätstest")
                 
                 # Ergebnisse der vorherigen Stufen anzeigen
                 for stage_num in [1, 2, 3]:
                     if f"stage{stage_num}" in st.session_state.multi_visio_pipeline["results"]:
-                        stage_names = {1: "Experten-Einweisung", 2: "JSON-Analyse", 3: "Textextraktion"}
+                        stage_names = {1: "Experten-Einweisung", 2: "JSON-Analyse", 3: "Backend Text-Processing"}
                         with st.expander(f"📋 Ergebnis Stufe {stage_num}: {stage_names[stage_num]}"):
                             stage_result = st.session_state.multi_visio_pipeline["results"][f"stage{stage_num}"]
                             st.success(f"✅ Stufe {stage_num} erfolgreich")
@@ -1927,8 +1931,8 @@ def render_unified_upload():
                                         st.info(f"• {rec}")
                                 
                                 # Debug-Details
-                                with st.expander("🔧 Technische Details"):
-                                    st.json(verification)
+                                st.subheader("🔧 Technische Details:")
+                                st.json(verification)
                             else:
                                 st.write(f"**Antwort:** {stage_result.get('response', 'Keine Antwort')}")
                 
