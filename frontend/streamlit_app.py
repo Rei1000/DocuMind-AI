@@ -1186,6 +1186,9 @@ def init_session_state():
     
     if "upload_success" not in st.session_state:
         st.session_state.upload_success = None
+    
+    if "multi_visio_pipeline" not in st.session_state:
+        st.session_state.multi_visio_pipeline = None
 
 # ===== UI KOMPONENTEN =====
 def render_header():
@@ -1655,7 +1658,7 @@ def render_unified_upload():
             st.info("📋 **Workflow:** Experten-Einweisung → JSON-Analyse → Textextraktion → Verifikation (Backend) → Normkonformität")
         
             # Multi-Visio Pipeline-Status initialisieren
-            if "multi_visio_pipeline" not in st.session_state:
+            if "multi_visio_pipeline" not in st.session_state or st.session_state.multi_visio_pipeline is None:
                 st.session_state.multi_visio_pipeline = {
                     "current_stage": 1,
                     "stages_completed": [],
