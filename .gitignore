@@ -224,3 +224,5 @@ test_upload_dokument.txt
 # =============================================================================
 wird_nicht_mehr_benoetigt/
 
+*.md
+!README.md

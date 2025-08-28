@@ -1,32 +1,81 @@
 """
-KI-QMS API Schemas - Pydantic v2 Datenvalidierung
+📋 KI-QMS API Schemas - Pydantic v2 Datenvalidierung
 
 Dieses Modul definiert alle Datenvalidierungs-Schemas für die FastAPI-Anwendung
 mit umfassender Fehlerbehandlung, Type Safety und automatischer API-Dokumentation.
 
-Pydantic v2 Features verwendet:
+🏗️ PYDANTIC v2 FEATURES:
 - @field_validator statt @validator (v1 deprecated)
 - ConfigDict statt Config Klassen 
 - Field() für erweiterte Feldvalidierung
 - EmailStr für E-Mail-Validierung
 - Automatische OpenAPI Schema-Generierung
+- Performance-Optimierungen durch Rust-basierte Validierung
 
-Schema-Kategorien:
-- InterestGroup: 13-Stakeholder-System Schemas
-- User: Benutzerverwaltung mit Rollensystem
-- Document: QMS-Dokumentenverwaltung (14 Dokumenttypen)
-- Equipment: Asset-Management mit Kalibrierung
-- Authentication: Login/Token Management
-- API Responses: Standardisierte API-Antworten
+📋 SCHEMA-KATEGORIEN:
 
-Technologie-Stack:
-- FastAPI + Pydantic v2 für automatische Validierung
+1. 👥 USER MANAGEMENT:
+   - InterestGroup: 13-Stakeholder-System Schemas
+   - User: Benutzerverwaltung mit Rollensystem
+   - UserGroupMembership: Many-to-Many Beziehungen
+
+2. 📄 DOCUMENT MANAGEMENT:
+   - Document: QMS-Dokumentenverwaltung (25+ Dokumenttypen)
+   - DocumentStatusHistory: Audit-Trail Schemas
+   - DocumentNormMapping: Compliance-Beziehungen
+
+3. ⚙️ EQUIPMENT MANAGEMENT:
+   - Equipment: Asset-Management mit Kalibrierung
+   - Calibration: Kalibrierungsprotokoll
+   - CalibrationRequirement: Norm-basierte Anforderungen
+
+4. 🔐 AUTHENTICATION:
+   - Login/Token Management
+   - Password Change/Reset
+   - User Profile Management
+
+5. 📊 API RESPONSES:
+   - Standardisierte API-Antworten
+   - Error Response Schemas
+   - Generic Response Templates
+
+🔧 VALIDATION FEATURES:
+- Field-Level Validierung mit @field_validator
+- Custom Validators für Business Rules
+- Cross-Field Validierung
+- Conditional Validierung basierend auf Kontext
+- Error Messages in Deutsch
+- Type Conversion und Serialization
+
+🔗 ORM INTEGRATION:
 - SQLAlchemy ORM Kompatibilität über from_attributes=True
-- JSON Schema für OpenAPI/Swagger Dokumentation
-- Type Safety durch umfassende Type Hints
+- Automatische Konvertierung zwischen ORM und Pydantic
+- Lazy Loading Support
+- Relationship Handling
+
+📊 OPENAPI INTEGRATION:
+- Automatische Schema-Generierung
+- Request/Response Examples
+- Field Descriptions für Swagger UI
+- Error Code Dokumentation
+- API-Versionierung Support
+
+🔒 SECURITY FEATURES:
+- Password Validierung (Stärke, Komplexität)
+- Email Validierung mit EmailStr
+- Input Sanitization
+- SQL Injection Prevention
+- XSS Protection
+
+📈 PERFORMANCE:
+- Rust-basierte Validierung (Pydantic v2)
+- Lazy Evaluation
+- Caching von validierten Schemas
+- Optimierte Serialization
 
 Autoren: KI-QMS Entwicklungsteam
 Version: 2.0.0 (Pydantic v2 Migration)
+Last Updated: 2025-01-27
 """
 
 from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict

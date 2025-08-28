@@ -1,27 +1,67 @@
 """
-KI-QMS Datenmodelle (SQLAlchemy ORM)
+📊 KI-QMS Data Models (SQLAlchemy ORM)
 
 Dieses Modul definiert alle Datenmodelle für das KI-gestützte 
 Qualitätsmanagementsystem. Die Modelle repräsentieren die Datenbankstrukturen
 für das 13-Interessensgruppen-System und QMS-spezifische Entitäten.
 
-Hauptkomponenten:
-- InterestGroup: 13 praxisorientierte Stakeholder-Gruppen
-- User: Benutzer mit Rollen und Abteilungszuordnung
-- UserGroupMembership: Many-to-Many Beziehung User ↔ Groups
-- Document: QMS-Dokumente mit 14 spezifischen Typen
-- Norm: Compliance-Standards (ISO 13485, MDR, etc.)
-- Equipment: Geräte-Management mit Kalibrierungs-Tracking
-- Calibration: Kalibrierungsprotokoll mit Audit-Trail
-
-Technologie:
+🏗️ ARCHITEKTUR:
 - SQLAlchemy ORM für Datenbankoperationen
 - Pydantic für Datenvalidierung
 - Enum für typisierte Auswahlwerte
 - JSON-Felder für flexible Datenstrukturen
+- Relationship-Management für komplexe Beziehungen
+
+📋 CORE ENTITIES:
+
+1. 👥 USER MANAGEMENT:
+   - User: Benutzer mit Rollen und Berechtigungen
+   - InterestGroup: 13 praxisorientierte Stakeholder-Gruppen
+   - UserGroupMembership: Many-to-Many Beziehung User ↔ Groups
+
+2. 📄 DOCUMENT MANAGEMENT:
+   - Document: QMS-Dokumente mit 25+ spezifischen Typen
+   - DocumentStatusHistory: Audit-Trail für Status-Änderungen
+   - DocumentNormMapping: Many-to-Many Beziehung Document ↔ Norms
+
+3. ⚙️ EQUIPMENT MANAGEMENT:
+   - Equipment: Geräte-Management mit Kalibrierungs-Tracking
+   - Calibration: Kalibrierungsprotokoll mit Audit-Trail
+   - CalibrationRequirement: Norm-basierte Kalibrierungsanforderungen
+
+4. 📋 COMPLIANCE MANAGEMENT:
+   - Norm: Compliance-Standards (ISO 13485, MDR, FDA CFR Part 820)
+   - QMSTask: Workflow-Tasks für QMS-Prozesse
+   - WorkflowTemplate: Template für automatisierte Workflows
+
+🔗 RELATIONSHIPS:
+- User ↔ InterestGroup (Many-to-Many via UserGroupMembership)
+- Document → User (Creator, Reviewer, Approver)
+- Equipment → Calibration (One-to-Many)
+- Document ↔ Norm (Many-to-Many via DocumentNormMapping)
+- InterestGroup → QMSTask (One-to-Many)
+
+📊 ENUMS:
+- DocumentType: 25+ QMS-spezifische Dokumenttypen
+- DocumentStatus: 4-stufiger Workflow (Draft → Reviewed → Approved → Obsolete)
+- EquipmentStatus: Geräte-Status (Active, Maintenance, Retired)
+- TaskStatus: Workflow-Task-Status
+
+🔒 SECURITY FEATURES:
+- Password Hashing mit bcrypt
+- JWT Token Management
+- Role-based Access Control (RBAC)
+- Audit-Trail für alle Änderungen
+
+📈 PERFORMANCE:
+- Indizierte Felder für schnelle Suche
+- Lazy Loading für Relationships
+- Connection Pooling
+- Optimierte Queries
 
 Autoren: KI-QMS Entwicklungsteam
 Version: 1.0.0 (MVP Phase 1)
+Last Updated: 2025-01-27
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum, JSON, Float

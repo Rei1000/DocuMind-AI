@@ -1,11 +1,64 @@
 """
-Zentrale Konfiguration für DocuMind-AI QMS System
+⚙️ Zentrale Konfiguration für DocuMind-AI QMS System
 
 Diese Datei verwaltet alle konfigurierbaren Parameter des Systems,
 um hardcodierte Werte zu vermeiden und Flexibilität zu gewährleisten.
 
+🏗️ KONFIGURATIONS-BEREICHE:
+
+1. 📁 SYSTEM-PFADE:
+   - Upload-Verzeichnisse für Dokumente
+   - Prompt-Verzeichnisse für AI-Engine
+   - Log-Verzeichnisse für Debugging
+   - Cache-Verzeichnisse für Performance
+
+2. 🤖 AI-PROVIDER KONFIGURATION:
+   - Provider-Fallback-Kette (OpenAI → Gemini → Ollama → Rule-based)
+   - API-Keys und Endpoints
+   - Quality-Thresholds für Validierung
+   - Prompt-Konfiguration
+
+3. 🔧 SYSTEM-EINSTELLUNGEN:
+   - Environment Detection (Development/Production)
+   - Debug-Level und Logging
+   - Performance-Optimierungen
+   - Security-Settings
+
+4. 📊 VALIDATION & MONITORING:
+   - Konfigurations-Validierung
+   - Health-Check-Parameter
+   - Performance-Metriken
+   - Error-Handling
+
+🔧 ENVIRONMENT VARIABLES:
+- UPLOADS_DIR: Upload-Verzeichnis
+- PROMPTS_DIR: Prompt-Verzeichnis
+- LOGS_DIR: Log-Verzeichnis
+- AI_PROVIDERS: Komma-separierte Provider-Liste
+- DEFAULT_AI_PROVIDER: Standard-Provider
+- ENVIRONMENT: Development/Production
+- DEBUG_LEVEL: Logging-Level
+
+📋 FALLBACK-STRATEGIE:
+1. Environment Variable (höchste Priorität)
+2. Konfigurationsdatei
+3. Default-Werte (niedrigste Priorität)
+
+🔒 SECURITY:
+- Sensitive Daten nur über Environment Variables
+- Keine Hardcoded Secrets
+- Konfigurations-Validierung
+- Production-Safety Checks
+
+📈 PERFORMANCE:
+- Lazy Loading von Konfigurationen
+- Caching von häufig verwendeten Werten
+- Optimierte Pfad-Resolution
+- Memory-Effiziente String-Handling
+
 Version: 1.0.0
 Autor: DocuMind-AI Team
+Last Updated: 2025-01-27
 """
 
 import os

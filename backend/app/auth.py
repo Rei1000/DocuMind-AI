@@ -1,24 +1,65 @@
 """
-KI-QMS Authentication & Authorization System
+🔐 KI-QMS Authentication & Authorization System
 
 Implementiert rollenbasierte Authentifizierung (RBAC) für das KI-QMS System
 mit JWT-Tokens und Interessengruppen-basierten Berechtigungen.
 
-Features:
-- JWT Token Authentication
-- Role-Based Access Control (RBAC)
-- Interest Group Permissions
-- Password Hashing (bcrypt)
-- Session Management
+🏗️ CORE FEATURES:
+- JWT Token Authentication mit automatischer Verlängerung
+- Role-Based Access Control (RBAC) mit granularen Berechtigungen
+- Interest Group Permissions (13 Stakeholder-Gruppen)
+- Password Hashing mit bcrypt (sicher, performant)
+- Session Management mit Token-Validierung
+- Multi-Factor Authentication Ready (erweiterbar)
 
-Technologie:
-- FastAPI Security Utilities
-- python-jose für JWT
-- passlib für Password Hashing
-- python-multipart für Form Data
+🔒 SECURITY FEATURES:
+- BCrypt Password Hashing (automatisches Salt)
+- JWT Token mit HS256 Signierung
+- Token Expiration und Refresh
+- Role-based Endpoint Protection
+- Input Validation und Sanitization
+- CSRF Protection Ready
+- Rate Limiting Support
+
+👥 AUTHORIZATION LEVELS:
+1. **System Admin**: Vollzugriff auf alle Funktionen
+2. **QMS Admin**: QMS-spezifische Verwaltung
+3. **Department Head**: Abteilungsleitung
+4. **Regular User**: Standard-Benutzer
+5. **External User**: Externe Stakeholder (eingeschränkt)
+
+🔧 TECHNOLOGIE-STACK:
+- FastAPI Security Utilities (HTTPBearer, Depends)
+- python-jose für JWT Token Handling
+- passlib für Password Hashing (bcrypt)
+- python-multipart für Form Data Processing
+- SQLAlchemy für User-Datenbank-Operationen
+
+📋 AUTHENTICATION FLOW:
+1. User Login mit Email/Password
+2. Password Verification gegen BCrypt-Hash
+3. JWT Token Generation mit User-Claims
+4. Token-Übertragung via Authorization Header
+5. Token-Validierung bei jedem Request
+6. Role/Permission Check für Endpoint-Zugriff
+
+🔗 INTEGRATION:
+- FastAPI Dependency Injection
+- SQLAlchemy ORM Integration
+- Environment Variable Configuration
+- Health Check Endpoints
+- Error Handling mit HTTP Status Codes
+
+📊 MONITORING:
+- Login Attempt Tracking
+- Failed Authentication Logging
+- Token Usage Statistics
+- Security Event Monitoring
+- Audit Trail für Auth-Events
 
 Autoren: KI-QMS Entwicklungsteam
 Version: 1.0.0 (MVP Phase 1)
+Last Updated: 2025-01-27
 """
 
 from datetime import datetime, timedelta
