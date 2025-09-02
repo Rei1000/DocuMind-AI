@@ -709,6 +709,16 @@ app = FastAPI(
     },
 )
 
+# ===== FEATURE-TOGGLE FÜR DDD+HEX IMPLEMENTIERUNG =====
+# DDD+Hex Router für Interest Groups (nur wenn IG_IMPL=ddd gesetzt)
+if os.getenv("IG_IMPL") == "ddd":
+    try:
+        from contexts.interestgroups.interface.router import router as ig_router
+        app.include_router(ig_router)
+        print("✅ DDD+Hex Interest Groups Router aktiviert")
+    except ImportError as e:
+        print(f"⚠️ DDD+Hex Interest Groups Router konnte nicht geladen werden: {e}")
+
 # ===== CORS-KONFIGURATION =====
 # Erlaubt Frontend-Zugriff von Streamlit und React Development Server
 app.add_middleware(
