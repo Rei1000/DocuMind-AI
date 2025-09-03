@@ -61,6 +61,13 @@ cd DocuMind-AI
 ```bash
 # Automatisches Setup und Start
 ./start-all.sh
+
+# Oder manuell mit Routing-Auswahl:
+# Legacy-Modus (Standard):
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+
+# DDD-Modus:
+IG_IMPL=ddd uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 3. System nutzen
@@ -71,6 +78,45 @@ cd DocuMind-AI
 **Standard-Login:**
 - **Email:** `qms.admin@company.com`
 - **Passwort:** `admin123`
+
+---
+
+## 🔄 Routing-Switch (Legacy ↔ DDD)
+
+**DocuMind-AI** unterstützt zwei Implementierungsmodi für die `/api/interest-groups` Endpoints:
+
+### 🚀 **Legacy-Modus (Standard)**
+- **Umgebungsvariable:** `IG_IMPL` nicht gesetzt oder leer
+- **Router:** Legacy-Implementierung in `backend/app/main.py`
+- **Verhalten:** Bewährte Funktionalität, unveränderte Pfade
+
+### 🏗️ **DDD-Modus**
+- **Umgebungsvariable:** `IG_IMPL=ddd`
+- **Router:** DDD+Hexagonal Architecture Router
+- **Verhalten:** Neue Implementierung, gleiche API-Pfade
+
+### ⚠️ **Wichtige Hinweise**
+- **Exklusive Auswahl:** Nur ein Router ist gleichzeitig aktiv
+- **Gleiche Pfade:** Beide Modi verwenden `/api/interest-groups`
+- **ENV-Weiche entscheidet:** `IG_IMPL=ddd` aktiviert DDD, sonst Legacy
+
+### 🧪 **Testing**
+```bash
+# Legacy-Tests
+pytest -q tests
+
+# DDD-Tests  
+IG_IMPL=ddd pytest -q tests
+
+# Paritätstests (Vergleich Legacy vs DDD)
+pytest -q tests/characterization/interestgroups/
+```
+
+### 📍 **Paritätstests**
+- **Speicherort:** `tests/characterization/interestgroups/`
+- **Zweck:** Status/Body-Gleichheit zwischen Legacy und DDD
+- **Robustheit:** Unterstützt Dict- und List-Responses
+- **Datenbank:** Separate DB-Instanzen für jeden Modus
 
 ---
 

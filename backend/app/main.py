@@ -714,10 +714,457 @@ app = FastAPI(
 if os.getenv("IG_IMPL") == "ddd":
     try:
         from contexts.interestgroups.interface.router import router as ig_router
-        app.include_router(ig_router)
+        app.include_router(ig_router, tags=["Interest Groups"])
         print("✅ DDD+Hex Interest Groups Router aktiviert")
+        print("[ROUTING] mode=ddd for /api/interest-groups")
     except ImportError as e:
         print(f"⚠️ DDD+Hex Interest Groups Router konnte nicht geladen werden: {e}")
+        print("[ROUTING] mode=legacy for /api/interest-groups (fallback)")
+else:
+    print("[ROUTING] mode=legacy for /api/interest-groups")
+    
+    # === LEGACY INTEREST GROUPS API ===
+    
+    @app.get("/api/interest-groups", response_model=List[InterestGroup], tags=["Interest Groups"])
+    async def get_interest_groups(
+        skip: int = 0,
+        limit: int = 20,
+        include_inactive: bool = False,
+        db: Session = Depends(get_db)
+    ):
+        """
+        Alle Interessensgruppen abrufen (standardmäßig nur aktive).
+        
+        Das 13-Interessensgruppen-System bildet die organisatorische Grundlage
+        des QMS ab - von internen Stakeholdern (Einkauf, Produktion, QM) bis
+        zu externen Partnern (Auditoren, Lieferanten).
+        
+        Args:
+            skip (int): Anzahl zu überspringender Datensätze (Pagination). Default: 0
+            limit (int): Maximale Anzahl zurückzugebender Datensätze. Default: 20, Max: 100
+            include_inactive (bool): Auch deaktivierte Gruppen einschließen. Default: False
+            db (Session): Datenbankverbindung (automatisch injiziert)
+        
+        Returns:
+            List[InterestGroup]: Liste der Interessensgruppen
+            
+        Example Response:
+            ```json
+            [
+                {
+                    "id": 2,
+                    "name": "Qualitätsmanagement (QM)",
+                    "code": "quality_management",
+                    "description": "Alle Rechte, finale Freigabe, Gap-Analyse - Herzstück des QMS",
+                    "permissions": ["all_rights", "final_approval", "gap_analysis"],
+                    "ai_functionality": "Gap-Analyse & Normprüfung",
+                    "typical_tasks": "QM-Freigaben, CAPA-Management, interne Audits",
+                    "is_external": false,
+                    "is_active": true,
+                    "created_at": "2024-01-15T10:30:00Z"
+                },
+                {
+                    "id": 11,
+                    "name": "Auditor (extern)",
+                    "code": "external_auditor", 
+                    "description": "Read-only extern, Gap-API, Remote-Zugriff",
+                    "permissions": ["read_only_external", "gap_api", "remote_access"],
+                    "ai_functionality": "Read-only extern, Gap-API",
+                    "typical_tasks": "Externe Audits, Compliance-Prüfungen",
+                    "is_external": true,
+                    "is_active": true,
+                    "created_at": "2024-01-15T10:30:00Z"
+                }
+            ]
+            ```
+        
+        Raises:
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Soft-Delete: Gelöschte Gruppen haben is_active=false
+            - Externe Gruppen (is_external=true): Auditoren, Lieferanten
+            - Permissions sind als JSON-Array gespeichert
+        """
+        query = db.query(InterestGroupModel)
+        
+        # Standardmäßig nur aktive Gruppen anzeigen
+        if not include_inactive:
+            query = query.filter(InterestGroupModel.is_active == True)
+        
+        groups = query.offset(skip).limit(limit).all()
+        
+        # JSON-Strings in Listen konvertieren für Response-Validierung
+        for group in groups:
+            if group.group_permissions and isinstance(group.group_permissions, str):
+                try:
+                    import json
+                    group.group_permissions = json.loads(group.group_permissions)
+                except (json.JSONDecodeError, TypeError):
+                    group.group_permissions = []
+        
+        return groups
+
+    @app.get("/api/interest-groups/{group_id}", response_model=InterestGroup, tags=["Interest Groups"])
+    async def get_interest_group(group_id: int, db: Session = Depends(get_db)):
+        """
+        Eine spezifische Interessensgruppe abrufen.
+        
+        Lädt eine einzelne Interessensgruppe mit allen Details,
+        einschließlich Berechtigungen und KI-Funktionalitäten.
+        
+        Args:
+            group_id (int): Eindeutige ID der Interessensgruppe (1-13 für Standard-Gruppen)
+            db (Session): Datenbankverbindung (automatisch injiziert)
+            
+        Returns:
+            InterestGroup: Detaillierte Informationen der Interessensgruppe
+            
+        Example Response:
+            ```json
+            {
+                "id": 5,
+                "name": "Entwicklung",
+                "code": "development",
+                "description": "Design-Control, Normprüfung",
+                "permissions": ["design_control", "norm_verification", "technical_documentation"],
+                "ai_functionality": "Design-Control, Normprüfung",
+                "typical_tasks": "Produktentwicklung, Design-FMEA, technische Dokumentation",
+                "is_external": false,
+                "is_active": true,
+                "created_at": "2024-01-15T10:30:00Z"
+            }
+            ```
+        
+        Raises:
+            HTTPException: 404 wenn Interessensgruppe nicht gefunden
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Auch deaktivierte Gruppen werden zurückgegeben (für Admin-Zwecke)
+            - Permissions als JSON-Array für flexible Berechtigungssteuerung
+        """
+        group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
+            )
+        
+        # JSON-String in Liste konvertieren für Response-Validierung
+        if group.group_permissions and isinstance(group.group_permissions, str):
+            try:
+                import json
+                group.group_permissions = json.loads(group.group_permissions)
+            except (json.JSONDecodeError, TypeError):
+                group.group_permissions = []
+        
+        return group
+
+    @app.post("/api/interest-groups", response_model=InterestGroup, tags=["Interest Groups"])
+    async def create_interest_group(
+        group: InterestGroupCreate,
+        db: Session = Depends(get_db)
+    ):
+        """
+        Neue Interessensgruppe erstellen.
+        
+        Erstellt eine neue Interessensgruppe im System. Typischerweise für
+        kundenspezifische Erweiterungen des Standard-13-Gruppen-Systems.
+        
+        Args:
+            group (InterestGroupCreate): Daten der neuen Interessensgruppe
+            db (Session): Datenbankverbindung (automatisch injiziert)
+            
+        Returns:
+            InterestGroup: Die erstellte Interessensgruppe mit generierter ID
+            
+        Example Request:
+            ```json
+            {
+                "name": "Regulatorische Angelegenheiten",
+                "code": "regulatory_affairs",
+                "description": "FDA-Submissions, CE-Kennzeichnung, Marktzulassungen",
+                "permissions": ["regulatory_submissions", "market_approval", "documentation_review"],
+                "ai_functionality": "Regulatorische Dokumentenanalyse",
+                "typical_tasks": "FDA-Anträge, CE-Dokumentation, Marktzulassungsverfahren",
+                "is_external": false
+            }
+            ```
+            
+        Example Response:
+            ```json
+            {
+                "id": 14,
+                "name": "Regulatorische Angelegenheiten",
+                "code": "regulatory_affairs",
+                "description": "FDA-Submissions, CE-Kennzeichnung, Marktzulassungen",
+                "permissions": ["regulatory_submissions", "market_approval", "documentation_review"],
+                "ai_functionality": "Regulatorische Dokumentenanalyse",
+                "typical_tasks": "FDA-Anträge, CE-Dokumentation, Marktzulassungsverfahren",
+                "is_external": false,
+                "is_active": true,
+                "created_at": "2024-01-15T10:30:00Z"
+            }
+            ```
+            
+        Raises:
+            HTTPException: 400 bei ungültigen Eingabedaten
+            HTTPException: 409 wenn Code bereits existiert
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Code muss eindeutig sein (wird für API-Zugriff verwendet)
+            - is_active wird automatisch auf true gesetzt
+            - created_at wird automatisch gesetzt
+        """
+        # Prüfen ob Code bereits existiert
+        existing_group = db.query(InterestGroupModel).filter(
+            InterestGroupModel.code == group.code
+        ).first()
+        if existing_group:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Interessensgruppe mit Code '{group.code}' existiert bereits"
+            )
+        
+        # Daten vorbereiten und group_permissions zu JSON konvertieren
+        group_data = group.dict()
+        if 'group_permissions' in group_data and isinstance(group_data['group_permissions'], list):
+            import json
+            group_data['group_permissions'] = json.dumps(group_data['group_permissions'])
+        
+        db_group = InterestGroupModel(**group_data)
+        db.add(db_group)
+        db.commit()
+        db.refresh(db_group)
+        return db_group
+
+    @app.put("/api/interest-groups/{group_id}", response_model=InterestGroup, tags=["Interest Groups"])
+    async def update_interest_group(
+        group_id: int,
+        group_update: InterestGroupUpdate,
+        db: Session = Depends(get_db)
+    ):
+        """
+        Interessensgruppe aktualisieren.
+        
+        Aktualisiert eine bestehende Interessensgruppe. Besonders nützlich für:
+        - Anpassung von Berechtigungen
+        - Aktivierung/Deaktivierung von Gruppen
+        - Aktualisierung von KI-Funktionalitäten
+        
+        Args:
+            group_id (int): ID der zu aktualisierenden Interessensgruppe
+            group_update (InterestGroupUpdate): Zu aktualisierende Felder (partial update)
+            db (Session): Datenbankverbindung (automatisch injiziert)
+            
+        Returns:
+            InterestGroup: Die aktualisierte Interessensgruppe
+            
+        Example Request (Gruppe reaktivieren):
+            ```json
+            {
+                "is_active": true,
+                "description": "Wieder aktiviert nach Umstrukturierung"
+            }
+            ```
+            
+        Example Request (Berechtigungen erweitern):
+            ```json
+            {
+                "permissions": ["existing_permission", "new_ai_feature", "advanced_analytics"],
+                "ai_functionality": "Erweitert um prädiktive Analysen"
+            }
+            ```
+            
+        Example Response:
+            ```json
+            {
+                "id": 1,
+                "name": "Einkauf",
+                "code": "procurement",
+                "description": "Wieder aktiviert nach Umstrukturierung",
+                "permissions": ["supplier_evaluation", "purchase_notifications"],
+                "ai_functionality": "Lieferantenbewertung, Benachrichtigungen",
+                "typical_tasks": "Lieferantenqualifikation, Einkaufsprozesse",
+                "is_external": false,
+                "is_active": true,
+                "created_at": "2024-01-15T10:30:00Z"
+            }
+            ```
+            
+        Raises:
+            HTTPException: 404 wenn Interessensgruppe nicht gefunden
+            HTTPException: 400 bei ungültigen Eingabedaten
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Nur übermittelte Felder werden aktualisiert (partial update)
+            - updated_at wird automatisch gesetzt
+            - Code und ID können nicht geändert werden
+        """
+        db_group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
+        if not db_group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
+            )
+        
+        # Nur übermittelte Felder aktualisieren
+        update_data = group_update.dict(exclude_unset=True)
+        
+        # Prüfen ob Code-Update zu Konflikt führen würde
+        if 'code' in update_data and update_data['code'] != db_group.code:
+            existing_code = db.query(InterestGroupModel).filter(
+                InterestGroupModel.code == update_data['code'],
+                InterestGroupModel.id != group_id
+            ).first()
+            if existing_code:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Code '{update_data['code']}' wird bereits von einer anderen Gruppe verwendet"
+                )
+        
+        # Group permissions zu JSON-String konvertieren, falls vorhanden
+        if 'group_permissions' in update_data and isinstance(update_data['group_permissions'], list):
+            import json
+            update_data['group_permissions'] = json.dumps(update_data['group_permissions'])
+        
+        for field, value in update_data.items():
+            setattr(db_group, field, value)
+        
+        db.commit()
+        db.refresh(db_group)
+        return db_group
+
+    @app.delete("/api/interest-groups/{group_id}", response_model=GenericResponse, tags=["Interest Groups"])
+    async def delete_interest_group(group_id: int, db: Session = Depends(get_db)):
+        """
+        Interessensgruppe löschen (Soft Delete).
+        
+        Führt einen Soft Delete durch (is_active = false). Echtes Löschen wird
+        vermieden, da Interessensgruppen in User-Memberships referenziert werden.
+        
+        Args:
+            group_id (int): ID der zu löschenden Interessensgruppe
+            db (Session): Datenbankverbindung (automatisch injiziert)
+            
+        Returns:
+            GenericResponse: Bestätigung der Löschung
+            
+        Example Response:
+            ```json
+            {
+                "message": "Interessensgruppe 'Einkauf' wurde deaktiviert",
+                "success": true
+            }
+            ```
+            
+        Raises:
+            HTTPException: 404 wenn Interessensgruppe nicht gefunden
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Soft Delete: is_active wird auf false gesetzt
+            - Daten bleiben in DB erhalten (für Audit-Trail)
+            - User-Memberships bleiben bestehen
+            - Reaktivierung über PUT-Endpoint möglich
+            
+        Warning:
+            - Standard-Gruppen (ID 1-13) sollten nicht gelöscht werden
+            - Prüfe User-Memberships vor Löschung
+        """
+        db_group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
+        if not db_group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
+            )
+        
+        # Soft Delete: is_active auf false setzen
+        db_group.is_active = False
+        db.commit()
+        return GenericResponse(message=f"Interessensgruppe '{db_group.name}' wurde deaktiviert")
+
+    @app.get("/api/interest-groups/{group_id}/users", response_model=List[User], tags=["User Group Memberships"])
+    async def get_group_users(group_id: int, db: Session = Depends(get_db)):
+        """
+        Alle Benutzer einer Interessensgruppe abrufen.
+        
+        Zeigt alle Benutzer an, die einer spezifischen Interessensgruppe
+        zugeordnet sind. Für Team-Übersichten und Kontaktlisten.
+        
+        Args:
+            group_id (int): Eindeutige ID der Interessensgruppe
+            db (Session): Datenbankverbindung (automatisch injiziert)
+            
+        Returns:
+            List[User]: Liste aller Benutzer in der Gruppe
+            
+        Example Response:
+            ```json
+            [
+                {
+                    "id": 3,
+                    "username": "anna.schmidt",
+                    "email": "anna.schmidt@medtech-company.de",
+                    "full_name": "Anna Schmidt",
+                    "role": "DEVELOPMENT_ENGINEER",
+                    "department": "Produktentwicklung",
+                    "is_active": true,
+                    "created_at": "2024-01-15T10:30:00Z"
+                },
+                {
+                    "id": 8,
+                    "username": "tom.werner",
+                    "email": "tom.werner@medtech-company.de",
+                    "full_name": "Tom Werner",
+                    "role": "SENIOR_DEVELOPER",
+                    "department": "Produktentwicklung",
+                    "is_active": true,
+                    "created_at": "2024-01-12T14:20:00Z"
+                }
+            ]
+            ```
+            
+        Raises:
+            HTTPException: 404 wenn Interessensgruppe nicht gefunden
+            HTTPException: 500 bei Datenbankfehlern
+            
+        Note:
+            - Nur aktive Benutzer werden angezeigt
+            - Sortierung nach Benutzernamen (alphabetisch)
+            - Passwort-Hashes werden niemals zurückgegeben
+            
+        Use Cases:
+            - Team-Kontaktlisten erstellen
+            - Zuständigkeiten identifizieren
+            - Benachrichtigungen an ganze Gruppen senden
+        """
+        group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
+            )
+        
+        # Join über UserGroupMembership um nur aktive Benutzer zu holen
+        users = db.query(UserModel).join(UserGroupMembershipModel).filter(
+            UserGroupMembershipModel.interest_group_id == group_id,
+            UserModel.is_active == True
+        ).all()
+        
+        # JSON-Strings in Listen konvertieren für Response-Validierung
+        for user in users:
+            if user.individual_permissions and isinstance(user.individual_permissions, str):
+                try:
+                    import json
+                    user.individual_permissions = json.loads(user.individual_permissions)
+                except (json.JSONDecodeError, TypeError):
+                    user.individual_permissions = []
+        
+        return users
 
 # ===== CORS-KONFIGURATION =====
 # Erlaubt Frontend-Zugriff von Streamlit und React Development Server
@@ -1096,368 +1543,15 @@ async def change_password(
     }
 
 # === INTEREST GROUPS API ===
+# Legacy-Endpoints werden durch ENV-Weiche ersetzt (siehe unten)
 
-@app.get("/api/interest-groups", response_model=List[InterestGroup], tags=["Interest Groups"])
-async def get_interest_groups(
-    skip: int = 0,
-    limit: int = 20,
-    include_inactive: bool = False,
-    db: Session = Depends(get_db)
-):
-    """
-    Alle Interessensgruppen abrufen (standardmäßig nur aktive).
-    
-    Das 13-Interessensgruppen-System bildet die organisatorische Grundlage
-    des QMS ab - von internen Stakeholdern (Einkauf, Produktion, QM) bis
-    zu externen Partnern (Auditoren, Lieferanten).
-    
-    Args:
-        skip (int): Anzahl zu überspringender Datensätze (Pagination). Default: 0
-        limit (int): Maximale Anzahl zurückzugebender Datensätze. Default: 20, Max: 100
-        include_inactive (bool): Auch deaktivierte Gruppen einschließen. Default: False
-        db (Session): Datenbankverbindung (automatisch injiziert)
-    
-    Returns:
-        List[InterestGroup]: Liste der Interessensgruppen
-        
-    Example Response:
-        ```json
-        [
-            {
-                "id": 2,
-                "name": "Qualitätsmanagement (QM)",
-                "code": "quality_management",
-                "description": "Alle Rechte, finale Freigabe, Gap-Analyse - Herzstück des QMS",
-                "permissions": ["all_rights", "final_approval", "gap_analysis"],
-                "ai_functionality": "Gap-Analyse & Normprüfung",
-                "typical_tasks": "QM-Freigaben, CAPA-Management, interne Audits",
-                "is_external": false,
-                "is_active": true,
-                "created_at": "2024-01-15T10:30:00Z"
-            },
-            {
-                "id": 11,
-                "name": "Auditor (extern)",
-                "code": "external_auditor", 
-                "description": "Read-only extern, Gap-API, Remote-Zugriff",
-                "permissions": ["read_only_external", "gap_api", "remote_access"],
-                "ai_functionality": "Read-only extern, Gap-API",
-                "typical_tasks": "Externe Audits, Compliance-Prüfungen",
-                "is_external": true,
-                "is_active": true,
-                "created_at": "2024-01-15T10:30:00Z"
-            }
-        ]
-        ```
-    
-    Raises:
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Soft-Delete: Gelöschte Gruppen haben is_active=false
-        - Externe Gruppen (is_external=true): Auditoren, Lieferanten
-        - Permissions sind als JSON-Array gespeichert
-    """
-    query = db.query(InterestGroupModel)
-    
-    # Standardmäßig nur aktive Gruppen anzeigen
-    if not include_inactive:
-        query = query.filter(InterestGroupModel.is_active == True)
-    
-    groups = query.offset(skip).limit(limit).all()
-    
-    # JSON-Strings in Listen konvertieren für Response-Validierung
-    for group in groups:
-        if group.group_permissions and isinstance(group.group_permissions, str):
-            try:
-                import json
-                group.group_permissions = json.loads(group.group_permissions)
-            except (json.JSONDecodeError, TypeError):
-                group.group_permissions = []
-    
-    return groups
+# GET-Endpoint wird durch ENV-Weiche ersetzt
 
-@app.get("/api/interest-groups/{group_id}", response_model=InterestGroup, tags=["Interest Groups"])
-async def get_interest_group(group_id: int, db: Session = Depends(get_db)):
-    """
-    Eine spezifische Interessensgruppe abrufen.
-    
-    Lädt eine einzelne Interessensgruppe mit allen Details,
-    einschließlich Berechtigungen und KI-Funktionalitäten.
-    
-    Args:
-        group_id (int): Eindeutige ID der Interessensgruppe (1-13 für Standard-Gruppen)
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        InterestGroup: Detaillierte Informationen der Interessensgruppe
-        
-    Example Response:
-        ```json
-        {
-            "id": 5,
-            "name": "Entwicklung",
-            "code": "development",
-            "description": "Design-Control, Normprüfung",
-            "permissions": ["design_control", "norm_verification", "technical_documentation"],
-            "ai_functionality": "Design-Control, Normprüfung",
-            "typical_tasks": "Produktentwicklung, Design-FMEA, technische Dokumentation",
-            "is_external": false,
-            "is_active": true,
-            "created_at": "2024-01-15T10:30:00Z"
-        }
-        ```
-        
-    Raises:
-        HTTPException: 404 wenn Interessensgruppe nicht gefunden
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Auch deaktivierte Gruppen werden zurückgegeben (für Admin-Zwecke)
-        - Permissions als JSON-Array für flexible Berechtigungssteuerung
-    """
-    group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
-        )
-    
-    # JSON-String in Liste konvertieren für Response-Validierung
-    if group.group_permissions and isinstance(group.group_permissions, str):
-        try:
-            import json
-            group.group_permissions = json.loads(group.group_permissions)
-        except (json.JSONDecodeError, TypeError):
-            group.group_permissions = []
-    
-    return group
+# POST-Endpoint wird durch ENV-Weiche ersetzt
 
-@app.post("/api/interest-groups", response_model=InterestGroup, tags=["Interest Groups"])
-async def create_interest_group(
-    group: InterestGroupCreate,
-    db: Session = Depends(get_db)
-):
-    """
-    Neue Interessensgruppe erstellen.
-    
-    Erstellt eine neue Interessensgruppe im System. Typischerweise für
-    kundenspezifische Erweiterungen des Standard-13-Gruppen-Systems.
-    
-    Args:
-        group (InterestGroupCreate): Daten der neuen Interessensgruppe
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        InterestGroup: Die erstellte Interessensgruppe mit generierter ID
-        
-    Example Request:
-        ```json
-        {
-            "name": "Regulatorische Angelegenheiten",
-            "code": "regulatory_affairs",
-            "description": "FDA-Submissions, CE-Kennzeichnung, Marktzulassungen",
-            "permissions": ["regulatory_submissions", "market_approval", "documentation_review"],
-            "ai_functionality": "Regulatorische Dokumentenanalyse",
-            "typical_tasks": "FDA-Anträge, CE-Dokumentation, Marktzulassungsverfahren",
-            "is_external": false
-        }
-        ```
-        
-    Example Response:
-        ```json
-        {
-            "id": 14,
-            "name": "Regulatorische Angelegenheiten",
-            "code": "regulatory_affairs",
-            "description": "FDA-Submissions, CE-Kennzeichnung, Marktzulassungen",
-            "permissions": ["regulatory_submissions", "market_approval", "documentation_review"],
-            "ai_functionality": "Regulatorische Dokumentenanalyse",
-            "typical_tasks": "FDA-Anträge, CE-Dokumentation, Marktzulassungsverfahren",
-            "is_external": false,
-            "is_active": true,
-            "created_at": "2024-01-15T10:30:00Z"
-        }
-        ```
-        
-    Raises:
-        HTTPException: 400 bei ungültigen Eingabedaten
-        HTTPException: 409 wenn Code bereits existiert
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Code muss eindeutig sein (wird für API-Zugriff verwendet)
-        - is_active wird automatisch auf true gesetzt
-        - created_at wird automatisch gesetzt
-    """
-    # Prüfen ob Code bereits existiert
-    existing_group = db.query(InterestGroupModel).filter(
-        InterestGroupModel.code == group.code
-    ).first()
-    if existing_group:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Interessensgruppe mit Code '{group.code}' existiert bereits"
-        )
-    
-    # Daten vorbereiten und group_permissions zu JSON konvertieren
-    group_data = group.dict()
-    if 'group_permissions' in group_data and isinstance(group_data['group_permissions'], list):
-        import json
-        group_data['group_permissions'] = json.dumps(group_data['group_permissions'])
-    
-    db_group = InterestGroupModel(**group_data)
-    db.add(db_group)
-    db.commit()
-    db.refresh(db_group)
-    return db_group
+# PUT-Endpoint wird durch ENV-Weiche ersetzt
 
-@app.put("/api/interest-groups/{group_id}", response_model=InterestGroup, tags=["Interest Groups"])
-async def update_interest_group(
-    group_id: int,
-    group_update: InterestGroupUpdate,
-    db: Session = Depends(get_db)
-):
-    """
-    Interessensgruppe aktualisieren.
-    
-    Aktualisiert eine bestehende Interessensgruppe. Besonders nützlich für:
-    - Anpassung von Berechtigungen
-    - Aktivierung/Deaktivierung von Gruppen
-    - Aktualisierung von KI-Funktionalitäten
-    
-    Args:
-        group_id (int): ID der zu aktualisierenden Interessensgruppe
-        group_update (InterestGroupUpdate): Zu aktualisierende Felder (partial update)
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        InterestGroup: Die aktualisierte Interessensgruppe
-        
-    Example Request (Gruppe reaktivieren):
-        ```json
-        {
-            "is_active": true,
-            "description": "Wieder aktiviert nach Umstrukturierung"
-        }
-        ```
-        
-    Example Request (Berechtigungen erweitern):
-        ```json
-        {
-            "permissions": ["existing_permission", "new_ai_feature", "advanced_analytics"],
-            "ai_functionality": "Erweitert um prädiktive Analysen"
-        }
-        ```
-        
-    Example Response:
-        ```json
-        {
-            "id": 1,
-            "name": "Einkauf",
-            "code": "procurement",
-            "description": "Wieder aktiviert nach Umstrukturierung",
-            "permissions": ["supplier_evaluation", "purchase_notifications"],
-            "ai_functionality": "Lieferantenbewertung, Benachrichtigungen",
-            "typical_tasks": "Lieferantenqualifikation, Einkaufsprozesse",
-            "is_external": false,
-            "is_active": true,
-            "created_at": "2024-01-15T10:30:00Z"
-        }
-        ```
-        
-    Raises:
-        HTTPException: 404 wenn Interessensgruppe nicht gefunden
-        HTTPException: 400 bei ungültigen Eingabedaten
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Nur übermittelte Felder werden aktualisiert (partial update)
-        - updated_at wird automatisch gesetzt
-        - Code und ID können nicht geändert werden
-    """
-    db_group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
-    if not db_group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
-        )
-    
-    # Nur übermittelte Felder aktualisieren
-    update_data = group_update.dict(exclude_unset=True)
-    
-    # Prüfen ob Code-Update zu Konflikt führen würde
-    if 'code' in update_data and update_data['code'] != db_group.code:
-        existing_code = db.query(InterestGroupModel).filter(
-            InterestGroupModel.code == update_data['code'],
-            InterestGroupModel.id != group_id
-        ).first()
-        if existing_code:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Code '{update_data['code']}' wird bereits von einer anderen Gruppe verwendet"
-            )
-    
-    # Group permissions zu JSON-String konvertieren, falls vorhanden
-    if 'group_permissions' in update_data and isinstance(update_data['group_permissions'], list):
-        import json
-        update_data['group_permissions'] = json.dumps(update_data['group_permissions'])
-    
-    for field, value in update_data.items():
-        setattr(db_group, field, value)
-    
-    db.commit()
-    db.refresh(db_group)
-    return db_group
-
-@app.delete("/api/interest-groups/{group_id}", response_model=GenericResponse, tags=["Interest Groups"])
-async def delete_interest_group(group_id: int, db: Session = Depends(get_db)):
-    """
-    Interessensgruppe löschen (Soft Delete).
-    
-    Führt einen Soft Delete durch (is_active = false). Echtes Löschen wird
-    vermieden, da Interessensgruppen in User-Memberships referenziert werden.
-    
-    Args:
-        group_id (int): ID der zu löschenden Interessensgruppe
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        GenericResponse: Bestätigung der Löschung
-        
-    Example Response:
-        ```json
-        {
-            "message": "Interessensgruppe 'Einkauf' wurde deaktiviert",
-            "success": true
-        }
-        ```
-        
-    Raises:
-        HTTPException: 404 wenn Interessensgruppe nicht gefunden
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Soft Delete: is_active wird auf false gesetzt
-        - Daten bleiben in DB erhalten (für Audit-Trail)
-        - User-Memberships bleiben bestehen
-        - Reaktivierung über PUT-Endpoint möglich
-        
-    Warning:
-        - Standard-Gruppen (ID 1-13) sollten nicht gelöscht werden
-        - Prüfe User-Memberships vor Löschung
-    """
-    db_group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
-    if not db_group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
-        )
-    
-    # Soft Delete: is_active auf false setzen
-    db_group.is_active = False
-    db.commit()
-    return GenericResponse(message=f"Interessensgruppe '{db_group.name}' wurde deaktiviert")
+# DELETE-Endpoint wird durch ENV-Weiche ersetzt
 
 # === USERS API ===
 # Benutzerverwaltung mit Rollen- und Interessensgruppen-Zuordnung
@@ -2450,84 +2544,7 @@ async def get_user_groups(user_id: int, db: Session = Depends(get_db)):
     
     return groups
 
-@app.get("/api/interest-groups/{group_id}/users", response_model=List[User], tags=["User Group Memberships"])
-async def get_group_users(group_id: int, db: Session = Depends(get_db)):
-    """
-    Alle Benutzer einer Interessensgruppe abrufen.
-    
-    Zeigt alle Benutzer an, die einer spezifischen Interessensgruppe
-    zugeordnet sind. Für Team-Übersichten und Kontaktlisten.
-    
-    Args:
-        group_id (int): Eindeutige ID der Interessensgruppe
-        db (Session): Datenbankverbindung (automatisch injiziert)
-        
-    Returns:
-        List[User]: Liste aller Benutzer in der Gruppe
-        
-    Example Response:
-        ```json
-        [
-            {
-                "id": 3,
-                "username": "anna.schmidt",
-                "email": "anna.schmidt@medtech-company.de",
-                "full_name": "Anna Schmidt",
-                "role": "DEVELOPMENT_ENGINEER",
-                "department": "Produktentwicklung",
-                "is_active": true,
-                "created_at": "2024-01-15T10:30:00Z"
-            },
-            {
-                "id": 8,
-                "username": "tom.werner",
-                "email": "tom.werner@medtech-company.de",
-                "full_name": "Tom Werner",
-                "role": "SENIOR_DEVELOPER",
-                "department": "Produktentwicklung",
-                "is_active": true,
-                "created_at": "2024-01-12T14:20:00Z"
-            }
-        ]
-        ```
-        
-    Raises:
-        HTTPException: 404 wenn Interessensgruppe nicht gefunden
-        HTTPException: 500 bei Datenbankfehlern
-        
-    Note:
-        - Nur aktive Benutzer werden angezeigt
-        - Sortierung nach Benutzernamen (alphabetisch)
-        - Passwort-Hashes werden niemals zurückgegeben
-        
-    Use Cases:
-        - Team-Kontaktlisten erstellen
-        - Zuständigkeiten identifizieren
-        - Benachrichtigungen an ganze Gruppen senden
-    """
-    group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
-        )
-    
-    # Join über UserGroupMembership um nur aktive Benutzer zu holen
-    users = db.query(UserModel).join(UserGroupMembershipModel).filter(
-        UserGroupMembershipModel.interest_group_id == group_id,
-        UserModel.is_active == True
-    ).all()
-    
-    # JSON-Strings in Listen konvertieren für Response-Validierung
-    for user in users:
-        if user.individual_permissions and isinstance(user.individual_permissions, str):
-            try:
-                import json
-                user.individual_permissions = json.loads(user.individual_permissions)
-            except (json.JSONDecodeError, TypeError):
-                user.individual_permissions = []
-    
-    return users
+# Users-Endpoint wird durch ENV-Weiche ersetzt
 
 # === DOCUMENTS API ===
 # Dokumentenmanagement mit 14 QMS-spezifischen Dokumenttypen
