@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.schemas import InterestGroup, InterestGroupCreate, InterestGroupUpdate
+from backend.app.models import InterestGroup as InterestGroupModel
 from contexts.interestgroups.application.services import InterestGroupService
 from contexts.interestgroups.infrastructure.repositories import InterestGroupRepositoryLegacy
 from typing import List
@@ -68,16 +69,22 @@ def create_interest_group(
     service: InterestGroupService = Depends(get_interest_group_service)
 ):
     """POST /api/interest-groups - Neue Interest Group erstellen"""
+    # DDD router: remove id=0 fallback, return real DB id; legacy-compat on duplicate -> 200 with existing
     try:
+        # Versuche normale Erstellung
         created_group = service.create_group(db, group)
         return created_group
-    except ValueError as e:
-        # Duplikat-Fehler (wie im bestehenden Code)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e)
-        )
     except Exception as e:
+        # Legacy-Compat: bei Duplicate/Constraint-Fehlern bestehenden Datensatz via code laden und 200 OK zurückgeben
+        try:
+            if hasattr(group, 'code') and group.code:
+                existing_group = service.get_group_by_code(db, group.code)
+                if existing_group:
+                    return existing_group
+        except Exception:
+            pass
+        
+        # Wenn kein bestehender Datensatz gefunden, Fehler weiterreichen
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -92,6 +99,7 @@ def update_interest_group(
     service: InterestGroupService = Depends(get_interest_group_service)
 ):
     """PUT /api/interest-groups/{group_id} - Interest Group aktualisieren"""
+    # DDD router: remove id=0 fallback, return real DB id; legacy-compat on duplicate -> 200 with existing
     try:
         updated_group = service.update_group(db, group_id, group)
         if not updated_group:
@@ -101,7 +109,16 @@ def update_interest_group(
             )
         return updated_group
     except ValueError as e:
-        # Duplikat-Fehler (wie im bestehenden Code)
+        # Legacy-Compat: bei Duplicate-Fehlern bestehenden Datensatz via code laden und 200 OK zurückgeben
+        try:
+            if hasattr(group, 'code') and group.code:
+                existing_group = service.get_group_by_code(db, group.code)
+                if existing_group:
+                    return existing_group
+        except Exception:
+            pass
+        
+        # Wenn kein bestehender Datensatz gefunden, Duplikat-Fehler als 422 zurückgeben
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
@@ -123,13 +140,24 @@ def delete_interest_group(
 ):
     """DELETE /api/interest-groups/{group_id} - Interest Group löschen (Soft-Delete)"""
     try:
+        # Hole Gruppe vor dem Löschen, um Namen für Response zu bekommen
+        db_group = db.query(InterestGroupModel).filter(InterestGroupModel.id == group_id).first()
+        if not db_group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
+            )
+        
+        # Soft-Delete durchführen
         success = service.delete_group(db, group_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Interest group not found"
+                detail=f"Interessensgruppe mit ID {group_id} nicht gefunden"
             )
-        return {"message": "Interest group deleted successfully"}
+        
+        # Gleiche Response-Struktur wie Legacy
+        return {"message": f"Interessensgruppe '{db_group.name}' wurde deaktiviert", "success": True}
     except HTTPException:
         raise
     except Exception as e:

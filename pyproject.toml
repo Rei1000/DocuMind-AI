@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "documind-ai"
+version = "0.1.0"
+description = "DocuMind AI - Qualitätsmanagement System"
+authors = [{name = "DocuMind Team"}]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".tmp", ".venv", "venv", "__pycache__"]

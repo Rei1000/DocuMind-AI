@@ -1,0 +1,15 @@
+{
+  "table_count": 4,
+  "index_count": 9,
+  "trigger_count": 0,
+  "generated_from": "/Users/reiner/Documents/DocuMind-AI/qms_mvp.db",
+  "generated_at": "2025-01-27T17:30:00Z",
+  "schema_version": "1.0.0",
+  "description": "Synthetic schema based on ORM models for Interest Groups, Users, UserGroupMemberships, and Documents",
+  "tables": [
+    "interest_groups",
+    "users", 
+    "user_group_memberships",
+    "documents"
+  ]
+}

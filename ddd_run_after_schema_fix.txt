@@ -1,0 +1,790 @@
+..............F.............F.....................F.....F..F............ [ 76%]
+........F........F.F..                                                   [100%]
+=================================== FAILURES ===================================
+________ TestDatabaseSchema.test_interest_group_constraints_enforcement ________
+
+self = <sqlalchemy.engine.base.Connection object at 0x15291caa0>
+dialect = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x107181b20>
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x1529052e0>
+statement = <sqlalchemy.dialects.sqlite.base.SQLiteCompiler object at 0x152907e90>
+parameters = [('unique_test_code_1756983003',)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1967: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x107181b20>
+cursor = <sqlite3.Cursor object at 0x1528f1b40>
+statement = "\n                INSERT INTO interest_groups (name, code, is_external, is_active)\n                VALUES ('First Group', ?, 0, 1)\n            "
+parameters = ('unique_test_code_1756983003',)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x1529052e0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlite3.IntegrityError: UNIQUE constraint failed: interest_groups.name
+
+venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py:941: IntegrityError
+
+The above exception was the direct cause of the following exception:
+
+self = <test_database_schema.TestDatabaseSchema object at 0x110485a60>
+
+    def test_interest_group_constraints_enforcement(self):
+        """Test: Constraints werden von der Datenbank durchgesetzt"""
+        with engine.connect() as connection:
+            # Test 1: NOT NULL Constraint für name
+            try:
+                connection.execute(text("""
+                    INSERT INTO interest_groups (code, is_external, is_active)
+                    VALUES ('test_null_name', 0, 1)
+                """))
+                connection.commit()
+                assert False, "NOT NULL Constraint für name wird nicht durchgesetzt"
+            except Exception:
+                # Erwartet: Exception wegen NOT NULL Constraint
+                connection.rollback()
+    
+            # Test 2: NOT NULL Constraint für code
+            try:
+                connection.execute(text("""
+                    INSERT INTO interest_groups (name, is_external, is_active)
+                    VALUES ('Test Name', 0, 1)
+                """))
+                connection.commit()
+                assert False, "NOT NULL Constraint für code wird nicht durchgesetzt"
+            except Exception:
+                # Erwartet: Exception wegen NOT NULL Constraint
+                connection.rollback()
+    
+            # Test 3: Unique Constraint für code (mit eindeutigem Code)
+            import time
+            unique_code = f"unique_test_code_{int(time.time())}"
+    
+            # Erst gültige Gruppe einfügen
+>           connection.execute(text("""
+                INSERT INTO interest_groups (name, code, is_external, is_active)
+                VALUES ('First Group', :code, 0, 1)
+            """), {"code": unique_code})
+
+tests/characterization/interestgroups/test_database_schema.py:219: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1418: in execute
+    return meth(
+venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py:515: in _execute_on_connection
+    return connection._execute_clauseelement(
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1640: in _execute_clauseelement
+    ret = self._execute_context(
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1846: in _execute_context
+    return self._exec_single_context(
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:2355: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x107181b20>
+cursor = <sqlite3.Cursor object at 0x1528f1b40>
+statement = "\n                INSERT INTO interest_groups (name, code, is_external, is_active)\n                VALUES ('First Group', ?, 0, 1)\n            "
+parameters = ('unique_test_code_1756983003',)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x1529052e0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: interest_groups.name
+E       [SQL: 
+E                       INSERT INTO interest_groups (name, code, is_external, is_active)
+E                       VALUES ('First Group', ?, 0, 1)
+E                   ]
+E       [parameters: ('unique_test_code_1756983003',)]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py:941: IntegrityError
+____ TestDeleteInterestGroup.test_delete_interest_group_multiple_deletions _____
+
+self = <test_delete_interest_group.TestDeleteInterestGroup object at 0x151e7b2f0>
+client = <starlette.testclient.TestClient object at 0x1529043b0>
+
+    def test_delete_interest_group_multiple_deletions(self, client):
+        """Test: Mehrfache Löschungen der gleichen Gruppe"""
+        # Erst eine Gruppe erstellen
+        create_data = {
+            "name": "Multiple Delete Test Group",
+            "code": "multiple_delete_test",
+            "description": "Test für mehrfache Löschungen"
+        }
+    
+        create_response = client.post("/api/interest-groups", json=create_data)
+        assert create_response.status_code == 200
+        created_group = create_response.json()
+        group_id = created_group["id"]
+    
+        # Gruppe zum ersten Mal löschen
+        first_delete = client.delete(f"/api/interest-groups/{group_id}")
+        assert first_delete.status_code == 200
+    
+        # Gruppe zum zweiten Mal löschen (sollte 404 zurückgeben)
+        second_delete = client.delete(f"/api/interest-groups/{group_id}")
+    
+        # Bestehendes Verhalten: 404 für bereits gelöschte Gruppen
+>       assert second_delete.status_code == 404
+E       assert 200 == 404
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/characterization/interestgroups/test_delete_interest_group.py:166: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:03,425 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:03,428 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+2025-09-04 12:50:03,431 [INFO] [httpx] HTTP Request: DELETE http://testserver/api/interest-groups/15 "HTTP/1.1 200 OK"
+2025-09-04 12:50:03,432 [INFO] [httpx] HTTP Request: DELETE http://testserver/api/interest-groups/15 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: DELETE http://testserver/api/interest-groups/15 "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: DELETE http://testserver/api/interest-groups/15 "HTTP/1.1 200 OK"
+______ TestInterestGroupBusinessRules.test_interest_group_entity_creation ______
+
+self = <test_interest_group_business_rules.TestInterestGroupBusinessRules object at 0x151eba6c0>
+
+    def test_interest_group_entity_creation(self):
+        """Test: InterestGroup Entity kann erstellt werden (Legacy vs DDD)"""
+        timestamp = int(time.time())
+    
+        # Test mit minimalen Daten
+        payload = ig_payload(
+            code=f"test_business_group_{timestamp}",
+            name="Test Business Group",
+            perms_input=None
+        )
+    
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_db_path = f".tmp/perm_legacy_{timestamp}.db"
+        make_fresh_db_at(legacy_db_path)
+        set_env_db(legacy_db_path)
+    
+        # Legacy-Create
+        legacy_status, legacy_body = run_legacy(
+            "backend.app.main:app",
+            legacy_db_path,
+            "POST",
+            "/api/interest-groups",
+            json_data=payload
+        )
+    
+        # DDD-Lauf: Frische DB erstellen
+        ddd_db_path = f".tmp/perm_ddd_{timestamp}.db"
+        make_fresh_db_at(ddd_db_path)
+        set_env_db(ddd_db_path)
+    
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_payload = ig_payload(
+            code=f"ddd_test_business_group_{timestamp}",
+            name="Test Business Group",  # Gleicher Name wie Legacy
+            perms_input=None
+        )
+    
+        ddd_status, ddd_body = run_ddd(
+            "backend.app.main:app",
+            ddd_db_path,
+            "POST",
+            "/api/interest-groups",
+            json_data=ddd_payload
+        )
+    
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+>       assert legacy_status == ddd_status, \
+            f"Entity Creation Statuscode-Parität verletzt: Legacy={legacy_status}, DDD={ddd_status}"
+E       AssertionError: Entity Creation Statuscode-Parität verletzt: Legacy=200, DDD=500
+E       assert 200 == 500
+
+tests/characterization/interestgroups/test_interest_group_business_rules.py:77: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[SCHEMA-EXTRAS] applied=true tables=
+[SCHEMA-EXTRAS] applied=true tables=
+✅ Advanced RAG Engine (Enterprise Grade) erfolgreich geladen
+🚀 Features: Hierarchical Chunking, LangChain, Enhanced Metadata
+⚠️  AI-Enhanced Features nicht verfügbar: cannot import name 'upload_document_with_ai' from 'backend.app.ai_endpoints' (/Users/reiner/Documents/DocuMind-AI/backend/app/ai_endpoints.py)
+⚠️ Enhanced AI System nicht verfügbar: No module named 'schemas_enhanced'
+✅ Advanced AI System (Enterprise Grade) geladen
+🚀 Features: Hierarchical Chunking, Multi-Layer Analysis, Query Enhancement
+[ROUTING] mode=legacy for /api/interest-groups
+[RUNTIME] mode=legacy url=sqlite:///.tmp/perm_legacy_1756983004.db
+[RUNTIME] tables=4 first=interest_groups
+[SCHEMA-EXTRAS] applied=true tables=
+[SCHEMA-EXTRAS] applied=true tables=
+✅ Advanced RAG Engine (Enterprise Grade) erfolgreich geladen
+🚀 Features: Hierarchical Chunking, LangChain, Enhanced Metadata
+⚠️  AI-Enhanced Features nicht verfügbar: cannot import name 'upload_document_with_ai' from 'backend.app.ai_endpoints' (/Users/reiner/Documents/DocuMind-AI/backend/app/ai_endpoints.py)
+⚠️ Enhanced AI System nicht verfügbar: No module named 'schemas_enhanced'
+✅ Advanced AI System (Enterprise Grade) geladen
+🚀 Features: Hierarchical Chunking, Multi-Layer Analysis, Query Enhancement
+✅ DDD+Hex Interest Groups Router aktiviert
+[ROUTING] mode=ddd for /api/interest-groups
+[RUNTIME] mode=ddd url=sqlite:///.tmp/perm_ddd_1756983004.db
+[RUNTIME] tables=4 first=interest_groups
+[EXC] type=HTTPException msg=Interest group with name 'Test Business Group' already exists status=500
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:04,121 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 200 OK"
+2025-09-04 12:50:04,290 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:04,293 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+___________ TestEndpointParity.test_get_interest_group_by_id_parity ____________
+
+self = <test_parity_endpoints.TestEndpointParity object at 0x151eb9700>
+client = <starlette.testclient.TestClient object at 0x152faa4e0>
+
+    def test_get_interest_group_by_id_parity(self, client):
+        """Test: GET /api/interest-groups/{id} - Legacy vs. DDD"""
+        # Erst eine Gruppe erstellen für den Test
+        create_data = {
+            "name": "Parity Test Group",
+            "code": "parity_test_group",
+            "description": "Test für Paritäts-Vergleich"
+        }
+    
+        create_response = run_request(
+            client, "legacy", "POST", "/api/interest-groups", json_data=create_data
+        )
+>       assert create_response[0] == 200, f"Gruppe konnte nicht erstellt werden: {create_response[0]}"
+E       AssertionError: Gruppe konnte nicht erstellt werden: 500
+E       assert 500 == 200
+
+tests/characterization/interestgroups/test_parity_endpoints.py:47: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:05,094 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:05,096 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+_____________ TestEndpointParity.test_delete_interest_group_parity _____________
+
+self = <test_parity_endpoints.TestEndpointParity object at 0x151ebb8f0>
+client = <starlette.testclient.TestClient object at 0x1539aaed0>
+
+    def test_delete_interest_group_parity(self, client):
+        """Test: DELETE /api/interest-groups/{id} - Legacy vs. DDD"""
+        # Erst eine Gruppe erstellen
+        create_data = {
+            "name": "Delete Parity Test",
+            "code": "delete_parity_test",
+            "description": "Test für Delete-Parität"
+        }
+    
+        create_response = run_request(
+            client, "legacy", "POST", "/api/interest-groups", json_data=create_data
+        )
+>       assert create_response[0] == 200, f"Gruppe konnte nicht erstellt werden: {create_response[0]}"
+E       AssertionError: Gruppe konnte nicht erstellt werden: 500
+E       assert 500 == 200
+
+tests/characterization/interestgroups/test_parity_endpoints.py:167: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:05,117 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:05,119 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+____________ TestStatuscodeParity.test_duplicate_constraints_parity ____________
+
+self = <test_statuscode_parity.TestStatuscodeParity object at 0x151ede720>
+client = <starlette.testclient.TestClient object at 0x153964350>
+
+    def test_duplicate_constraints_parity(self, client):
+        """Test: Duplicate-Constraints - Legacy vs. DDD"""
+        print("Teste Duplicate-Constraints...")
+    
+        # Erst eine Gruppe erstellen
+        create_data = {
+            "name": "Duplicate Test Group",
+            "code": "duplicate_test_code",
+            "description": "Test für Duplicate-Constraints"
+        }
+    
+        create_response = run_request(
+            client, "legacy", "POST", "/api/interest-groups", json_data=create_data
+        )
+        assert create_response[0] == 200, f"Gruppe konnte nicht erstellt werden: {create_response[0]}"
+    
+        # Versuche, eine Gruppe mit gleichem Namen zu erstellen
+        duplicate_name_data = {
+            "name": "Duplicate Test Group",  # Gleicher Name
+            "code": "different_code",
+            "description": "Andere Beschreibung"
+        }
+    
+        # Legacy-Request
+        legacy_response = run_request(
+            client, "legacy", "POST", "/api/interest-groups", json_data=duplicate_name_data
+        )
+    
+        # DDD-Request
+        ddd_response = run_request(
+            client, "ddd", "POST", "/api/interest-groups", json_data=duplicate_name_data
+        )
+    
+        # Vergleich
+        comparison = compare_responses(legacy_response, ddd_response)
+        print(f"Duplicate name: {format_comparison_result(comparison)}")
+    
+        # Statuscodes müssen identisch sein - beide sollten 200 zurückgeben (Legacy-Kompatibilität)
+        assert comparison["status_equal"], f"Status unterscheidet sich: {comparison['status_diff']}"
+>       assert legacy_response[0] == 200, f"Legacy sollte 200 zurückgeben, aber gab {legacy_response[0]} zurück"
+E       AssertionError: Legacy sollte 200 zurückgeben, aber gab 500 zurück
+E       assert 500 == 200
+
+tests/characterization/interestgroups/test_statuscode_parity.py:104: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Teste Duplicate-Constraints...
+Duplicate name: ✅ IDENTISCH
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:06,420 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,423 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+2025-09-04 12:50:06,423 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,425 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+2025-09-04 12:50:06,426 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,427 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 500 Internal Server Error"
+_____ TestUpdateInterestGroup.test_update_interest_group_validation_rules ______
+
+self = <test_update_interest_group.TestUpdateInterestGroup object at 0x151edcaa0>
+client = <starlette.testclient.TestClient object at 0x1557c34d0>
+
+    def test_update_interest_group_validation_rules(self, client):
+        """Test: Validierungsregeln gelten auch bei Updates"""
+        # Erst eine Gruppe erstellen
+        create_data = {
+            "name": "Validation Test Group",
+            "code": "validation_test_group",
+            "description": "Test"
+        }
+    
+        create_response = client.post("/api/interest-groups", json=create_data)
+        assert create_response.status_code == 200
+        created_group = create_response.json()
+        group_id = created_group["id"]
+    
+        # Test mit zu kurzem Namen
+        short_name_update = {
+            "name": "A"  # Zu kurz (min 2 Zeichen)
+        }
+    
+        response = client.put(f"/api/interest-groups/{group_id}", json=short_name_update)
+    
+        # Bestehendes Verhalten: 422 für ungültige Namen
+        assert response.status_code == 422
+    
+        # Test mit zu langem Namen
+        long_name_update = {
+            "name": "A" * 101  # Zu lang (max 100 Zeichen)
+        }
+    
+        response = client.put(f"/api/interest-groups/{group_id}", json=long_name_update)
+    
+        # Bestehendes Verhalten: 422 für zu lange Namen
+        assert response.status_code == 422
+    
+        # Test mit ungültigem Code-Format
+        invalid_code_update = {
+            "code": "InvalidCode"  # Sollte snake_case sein
+        }
+    
+>       response = client.put(f"/api/interest-groups/{group_id}", json=invalid_code_update)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/characterization/interestgroups/test_update_interest_group.py:147: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+venv/lib/python3.12/site-packages/starlette/testclient.py:626: in put
+    return super().put(
+venv/lib/python3.12/site-packages/httpx/_client.py:1181: in put
+    return self.request(
+venv/lib/python3.12/site-packages/starlette/testclient.py:484: in request
+    return super().request(
+venv/lib/python3.12/site-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv/lib/python3.12/site-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+venv/lib/python3.12/site-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+venv/lib/python3.12/site-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv/lib/python3.12/site-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv/lib/python3.12/site-packages/starlette/testclient.py:377: in handle_request
+    raise exc
+venv/lib/python3.12/site-packages/starlette/testclient.py:374: in handle_request
+    portal.call(self.app, scope, receive, send)
+venv/lib/python3.12/site-packages/anyio/from_thread.py:290: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+venv/lib/python3.12/site-packages/anyio/from_thread.py:221: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv/lib/python3.12/site-packages/fastapi/applications.py:1054: in __call__
+    await super().__call__(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/applications.py:113: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/middleware/errors.py:187: in __call__
+    raise exc
+venv/lib/python3.12/site-packages/starlette/middleware/errors.py:165: in __call__
+    await self.app(scope, receive, _send)
+venv/lib/python3.12/site-packages/starlette/middleware/cors.py:85: in __call__
+    await self.app(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py:62: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv/lib/python3.12/site-packages/starlette/routing.py:715: in __call__
+    await self.middleware_stack(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/routing.py:735: in app
+    await route.handle(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/routing.py:288: in handle
+    await self.app(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/routing.py:76: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+venv/lib/python3.12/site-packages/starlette/routing.py:73: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+venv/lib/python3.12/site-packages/fastapi/routing.py:327: in app
+    content = await serialize_response(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    async def serialize_response(
+        *,
+        field: Optional[ModelField] = None,
+        response_content: Any,
+        include: Optional[IncEx] = None,
+        exclude: Optional[IncEx] = None,
+        by_alias: bool = True,
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+        is_coroutine: bool = True,
+    ) -> Any:
+        if field:
+            errors = []
+            if not hasattr(field, "serialize"):
+                # pydantic v1
+                response_content = _prepare_response_content(
+                    response_content,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                )
+            if is_coroutine:
+                value, errors_ = field.validate(response_content, {}, loc=("response",))
+            else:
+                value, errors_ = await run_in_threadpool(
+                    field.validate, response_content, {}, loc=("response",)
+                )
+            if isinstance(errors_, list):
+                errors.extend(errors_)
+            elif errors_:
+                errors.append(errors_)
+            if errors:
+>               raise ResponseValidationError(
+                    errors=_normalize_errors(errors), body=response_content
+                )
+E               fastapi.exceptions.ResponseValidationError: 1 validation errors:
+E                 {'type': 'value_error', 'loc': ('response', 'code'), 'msg': 'Value error, Code muss snake_case Format haben', 'input': 'InvalidCode', 'ctx': {'error': ValueError('Code muss snake_case Format haben')}}
+
+venv/lib/python3.12/site-packages/fastapi/routing.py:176: ResponseValidationError
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:06,485 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,487 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+2025-09-04 12:50:06,488 [INFO] [httpx] HTTP Request: PUT http://testserver/api/interest-groups/63 "HTTP/1.1 422 Unprocessable Entity"
+2025-09-04 12:50:06,489 [INFO] [httpx] HTTP Request: PUT http://testserver/api/interest-groups/63 "HTTP/1.1 422 Unprocessable Entity"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: PUT http://testserver/api/interest-groups/63 "HTTP/1.1 422 Unprocessable Entity"
+INFO     httpx:_client.py:1025 HTTP Request: PUT http://testserver/api/interest-groups/63 "HTTP/1.1 422 Unprocessable Entity"
+___ TestUpdateInterestGroup.test_update_interest_group_duplicate_constraints ___
+
+self = <test_update_interest_group.TestUpdateInterestGroup object at 0x151edf8c0>
+client = <starlette.testclient.TestClient object at 0x152ea92b0>
+
+    def test_update_interest_group_duplicate_constraints(self, client):
+        """Test: Duplikat-Constraints gelten auch bei Updates"""
+        # Zwei Gruppen erstellen
+        first_group_data = {
+            "name": "First Group for Duplicate Test",
+            "code": "first_duplicate_test"
+        }
+    
+        second_group_data = {
+            "name": "Second Group for Duplicate Test",
+            "code": "second_duplicate_test"
+        }
+    
+        first_response = client.post("/api/interest-groups", json=first_group_data)
+        second_response = client.post("/api/interest-groups", json=second_group_data)
+    
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+    
+        first_group = first_response.json()
+        second_group = second_response.json()
+    
+        # Versuch, den Code der ersten Gruppe auf den der zweiten zu setzen
+        duplicate_code_update = {
+            "code": "second_duplicate_test"
+        }
+    
+        response = client.put(f"/api/interest-groups/{first_group['id']}", json=duplicate_code_update)
+    
+        # Bestehendes Verhalten: 422 für doppelte Codes
+>       assert response.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/characterization/interestgroups/test_update_interest_group.py:226: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2025-09-04 12:50:06,613 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,616 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+2025-09-04 12:50:06,616 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+2025-09-04 12:50:06,618 [INFO] [httpx] HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+2025-09-04 12:50:06,620 [INFO] [httpx] HTTP Request: PUT http://testserver/api/interest-groups/65 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups "HTTP/1.1 307 Temporary Redirect"
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/interest-groups/ "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1025 HTTP Request: PUT http://testserver/api/interest-groups/65 "HTTP/1.1 200 OK"
+=============================== warnings summary ===============================
+backend/app/database.py:63
+  /Users/reiner/Documents/DocuMind-AI/backend/app/database.py:63: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/reiner/Documents/DocuMind-AI/venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+venv/lib/python3.12/site-packages/pydantic/_internal/_config.py:291
+  /Users/reiner/Documents/DocuMind-AI/venv/lib/python3.12/site-packages/pydantic/_internal/_config.py:291: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+backend/app/schemas_enhanced.py:130
+  /Users/reiner/Documents/DocuMind-AI/backend/app/schemas_enhanced.py:130: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    @validator('chunk_id', always=True)
+
+backend/app/main.py:1185: 1 warning
+tests/characterization/interestgroups/test_delete_interest_group.py: 4 warnings
+tests/characterization/interestgroups/test_first_post_diagnostics.py: 2 warnings
+tests/characterization/interestgroups/test_interest_group_business_rules.py: 12 warnings
+tests/characterization/interestgroups/test_parity_endpoints.py: 4 warnings
+tests/characterization/interestgroups/test_permission_handling.py: 10 warnings
+tests/characterization/interestgroups/test_update_interest_group.py: 4 warnings
+  /Users/reiner/Documents/DocuMind-AI/backend/app/main.py:1185: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+venv/lib/python3.12/site-packages/fastapi/applications.py:4495: 1 warning
+tests/characterization/interestgroups/test_delete_interest_group.py: 4 warnings
+tests/characterization/interestgroups/test_first_post_diagnostics.py: 2 warnings
+tests/characterization/interestgroups/test_interest_group_business_rules.py: 12 warnings
+tests/characterization/interestgroups/test_parity_endpoints.py: 4 warnings
+tests/characterization/interestgroups/test_permission_handling.py: 10 warnings
+tests/characterization/interestgroups/test_update_interest_group.py: 4 warnings
+  /Users/reiner/Documents/DocuMind-AI/venv/lib/python3.12/site-packages/fastapi/applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/characterization/interestgroups/test_create_interest_group.py: 9 warnings
+tests/characterization/interestgroups/test_delete_interest_group.py: 12 warnings
+tests/characterization/interestgroups/test_delete_parity.py: 2 warnings
+tests/characterization/interestgroups/test_first_post_diagnostics.py: 1 warning
+tests/characterization/interestgroups/test_interest_group_business_rules.py: 11 warnings
+tests/characterization/interestgroups/test_parity_endpoints.py: 5 warnings
+tests/characterization/interestgroups/test_permission_handling.py: 10 warnings
+tests/characterization/interestgroups/test_permission_parity.py: 5 warnings
+tests/characterization/interestgroups/test_soft_delete_parity.py: 4 warnings
+tests/characterization/interestgroups/test_statuscode_parity.py: 3 warnings
+tests/characterization/interestgroups/test_update_interest_group.py: 8 warnings
+  /Users/reiner/Documents/DocuMind-AI/venv/lib/python3.12/site-packages/sqlalchemy/sql/schema.py:3596: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+tests/characterization/interestgroups/test_delete_interest_group.py: 1 warning
+tests/characterization/interestgroups/test_first_post_diagnostics.py: 1 warning
+tests/characterization/interestgroups/test_interest_group_business_rules.py: 6 warnings
+tests/characterization/interestgroups/test_parity_endpoints.py: 3 warnings
+tests/characterization/interestgroups/test_permission_handling.py: 5 warnings
+tests/characterization/interestgroups/test_permission_parity.py: 2 warnings
+tests/characterization/interestgroups/test_update_interest_group.py: 10 warnings
+  /Users/reiner/Documents/DocuMind-AI/venv/lib/python3.12/site-packages/pydantic/main.py:1114: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.9/migration/
+    warnings.warn('The `dict` method is deprecated; use `model_dump` instead.', category=PydanticDeprecatedSince20)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/characterization/interestgroups/test_database_schema.py::TestDatabaseSchema::test_interest_group_constraints_enforcement
+FAILED tests/characterization/interestgroups/test_delete_interest_group.py::TestDeleteInterestGroup::test_delete_interest_group_multiple_deletions
+FAILED tests/characterization/interestgroups/test_interest_group_business_rules.py::TestInterestGroupBusinessRules::test_interest_group_entity_creation
+FAILED tests/characterization/interestgroups/test_parity_endpoints.py::TestEndpointParity::test_get_interest_group_by_id_parity
+FAILED tests/characterization/interestgroups/test_parity_endpoints.py::TestEndpointParity::test_delete_interest_group_parity
+FAILED tests/characterization/interestgroups/test_statuscode_parity.py::TestStatuscodeParity::test_duplicate_constraints_parity
+FAILED tests/characterization/interestgroups/test_update_interest_group.py::TestUpdateInterestGroup::test_update_interest_group_validation_rules
+FAILED tests/characterization/interestgroups/test_update_interest_group.py::TestUpdateInterestGroup::test_update_interest_group_duplicate_constraints
+8 failed, 86 passed, 181 warnings in 4.52s
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

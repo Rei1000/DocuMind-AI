@@ -222,7 +222,7 @@ test_upload_dokument.txt
 # =============================================================================
 # ARCHIVIERTE/VERALTETE ORDNER
 # =============================================================================
-wird_nicht_mehr_benoetigt/
 
 *.md
 !README.md
+.tmp/
