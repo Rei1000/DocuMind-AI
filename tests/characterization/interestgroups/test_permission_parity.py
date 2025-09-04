@@ -5,6 +5,7 @@ Vergleicht Permission-Parsing zwischen beiden Modi
 
 import pytest
 from tests.helpers.ab_runner import run_request, compare_responses, format_comparison_result
+from tests.helpers.payloads import unique_ig_payload
 
 
 class TestPermissionParity:
@@ -12,12 +13,8 @@ class TestPermissionParity:
     
     def test_empty_permissions_parity(self, client):
         """Test: Leere Permissions werden identisch behandelt"""
-        create_data = {
-            "name": "Empty Permissions Test",
-            "code": "empty_permissions_test",
-            "description": "Test für leere Permissions",
-            "group_permissions": []  # Leere Liste
-        }
+        create_data = unique_ig_payload("empty_permissions_test", "Empty Permissions Test", [])
+        create_data["description"] = "Test für leere Permissions"
         
         print("Teste leere Permissions...")
         
@@ -80,12 +77,8 @@ class TestPermissionParity:
     
     def test_simple_permissions_parity(self, client):
         """Test: Einfache Permissions werden identisch behandelt"""
-        create_data = {
-            "name": "Simple Permissions Test",
-            "code": "simple_permissions_test",
-            "description": "Test für einfache Permissions",
-            "group_permissions": ["VIEW", "EDIT"]  # Einfache Liste
-        }
+        create_data = unique_ig_payload("simple_permissions_test", "Simple Permissions Test", ["VIEW", "EDIT"])
+        create_data["description"] = "Test für einfache Permissions"
         
         print("Teste einfache Permissions...")
         
@@ -148,12 +141,8 @@ class TestPermissionParity:
     
     def test_complex_permissions_parity(self, client):
         """Test: Komplexe Permissions werden identisch behandelt"""
-        create_data = {
-            "name": "Complex Permissions Test",
-            "code": "complex_permissions_test",
-            "description": "Test für komplexe Permissions",
-            "group_permissions": ["VIEW", "EDIT", "DELETE", "APPROVE", "ADMIN"]  # Komplexe Liste
-        }
+        create_data = unique_ig_payload("complex_permissions_test", "Complex Permissions Test", ["VIEW", "EDIT", "DELETE", "APPROVE", "ADMIN"])
+        create_data["description"] = "Test für komplexe Permissions"
         
         print("Teste komplexe Permissions...")
         
@@ -219,12 +208,8 @@ class TestPermissionParity:
         # JSON-String als group_permissions
         json_permissions = '["VIEW", "EDIT", "DELETE"]'
         
-        create_data = {
-            "name": "JSON String Permissions Test",
-            "code": "json_string_permissions_test",
-            "description": "Test für JSON-String Permissions",
-            "group_permissions": json_permissions
-        }
+        create_data = unique_ig_payload("json_string_permissions_test", "JSON String Permissions Test", json_permissions)
+        create_data["description"] = "Test für JSON-String Permissions"
         
         print(f"Teste JSON-String Permissions: {json_permissions}")
         

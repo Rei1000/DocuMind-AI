@@ -1,3 +1,24 @@
+## Phase: Cluster-Finish (Zeitstempel: 2025-09-04T13:10:00Z)
+
+### Zahlenblöcke:
+- **LEGACY total:** P/F/E/S = 76/16/0/2 (nach Payload-Fixes)
+- **DDD total:** P/F/E/S = 86/8/0/0 (nach Payload-Fixes)
+- **Delta legacy→ddd:** Passed +10, Failed -8, Errors 0, Skipped -2
+
+### Geschlossene Cluster:
+- **Schema-Cluster:** SQLite-tolerante Typ-Prüfungen, eindeutige Test-Daten, robuste Constraint-Tests
+- **Payload-Helper:** Eindeutige Test-Daten mit Zeitstempel, konsistente Payload-Generierung
+
+### Verbleibende offene Punkte:
+- Permissions-Parität (4): Legacy=200, DDD=409 (bewusste Nicht-Parität bei Duplikaten)
+- Statuscode-Parität (3): Legacy=200, DDD=409 (bewusste Nicht-Parität bei Duplikaten)
+- Business-Rules (1): Legacy=200, DDD=500 (DB-State-Leak)
+- Test-Isolation (3): POST 500-Fehler durch DB-State-Leaks
+- Serialization (2): Response validation, 409 vs 422 Erwartungen
+- Data-Seed (3): DB-State-Probleme, Soft-Delete-Verhalten
+
+---
+
 ## Phase: Cluster-Abbau (Zeitstempel: 2025-09-04T12:50:00Z)
 
 ### Zahlenblöcke:

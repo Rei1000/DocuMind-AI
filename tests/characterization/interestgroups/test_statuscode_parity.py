@@ -4,7 +4,9 @@ Vergleicht Statuscodes zwischen beiden Modi für Edge-Cases
 """
 
 import pytest
+import time
 from tests.helpers.ab_runner import run_request, compare_responses, format_comparison_result
+from tests.helpers.payloads import unique_ig_payload
 
 
 class TestStatuscodeParity:
@@ -66,22 +68,19 @@ class TestStatuscodeParity:
         """Test: Duplicate-Constraints - Legacy vs. DDD"""
         print("Teste Duplicate-Constraints...")
         
-        # Erst eine Gruppe erstellen
-        create_data = {
-            "name": "Duplicate Test Group",
-            "code": "duplicate_test_code",
-            "description": "Test für Duplicate-Constraints"
-        }
+        # Erst eine Gruppe erstellen (mit eindeutigen Daten)
+        create_data = unique_ig_payload("duplicate_test", "Duplicate Test Group", None)
+        create_data["description"] = "Test für Duplicate-Constraints"
         
         create_response = run_request(
             client, "legacy", "POST", "/api/interest-groups", json_data=create_data
         )
         assert create_response[0] == 200, f"Gruppe konnte nicht erstellt werden: {create_response[0]}"
         
-        # Versuche, eine Gruppe mit gleichem Namen zu erstellen
+        # Versuche, eine Gruppe mit gleichem Namen zu erstellen (aber anderem Code)
         duplicate_name_data = {
-            "name": "Duplicate Test Group",  # Gleicher Name
-            "code": "different_code",
+            "name": create_data["name"],  # Gleicher Name wie erstellt
+            "code": f"different_code_{int(time.time() * 1000)}",  # Anderer Code
             "description": "Andere Beschreibung"
         }
         
@@ -226,15 +225,16 @@ class TestStatuscodeParity:
         # Statuscodes müssen identisch sein
         assert comparison["status_equal"], f"Status unterscheidet sich: {comparison['status_diff']}"
         
-        # Test ohne Content-Type Header
+        # Test ohne Content-Type Header (mit eindeutigen Daten)
+        no_content_type_data = unique_ig_payload("no_content_type", "No Content Type", None)
         legacy_response = run_request(
             client, "legacy", "POST", "/api/interest-groups", 
-            json_data={"name": "No Content Type", "code": "no_content_type"}
+            json_data=no_content_type_data
         )
         
         ddd_response = run_request(
             client, "ddd", "POST", "/api/interest-groups", 
-            json_data={"name": "No Content Type", "code": "no_content_type"}
+            json_data=no_content_type_data
         )
         
         # Vergleich
@@ -349,15 +349,14 @@ class TestStatuscodeParity:
         # Statuscodes müssen identisch sein
         assert comparison["status_equal"], f"Status unterscheidet sich: {comparison['status_diff']}"
         
-        # Test mit None-Werten
-        none_values_data = {
-            "name": "None Values Test",
-            "code": "none_values_test",
+        # Test mit None-Werten (mit eindeutigen Daten)
+        none_values_data = unique_ig_payload("none_values_test", "None Values Test", None)
+        none_values_data.update({
             "description": None,  # None-Wert
             "group_permissions": None,  # None-Wert
             "ai_functionality": None,  # None-Wert
             "typical_tasks": None  # None-Wert
-        }
+        })
         
         # Legacy-Request
         legacy_response = run_request(
