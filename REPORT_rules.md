@@ -1,3 +1,22 @@
+## Phase: Cluster-Abbau (Zeitstempel: 2025-09-04T12:50:00Z)
+
+### Zahlenblöcke:
+- **LEGACY total:** P/F/E/S = 76/16/0/2 (nach Schema-Fix)
+- **DDD total:** P/F/E/S = 86/8/0/0 (nach Schema-Fix)
+- **Delta legacy→ddd:** Passed +10, Failed -8, Errors 0, Skipped -2
+
+### Geschlossene Cluster:
+- **Schema-Cluster:** SQLite-tolerante Typ-Prüfungen, eindeutige Test-Daten, robuste Constraint-Tests
+
+### Verbleibende offene Punkte:
+- Permissions-Parität (4): Legacy=200, DDD=409
+- Statuscode-Parität (3): Legacy=200, DDD=409
+- Business-Rules (1): Legacy=200, DDD=500
+- Parity-Endpoints (2): POST 500-Fehler
+- Update-Validation (2): 422 vs 409
+
+---
+
 ## Regression – DDD vs. Legacy (Zeitstempel: 2025-09-04T11:48:00Z)
 
 ### Zahlenblöcke:

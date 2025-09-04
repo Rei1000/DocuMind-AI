@@ -20,10 +20,12 @@ class TestInterestGroupDataTypes:
     def test_interest_group_data_types(self):
         """Test: Datentypen sind korrekt implementiert"""
         with engine.connect() as connection:
-            # Erstelle eine Test-Gruppe
+            # Erstelle eine Test-Gruppe (mit eindeutigem Code)
+            import time
+            unique_code = f"test_schema_group_{int(time.time())}"
             test_data = {
-                'name': 'Test Group for Schema',
-                'code': 'test_schema_group',
+                'name': f'Test Group for Schema {int(time.time())}',  # Eindeutiger Name
+                'code': unique_code,
                 'description': 'Test-Beschreibung',
                 'group_permissions': '["test_perm1", "test_perm2"]',
                 'ai_functionality': 'Test AI Funktionen',
@@ -44,8 +46,8 @@ class TestInterestGroupDataTypes:
             
             # Hole die eingefügten Daten zurück
             result = connection.execute(text("""
-                SELECT * FROM interest_groups WHERE code = 'test_schema_group'
-            """))
+                SELECT * FROM interest_groups WHERE code = :code
+            """), {"code": unique_code})
             row = result.fetchone()
             
             assert row is not None, "Test-Daten wurden nicht eingefügt"
@@ -68,5 +70,5 @@ class TestInterestGroupDataTypes:
             assert row[8] in [0, 1], f"is_active sollte 0 oder 1 sein, ist {row[8]}"
             
             # Cleanup
-            connection.execute(text("DELETE FROM interest_groups WHERE code = 'test_schema_group'"))
+            connection.execute(text("DELETE FROM interest_groups WHERE code = :code"), {"code": unique_code})
             connection.commit()
