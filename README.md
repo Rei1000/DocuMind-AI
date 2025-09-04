@@ -118,6 +118,9 @@ pytest -q tests/characterization/interestgroups/
 - **Robustheit:** Unterstützt Dict- und List-Responses
 - **Datenbank:** Separate DB-Instanzen für jeden Modus
 
+### 📊 **Aktueller Stand DDD vs. Legacy**
+DDD hat im aktuellen Regression-Lauf mehr grüne Tests als Legacy (83/13 vs. 73/21). Die ENV-Weiche ermöglicht nahtlosen Wechsel zwischen den Modi: Legacy als Standard, `IG_IMPL=ddd` für DDD-Modus. Details siehe [ADR-008](docs/ADR/ADR-008-regression-ddd-vs-legacy.md) und [REPORT_rules.md](REPORT_rules.md).
+
 ---
 
 ## 📋 Features

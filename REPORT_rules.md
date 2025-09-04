@@ -1,3 +1,21 @@
+## Regression – DDD vs. Legacy (Zeitstempel: 2025-09-04T11:48:00Z)
+
+### Zahlenblöcke:
+- **LEGACY total:** P/F/E/S = 73/21/0/2
+- **DDD total:** P/F/E/S = 83/13/0/0
+- **Delta legacy→ddd:** Passed +10, Failed −8, Errors 0, Skipped −2
+
+### Top-3 Cluster je Modus:
+- **Legacy:** Permission-Parität (200 vs 409), Statuscode-Parität (200 vs 409), Database-Schema
+- **DDD:** Database-Schema (5 Fails), Parity-Endpoints (2× POST 500 – vor Fix checken), Business-Rules (1× 500)
+
+### Bewertung:
+- DDD nach JSON-Serialisierung robuster als Legacy.
+- Offene Punkte gezielt: Schema-Extras abrunden, einzelne POST/Business-Rules isolieren.
+- ENV-Weiche und Schema-Extras aktiv (Logs ggf. nicht in pytest-Output sichtbar).
+
+---
+
 ## 🔍 IG Paritäts-Audit – 2025-01-27 18:30
 
 ## 🔄 Zwischenstand Parität & Routing – 2025-09-03 16:58

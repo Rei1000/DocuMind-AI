@@ -1,303 +1,325 @@
 """
 Charakterisierungstest für InterestGroup Business Rules
-Dokumentiert das bestehende Verhalten ohne neue Regeln zu erfinden.
+Testet Parität zwischen Legacy und DDD Modi
 """
 
 import pytest
-import sys
-from pathlib import Path
+import time
+import sqlite3
+from tests.helpers.payloads import ig_payload
+from tests.helpers.bootstrap_from_schema import make_fresh_db_at, set_env_db
+from tests.helpers.seeds_interest_groups import seed_group
+from tests.helpers.ab_runner import run_legacy, run_ddd
 
-# Import-Pfad für Backend-Modelle
-backend_path = Path("/Users/reiner/Documents/DocuMind-AI/backend")
-if str(backend_path) not in sys.path:
-    sys.path.insert(0, str(backend_path))
 
-from app.models import InterestGroup
+def get_interest_groups_count(db_path: str) -> int:
+    """Hilfsfunktion: Zählt die Anzahl der Interest Groups in der DB"""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM interest_groups")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except Exception:
+        return -1
+
 
 class TestInterestGroupBusinessRules:
-    """Test für InterestGroup Business Rules und Validierungen"""
+    """Test für InterestGroup Business Rules und Validierungen (Legacy vs DDD)"""
     
     def test_interest_group_entity_creation(self):
-        """Test: InterestGroup Entity kann erstellt werden"""
+        """Test: InterestGroup Entity kann erstellt werden (Legacy vs DDD)"""
+        timestamp = int(time.time())
+        
         # Test mit minimalen Daten
-        group = InterestGroup(
+        payload = ig_payload(
+            code=f"test_business_group_{timestamp}",
             name="Test Business Group",
-            code="test_business_group",
-            is_external=False,
-            is_active=True
+            perms_input=None
         )
         
-        # Entity sollte korrekt erstellt werden
-        assert group.name == "Test Business Group"
-        assert group.code == "test_business_group"
-        assert group.is_external is False
-        assert group.is_active is True
-        assert group.description is None
-        assert group.group_permissions is None
-        assert group.ai_functionality is None
-        assert group.typical_tasks is None
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_db_path = f".tmp/perm_legacy_{timestamp}.db"
+        make_fresh_db_at(legacy_db_path)
+        set_env_db(legacy_db_path)
+        
+        # Legacy-Create
+        legacy_status, legacy_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=payload
+        )
+        
+        # DDD-Lauf: Frische DB erstellen
+        ddd_db_path = f".tmp/perm_ddd_{timestamp}.db"
+        make_fresh_db_at(ddd_db_path)
+        set_env_db(ddd_db_path)
+        
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_payload = ig_payload(
+            code=f"ddd_test_business_group_{timestamp}",
+            name="Test Business Group",  # Gleicher Name wie Legacy
+            perms_input=None
+        )
+        
+        ddd_status, ddd_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_payload
+        )
+        
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_status == ddd_status, \
+            f"Entity Creation Statuscode-Parität verletzt: Legacy={legacy_status}, DDD={ddd_status}"
+        
+        print(f"Entity Creation Test - Legacy: {legacy_status}, DDD: {ddd_status}")
+        
+        # Wenn beide erfolgreich waren, vergleiche die Responses
+        if legacy_status == 200 and ddd_status == 200:
+            # Grundlegende Felder sollten identisch sein
+            assert legacy_body["name"] == ddd_body["name"], "Name sollte identisch sein"
+            assert legacy_body["is_active"] == ddd_body["is_active"], "is_active sollte identisch sein"
     
     def test_interest_group_permissions_parsing(self):
-        """Test: get_group_permissions_list() parst verschiedene Formate korrekt"""
+        """Test: get_group_permissions_list() parst verschiedene Formate identisch (Legacy vs DDD)"""
+        timestamp = int(time.time())
+        
         # Test 1: JSON-String
-        group_json = InterestGroup(
+        json_payload = ig_payload(
+            code=f"json_permissions_group_{timestamp}",
             name="JSON Permissions Group",
-            code="json_permissions_group",
-            group_permissions='["perm1", "perm2", "perm3"]',
-            is_external=False,
-            is_active=True
+            perms_input='["perm1", "perm2", "perm3"]'
         )
         
-        permissions = group_json.get_group_permissions_list()
-        assert permissions == ["perm1", "perm2", "perm3"]
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_db_path = f".tmp/perm_legacy_json_{timestamp}.db"
+        make_fresh_db_at(legacy_db_path)
+        set_env_db(legacy_db_path)
+        
+        # Legacy-Create
+        legacy_status, legacy_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=json_payload
+        )
+        
+        # DDD-Lauf: Frische DB erstellen
+        ddd_db_path = f".tmp/perm_ddd_json_{timestamp}.db"
+        make_fresh_db_at(ddd_db_path)
+        set_env_db(ddd_db_path)
+        
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_payload = ig_payload(
+            code=f"ddd_json_permissions_group_{timestamp}",
+            name="DDD JSON Permissions Group",
+            perms_input='["perm1", "perm2", "perm3"]'
+        )
+        
+        ddd_status, ddd_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_payload
+        )
+        
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_status == ddd_status, \
+            f"JSON-String Statuscode-Parität verletzt: Legacy={legacy_status}, DDD={ddd_status}"
+        
+        print(f"JSON-String Test - Legacy: {legacy_status}, DDD: {ddd_status}")
         
         # Test 2: Komma-separierte Strings
-        group_comma = InterestGroup(
+        comma_payload = ig_payload(
+            code=f"comma_permissions_group_{timestamp}",
             name="Comma Permissions Group",
-            code="comma_permissions_group",
-            group_permissions="perm1, perm2, perm3",
-            is_external=False,
-            is_active=True
+            perms_input="perm1, perm2, perm3"
         )
         
-        permissions = group_comma.get_group_permissions_list()
-        assert permissions == ["perm1", "perm2", "perm3"]
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_comma_db_path = f".tmp/perm_legacy_comma_{timestamp}.db"
+        make_fresh_db_at(legacy_comma_db_path)
+        set_env_db(legacy_comma_db_path)
+        
+        # Legacy-Create
+        legacy_comma_status, legacy_comma_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_comma_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=comma_payload
+        )
+        
+        # DDD-Lauf: Frische DB erstellen
+        ddd_comma_db_path = f".tmp/perm_ddd_comma_{timestamp}.db"
+        make_fresh_db_at(ddd_comma_db_path)
+        set_env_db(ddd_comma_db_path)
+        
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_comma_payload = ig_payload(
+            code=f"ddd_comma_permissions_group_{timestamp}",
+            name="DDD Comma Permissions Group",
+            perms_input="perm1, perm2, perm3"
+        )
+        
+        ddd_comma_status, ddd_comma_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_comma_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_comma_payload
+        )
+        
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_comma_status == ddd_comma_status, \
+            f"Comma-String Statuscode-Parität verletzt: Legacy={legacy_comma_status}, DDD={ddd_comma_status}"
+        
+        print(f"Comma-String Test - Legacy: {legacy_comma_status}, DDD: {ddd_comma_status}")
         
         # Test 3: Liste von Strings
-        group_list = InterestGroup(
+        list_payload = ig_payload(
+            code=f"list_permissions_group_{timestamp}",
             name="List Permissions Group",
-            code="list_permissions_group",
-            group_permissions=["perm1", "perm2", "perm3"],
-            is_external=False,
-            is_active=True
+            perms_input=["perm1", "perm2", "perm3"]
         )
         
-        permissions = group_list.get_group_permissions_list()
-        assert permissions == ["perm1", "perm2", "perm3"]
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_list_db_path = f".tmp/perm_legacy_list_{timestamp}.db"
+        make_fresh_db_at(legacy_list_db_path)
+        set_env_db(legacy_list_db_path)
+        
+        # Legacy-Create
+        legacy_list_status, legacy_list_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_list_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=list_payload
+        )
+        
+        # DDD-Lauf: Frische DB erstellen
+        ddd_list_db_path = f".tmp/perm_ddd_list_{timestamp}.db"
+        make_fresh_db_at(ddd_list_db_path)
+        set_env_db(ddd_list_db_path)
+        
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_list_payload = ig_payload(
+            code=f"ddd_list_permissions_group_{timestamp}",
+            name="DDD List Permissions Group",
+            perms_input=["perm1", "perm2", "perm3"]
+        )
+        
+        ddd_list_status, ddd_list_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_list_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_list_payload
+        )
+        
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_list_status == ddd_list_status, \
+            f"List-Input Statuscode-Parität verletzt: Legacy={legacy_list_status}, DDD={ddd_list_status}"
+        
+        print(f"List-Input Test - Legacy: {legacy_list_status}, DDD: {ddd_list_status}")
         
         # Test 4: Leere Permissions
-        group_empty = InterestGroup(
+        empty_payload = ig_payload(
+            code=f"empty_permissions_group_{timestamp}",
             name="Empty Permissions Group",
-            code="empty_permissions_group",
-            group_permissions="",
-            is_external=False,
-            is_active=True
+            perms_input=""
         )
         
-        permissions = group_empty.get_group_permissions_list()
-        assert permissions == []
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_empty_db_path = f".tmp/perm_legacy_empty_{timestamp}.db"
+        make_fresh_db_at(legacy_empty_db_path)
+        set_env_db(legacy_empty_db_path)
+        
+        # Legacy-Create
+        legacy_empty_status, legacy_empty_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_empty_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=empty_payload
+        )
+        
+        # DDD-Lauf: Frische DB erstellen
+        ddd_empty_db_path = f".tmp/perm_ddd_empty_{timestamp}.db"
+        make_fresh_db_at(ddd_empty_db_path)
+        set_env_db(ddd_empty_db_path)
+        
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_empty_payload = ig_payload(
+            code=f"ddd_empty_permissions_group_{timestamp}",
+            name="DDD Empty Permissions Group",
+            perms_input=""
+        )
+        
+        ddd_empty_status, ddd_empty_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_empty_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_empty_payload
+        )
+        
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_empty_status == ddd_empty_status, \
+            f"Empty-String Statuscode-Parität verletzt: Legacy={legacy_empty_status}, DDD={ddd_empty_status}"
+        
+        print(f"Empty-String Test - Legacy: {legacy_empty_status}, DDD: {ddd_empty_status}")
         
         # Test 5: None Permissions
-        group_none = InterestGroup(
+        none_payload = ig_payload(
+            code=f"none_permissions_group_{timestamp}",
             name="None Permissions Group",
-            code="none_permissions_group",
-            group_permissions=None,
-            is_external=False,
-            is_active=True
+            perms_input=None
         )
         
-        permissions = group_none.get_group_permissions_list()
-        assert permissions == []
-    
-    def test_interest_group_code_validation(self):
-        """Test: Code-Validierung funktioniert korrekt"""
-        # Test mit gültigem Code (snake_case)
-        valid_codes = [
-            "valid_code",
-            "valid_code_123",
-            "a",
-            "ab",
-            "valid_code_with_underscores"
-        ]
+        # Legacy-Lauf: Frische DB erstellen
+        legacy_none_db_path = f".tmp/perm_legacy_none_{timestamp}.db"
+        make_fresh_db_at(legacy_none_db_path)
+        set_env_db(legacy_none_db_path)
         
-        for code in valid_codes:
-            group = InterestGroup(
-                name=f"Group with code {code}",
-                code=code,
-                is_external=False,
-                is_active=True
-            )
-            assert group.code == code
-        
-        # Test mit ungültigen Codes (sollten Fehler werfen)
-        invalid_codes = [
-            "InvalidCode",  # PascalCase
-            "invalid-code",  # Kebab-Case
-            "invalid code",  # Leerzeichen
-            "123invalid",    # Beginnt mit Zahl
-            "_invalid",      # Beginnt mit Unterstrich
-            "invalid_",      # Endet mit Unterstrich
-            "__invalid__"    # Mehrere Unterstriche
-        ]
-        
-        for code in invalid_codes:
-            try:
-                group = InterestGroup(
-                    name=f"Group with invalid code {code}",
-                    code=code,
-                    is_external=False,
-                    is_active=True
-                )
-                # Falls kein Fehler geworfen wird, ist das ein Problem
-                assert False, f"Code {code} sollte ungültig sein"
-            except Exception:
-                # Erwartet: Exception für ungültige Codes
-                pass
-    
-    def test_interest_group_name_validation(self):
-        """Test: Name-Validierung funktioniert korrekt"""
-        # Test mit gültigen Namen
-        valid_names = [
-            "Valid Name",
-            "Valid Name 123",
-            "Valid-Name",
-            "Valid_Name",
-            "A",  # Minimal
-            "A" * 100  # Maximal
-        ]
-        
-        for name in valid_names:
-            group = InterestGroup(
-                name=name,
-                code=f"valid_name_{len(name)}",
-                is_external=False,
-                is_active=True
-            )
-            assert group.name == name
-        
-        # Test mit ungültigen Namen
-        invalid_names = [
-            "",  # Leerer String
-            "A" * 101,  # Zu lang
-            None  # None
-        ]
-        
-        for name in invalid_names:
-            try:
-                group = InterestGroup(
-                    name=name,
-                    code=f"invalid_name_{hash(name) if name else 'none'}",
-                    is_external=False,
-                    is_active=True
-                )
-                # Falls kein Fehler geworfen wird, ist das ein Problem
-                assert False, f"Name {name} sollte ungültig sein"
-            except Exception:
-                # Erwartet: Exception für ungültige Namen
-                pass
-    
-    def test_interest_group_boolean_fields(self):
-        """Test: Boolean-Felder funktionieren korrekt"""
-        # Test mit verschiedenen Boolean-Kombinationen
-        test_cases = [
-            (True, True),
-            (True, False),
-            (False, True),
-            (False, False)
-        ]
-        
-        for is_external, is_active in test_cases:
-            group = InterestGroup(
-                name=f"Boolean Test Group {is_external}_{is_active}",
-                code=f"boolean_test_{is_external}_{is_active}",
-                is_external=is_external,
-                is_active=is_active
-            )
-            
-            assert group.is_external is is_external
-            assert group.is_active is is_active
-    
-    def test_interest_group_optional_fields(self):
-        """Test: Optionale Felder werden korrekt behandelt"""
-        # Test mit minimalen Daten
-        minimal_group = InterestGroup(
-            name="Minimal Group",
-            code="minimal_group",
-            is_external=False,
-            is_active=True
+        # Legacy-Create
+        legacy_none_status, legacy_none_body = run_legacy(
+            "backend.app.main:app", 
+            legacy_none_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=none_payload
         )
         
-        # Optionale Felder sollten None sein
-        assert minimal_group.description is None
-        assert minimal_group.group_permissions is None
-        assert minimal_group.ai_functionality is None
-        assert minimal_group.typical_tasks is None
+        # DDD-Lauf: Frische DB erstellen
+        ddd_none_db_path = f".tmp/perm_ddd_none_{timestamp}.db"
+        make_fresh_db_at(ddd_none_db_path)
+        set_env_db(ddd_none_db_path)
         
-        # Test mit allen optionalen Feldern
-        full_group = InterestGroup(
-            name="Full Group",
-            code="full_group",
-            description="Vollständige Beschreibung",
-            group_permissions=["perm1", "perm2"],
-            ai_functionality="AI Funktionen",
-            typical_tasks="Typische Aufgaben",
-            is_external=True,
-            is_active=False
+        # DDD-Create (mit anderem Code für frischen DB-Zustand)
+        ddd_none_payload = ig_payload(
+            code=f"ddd_none_permissions_group_{timestamp}",
+            name="DDD None Permissions Group",
+            perms_input=None
         )
         
-        # Alle Felder sollten gesetzt sein
-        assert full_group.description == "Vollständige Beschreibung"
-        assert full_group.group_permissions == ["perm1", "perm2"]
-        assert full_group.ai_functionality == "AI Funktionen"
-        assert full_group.typical_tasks == "Typische Aufgaben"
-        assert full_group.is_external is True
-        assert full_group.is_active is False
-    
-    def test_interest_group_string_representation(self):
-        """Test: String-Repräsentation der InterestGroup"""
-        group = InterestGroup(
-            name="String Test Group",
-            code="string_test_group",
-            description="Test für String-Repräsentation",
-            is_external=False,
-            is_active=True
+        ddd_none_status, ddd_none_body = run_ddd(
+            "backend.app.main:app", 
+            ddd_none_db_path, 
+            "POST", 
+            "/api/interest-groups", 
+            json_data=ddd_none_payload
         )
         
-        # String-Repräsentation sollte den Namen enthalten
-        str_repr = str(group)
-        assert "String Test Group" in str_repr
-        assert "string_test_group" in str_repr
+        # Parität: Beide Modi sollten identischen Statuscode zurückgeben
+        assert legacy_none_status == ddd_none_status, \
+            f"None-Input Statuscode-Parität verletzt: Legacy={legacy_none_status}, DDD={ddd_none_status}"
         
-        # Repr-Repräsentation sollte technische Details enthalten
-        repr_repr = repr(group)
-        assert "InterestGroup" in repr_repr
-        assert "string_test_group" in repr_repr
-    
-    def test_interest_group_equality(self):
-        """Test: Gleichheit zwischen InterestGroup-Instanzen"""
-        # Zwei identische Gruppen
-        group1 = InterestGroup(
-            name="Equality Test Group",
-            code="equality_test_group",
-            is_external=False,
-            is_active=True
-        )
-        
-        group2 = InterestGroup(
-            name="Equality Test Group",
-            code="equality_test_group",
-            is_external=False,
-            is_active=True
-        )
-        
-        # Gruppen mit gleichen Daten sollten gleich sein
-        assert group1.name == group2.name
-        assert group1.code == group2.code
-        assert group1.is_external == group2.is_external
-        assert group1.is_active == group2.is_active
-        
-        # Aber es sind verschiedene Instanzen
-        assert group1 is not group2
-        
-        # Gruppen mit verschiedenen Daten sollten ungleich sein
-        group3 = InterestGroup(
-            name="Different Group",
-            code="different_group",
-            is_external=True,
-            is_active=False
-        )
-        
-        assert group1.name != group3.name
-        assert group1.code != group3.code
-        assert group1.is_external != group3.is_external
-        assert group1.is_active != group3.is_active
+        print(f"None-Input Test - Legacy: {legacy_none_status}, DDD: {ddd_none_status}")

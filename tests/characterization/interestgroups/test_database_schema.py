@@ -12,7 +12,7 @@ backend_path = Path("/Users/reiner/Documents/DocuMind-AI/backend")
 if str(backend_path) not in sys.path:
     sys.path.insert(0, str(backend_path))
 
-from app.database import engine
+from backend.app.database import engine
 from sqlalchemy import text
 
 class TestDatabaseSchema:

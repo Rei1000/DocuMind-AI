@@ -8,6 +8,7 @@ from backend.app.database import get_db
 from backend.app.models import InterestGroup
 from backend.app.schemas import InterestGroupCreate, InterestGroupUpdate
 from sqlalchemy.orm import Session
+import json
 
 
 class InterestGroupRepositoryLegacy:
@@ -24,6 +25,13 @@ class InterestGroupRepositoryLegacy:
         """Hole einzelne Interest Group nach ID (wie im bestehenden Code)"""
         return db.query(InterestGroup).filter(
             InterestGroup.id == group_id,
+            InterestGroup.is_active == True
+        ).first()
+    
+    def get_by_code(self, db: Session, code: str) -> Optional[InterestGroup]:
+        """Hole Interest Group nach Code (für Duplicate-Check)"""
+        return db.query(InterestGroup).filter(
+            InterestGroup.code == code,
             InterestGroup.is_active == True
         ).first()
     
@@ -44,12 +52,17 @@ class InterestGroupRepositoryLegacy:
         if existing_code:
             raise ValueError(f"Interest group with code '{group_data.code}' already exists")
         
+        # Serialisiere group_permissions zu JSON-String vor DB-Insert
+        permissions_value = group_data.group_permissions
+        if isinstance(permissions_value, (list, dict)):
+            permissions_value = json.dumps(permissions_value, ensure_ascii=False)
+        
         # Erstelle neue Gruppe (wie im bestehenden Code)
         db_group = InterestGroup(
             name=group_data.name,
             code=group_data.code,
             description=group_data.description,
-            group_permissions=group_data.group_permissions,
+            group_permissions=permissions_value,
             ai_functionality=group_data.ai_functionality,
             typical_tasks=group_data.typical_tasks,
             is_external=group_data.is_external,
@@ -89,6 +102,9 @@ class InterestGroupRepositoryLegacy:
         # Update Felder (wie im bestehenden Code)
         update_data = group_data.dict(exclude_unset=True)
         for field, value in update_data.items():
+            # Serialisiere group_permissions zu JSON-String vor DB-Update
+            if field == 'group_permissions' and isinstance(value, (list, dict)):
+                value = json.dumps(value, ensure_ascii=False)
             setattr(db_group, field, value)
         
         db.commit()
@@ -97,7 +113,8 @@ class InterestGroupRepositoryLegacy:
     
     def delete(self, db: Session, group_id: int) -> bool:
         """Lösche Interest Group (Soft-Delete, wie im bestehenden Code)"""
-        db_group = self.get(db, group_id)
+        # Für DELETE: auch inaktive Gruppen finden können (nicht nur aktive)
+        db_group = db.query(InterestGroup).filter(InterestGroup.id == group_id).first()
         if not db_group:
             return False
         

@@ -4,6 +4,8 @@ Dokumentiert das bestehende Verhalten ohne neue Regeln zu erfinden.
 """
 
 import pytest
+import os
+from tests.helpers.ab_runner import run_legacy, run_ddd
 
 class TestUpdateInterestGroup:
     """Test für PUT /api/interest-groups/{group_id} Endpunkt"""
@@ -261,3 +263,45 @@ class TestUpdateInterestGroup:
         # Boolean-Felder sollten aktualisiert sein
         assert updated_group["is_external"] is True
         assert updated_group["is_active"] is False
+    
+    def test_update_existing_group(self, client):
+        """Test: UPDATE-Parität mit getrennten DBs (Legacy vs DDD)"""
+        # Getrennte DB-Pfade
+        legacy_db = ".tmp/_legacy.db"
+        ddd_db = ".tmp/_ddd.db"
+        
+        # Test-Daten
+        create_data = {
+            "name": "Update Parity Group",
+            "code": "update_parity_group",
+            "description": "Test für UPDATE-Parität"
+        }
+        
+        update_data = {
+            "description": "Aktualisierte Beschreibung"
+        }
+        
+        # Legacy: POST + UPDATE
+        legacy_create = run_legacy("backend.app.main:app", legacy_db, "POST", "/api/interest-groups", create_data)
+        legacy_group_id = legacy_create[1].get("id", 0)
+        
+        legacy_update = run_legacy("backend.app.main:app", legacy_db, "PUT", f"/api/interest-groups/{legacy_group_id}", update_data)
+        
+        # DDD: POST + UPDATE
+        ddd_create = run_ddd("backend.app.main:app", ddd_db, "POST", "/api/interest-groups", create_data)
+        ddd_group_id = ddd_create[1].get("id", 0)
+        
+        ddd_update = run_ddd("backend.app.main:app", ddd_db, "PUT", f"/api/interest-groups/{ddd_group_id}", update_data)
+        
+        # Ergebnisse
+        print(f"POST id check: legacy_id>0={legacy_group_id > 0}, ddd_id>0={ddd_group_id > 0}")
+        print(f"UPDATE parity: legacy={legacy_update[0]}, ddd={ddd_update[0]}")
+        
+        # Body-Parität prüfen
+        if legacy_update[0] == 200 and ddd_update[0] == 200:
+            legacy_body = legacy_update[1]
+            ddd_body = ddd_update[1]
+            body_equal = "description" in legacy_body and "description" in ddd_body and legacy_body.get("description") == ddd_body.get("description")
+            print(f"UPDATE body_equal={body_equal}")
+        else:
+            print(f"UPDATE body_equal=false (status mismatch)")

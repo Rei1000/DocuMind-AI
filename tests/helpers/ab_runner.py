@@ -6,10 +6,13 @@ Vergleicht exakt dieselben Requests zwischen beiden Modi
 import os
 import sys
 import json
+import sqlite3
 from contextlib import contextmanager
 from typing import Dict, Any, Tuple, Optional, List
 from fastapi.testclient import TestClient
 from deepdiff import DeepDiff
+from tests.helpers.bootstrap_from_schema import make_fresh_db_at
+from tests.helpers.diagnostics import inject_exception_logger
 
 
 def run_legacy(app_import: str, db_path: str, method: str, path: str, json_data: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None, **kwargs) -> Tuple[int, Dict[str, Any]]:
@@ -32,6 +35,20 @@ def run_legacy(app_import: str, db_path: str, method: str, path: str, json_data:
     old_ig_impl = os.environ.pop("IG_IMPL", None)
     
     try:
+        # VOR Import: Frische DB erstellen und ENV setzen
+        try:
+            result = make_fresh_db_at(db_path)
+            if result == 0:
+                print(f"[RUNTIME] DB creation failed - no tables created")
+                return 500, {"error": "DB creation failed - no tables"}
+        except Exception as e:
+            print(f"[RUNTIME] DB creation failed with exception: {e}")
+            return 500, {"error": f"DB creation failed: {e}"}
+        
+        # ENV setzen
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+        os.environ["SQLALCHEMY_DATABASE_URL"] = f"sqlite:///{db_path}"
+        
         # Frischen App-Import erzwingen
         if "backend.app.main" in sys.modules:
             del sys.modules["backend.app.main"]
@@ -40,6 +57,24 @@ def run_legacy(app_import: str, db_path: str, method: str, path: str, json_data:
         module_name, app_name = app_import.split(":")
         module = __import__(module_name, fromlist=[app_name])
         app = getattr(module, app_name)
+        
+        # NACH Import: Runtime-Diagnose
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            
+            print(f"[RUNTIME] mode=legacy url=sqlite:///{db_path}")
+            print(f"[RUNTIME] tables={len(tables)} first={tables[0] if tables else []}")
+            
+            if len(tables) == 0:
+                print(f"[RUNTIME] DB empty: {os.path.abspath(db_path)}")
+                return 500, {"error": "DB empty"}
+                
+        except Exception as e:
+            print(f"[RUNTIME] DB diagnosis failed: {e}")
+            return 500, {"error": "DB diagnosis failed"}
         
         # Neuen TestClient erstellen
         client = TestClient(app)
@@ -104,6 +139,20 @@ def run_ddd(app_import: str, db_path: str, method: str, path: str, json_data: Op
     os.environ["IG_IMPL"] = "ddd"
     
     try:
+        # VOR Import: Frische DB erstellen und ENV setzen
+        try:
+            result = make_fresh_db_at(db_path)
+            if result == 0:
+                print(f"[RUNTIME] DB creation failed - no tables created")
+                return 500, {"error": "DB creation failed - no tables"}
+        except Exception as e:
+            print(f"[RUNTIME] DB creation failed with exception: {e}")
+            return 500, {"error": f"DB creation failed: {e}"}
+        
+        # ENV setzen
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+        os.environ["SQLALCHEMY_DATABASE_URL"] = f"sqlite:///{db_path}"
+        
         # Frischen App-Import erzwingen
         if "backend.app.main" in sys.modules:
             del sys.modules["backend.app.main"]
@@ -112,6 +161,27 @@ def run_ddd(app_import: str, db_path: str, method: str, path: str, json_data: Op
         module_name, app_name = app_import.split(":")
         module = __import__(module_name, fromlist=[app_name])
         app = getattr(module, app_name)
+        
+        # Exception-Logger für DDD-Diagnose injizieren
+        inject_exception_logger(app)
+        
+        # NACH Import: Runtime-Diagnose
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            
+            print(f"[RUNTIME] mode=ddd url=sqlite:///{db_path}")
+            print(f"[RUNTIME] tables={len(tables)} first={tables[0] if tables else []}")
+            
+            if len(tables) == 0:
+                print(f"[RUNTIME] DB empty: {os.path.abspath(db_path)}")
+                return 500, {"error": "DB empty"}
+                
+        except Exception as e:
+            print(f"[RUNTIME] DB diagnosis failed: {e}")
+            return 500, {"error": "DB diagnosis failed"}
         
         # Neuen TestClient erstellen
         client = TestClient(app)
