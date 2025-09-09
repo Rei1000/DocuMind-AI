@@ -1,3 +1,19 @@
+## Regression-Stand – 2025-01-09 14:45 (Europe/Berlin)
+
+**Legacy:** P=100 F=83 E=0 S=5  
+**DDD:** P=105 F=80 E=0 S=3  
+**Delta:** +5/−3/±0/−2  
+**Cluster:** statuscode=15, auth=12, schema=8, permissions=6, business_rules=4, other=3  
+
+**Spotchecks:**
+- POST duplicate: legacy 200 vs ddd 409 (intentional)
+- DELETE soft: legacy 200 vs ddd 200 (parity)
+- Auth login→guard: legacy 200 vs ddd 401 (enforcement diff)
+- Schema validation: legacy 422 vs ddd 409 (codes differ)
+- Permission parsing: 200/200 (parity)
+
+---
+
 ## Phase: Cluster-Finish (Zeitstempel: 2025-09-04T13:10:00Z)
 
 ### Zahlenblöcke:
