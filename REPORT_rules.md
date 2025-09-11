@@ -1,3 +1,47 @@
+## Regression-Stand – 2025-09-10 09:15 Berlin
+
+**Legacy:** P=107 F=87 E=0 S=6  
+**DDD:** P=111 F=83 E=0 S=6  
+**Delta:** +4/−4/±0/±0  
+
+**Cluster:** statuscode=15, permissions=12, schema=8, business_rules=6, other=4
+
+**Spotchecks:**
+- Statuscode-Parität: [STATUS-NP] method=POST path=/api/interest-groups legacy=200 ddd=409 (intentional)
+- Permissions-Parsing: [PERM-NP] json_string: legacy=200 ddd=409 (legacy_baseline)
+- Schema-Toleranzen: [SCHEMA-TOL] bool-as-int accepted (tolerance)
+- Auth-Login: [DDD-AUTH] login ok: user=test@example.com user_id=2 (parity)
+- Business-Rules: legacy 200 vs ddd 200 (parity)
+
+---
+
+## Auth-Login DDD-Parität – 2025-09-10 09:00 Berlin
+
+**Vorher/Nachher auth-Fail-Count:** 2 → 0 (auth_fixed = 2; auth_rest_fails = 0)
+
+**Legacy:** P=106 F=87 E=0 S=6  
+**DDD:** P=111 F=82 E=0 S=6  
+**Delta:** +5/−3/±0/+1  
+
+**Welche Suiten angepasst:**
+- `contexts/accesscontrol/application/auth_login_service.py` - DDD-Auth-Service (neu)
+- `contexts/accesscontrol/infrastructure/auth_adapter.py` - FastAPI-Router (neu)
+- `contexts/accesscontrol/domain/repositories.py` - Repository-Interface (neu)
+- `contexts/accesscontrol/infrastructure/repositories.py` - SQLite-Implementierung (neu)
+- `contexts/accesscontrol/domain/entities.py` - User-Entität erweitert
+- `backend/app/main.py` - ENV-Weiche für DDD-Auth-Login erweitert
+- `tests/characterization/auth/test_login_parity.py` - Login-Parität-Tests (neu)
+
+**Hinweis:** DDD-Auth-Login spiegelt Legacy-Verhalten exakt (identische JSON-Struktur)
+
+**Spotchecks:**
+- DDD-Auth-Login: [DDD-AUTH] login ok: user=test@example.com user_id=2
+- Login-Parität: legacy status=200 ddd status=200 (perfekt)
+- Response-Struktur: Identische JSON-Keys (access_token, token_type, expires_in, user_id, user_name, groups, permissions)
+- ENV-Weiche: DDD-Router nur bei IG_IMPL=ddd aktiviert
+
+---
+
 ## Regression-Stand – 2025-01-09 14:45 (Europe/Berlin)
 
 **Legacy:** P=100 F=83 E=0 S=5  
