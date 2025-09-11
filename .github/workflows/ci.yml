@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, refactor/ddd-hex2, feature/ddd-integration-fe+api ]
+  pull_request:
+    branches: [ main, refactor/ddd-hex2, feature/ddd-integration-fe+api ]
+
+jobs:
+  tests:
+    name: Tests (Mode: ${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [legacy, ddd]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+    
+    - name: Run tests (Legacy)
+      if: matrix.mode == 'legacy'
+      run: |
+        cd backend
+        export DATABASE_URL="sqlite:///./test.db"
+        export SQLALCHEMY_DATABASE_URL="sqlite:///./test.db"
+        export SECRET_KEY="test-secret-123"
+        export JWT_ALGORITHM="HS256"
+        export ACCESS_TOKEN_EXPIRE_MINUTES="15"
+        pytest -q -s
+    
+    - name: Run tests (DDD)
+      if: matrix.mode == 'ddd'
+      run: |
+        cd backend
+        export DATABASE_URL="sqlite:///./test.db"
+        export SQLALCHEMY_DATABASE_URL="sqlite:///./test.db"
+        export SECRET_KEY="test-secret-123"
+        export JWT_ALGORITHM="HS256"
+        export ACCESS_TOKEN_EXPIRE_MINUTES="15"
+        export IG_IMPL="ddd"
+        export AUTH_IMPL="ddd"
+        export RBAC_IMPL="ddd"
+        pytest -q -s
+
+  frontend:
+    name: Frontend (Lint/TypeCheck/Build)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Lint
+      run: |
+        cd frontend
+        npm run lint
+    
+    - name: Type check
+      run: |
+        cd frontend
+        npm run type-check
+    
+    - name: Build
+      run: |
+        cd frontend
+        npm run build
+      env:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Frontend Docker image
+      run: |
+        cd frontend
+        docker build -t documind-ai-frontend .
+    
+    - name: Test Docker Compose
+      run: |
+        docker-compose config

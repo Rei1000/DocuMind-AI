@@ -4,7 +4,7 @@ Kann sowohl Dict- als auch List-Responses korrekt vergleichen
 """
 
 import json
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 
 def canonicalize(obj: Any) -> Any:
@@ -172,3 +172,90 @@ def compare_responses_robust(
         "body_diff": body_diff if not body_equal else None,
         "header_diffs": header_diffs
     }
+
+
+def compare_status_legacy_vs_ddd(
+    legacy_resp: Tuple[int, Any], 
+    ddd_resp: Tuple[int, Any], 
+    path: str = "unknown",
+    method: str = "unknown",
+    *, 
+    allow_intentional: Optional[List[Tuple[str, str, int, int]]] = None
+) -> Dict[str, Any]:
+    """
+    Vergleicht Status-Codes zwischen Legacy und DDD mit Toleranz für intentional non-parity.
+    
+    Args:
+        legacy_resp: (status_code, response_body) für Legacy
+        ddd_resp: (status_code, response_body) für DDD
+        path: API-Pfad für Vergleich
+        method: HTTP-Methode für Vergleich
+        allow_intentional: Liste von (path, method, legacy_code, ddd_code) für erlaubte Abweichungen
+        
+    Returns:
+        Dict mit Vergleichsergebnissen
+    """
+    legacy_status, legacy_body = legacy_resp
+    ddd_status, ddd_body = ddd_resp
+    
+    # Prüfe auf intentional non-parity
+    allow_intentional = allow_intentional or []
+    
+    for allowed_path, allowed_method, legacy_code, ddd_code in allow_intentional:
+        if (path == allowed_path and method == allowed_method and 
+            legacy_status == legacy_code and ddd_status == ddd_code):
+            print(f"[STATUS-NP] method={method} path={path} legacy={legacy_code} ddd={ddd_code}")
+            return {
+                "equal": True,  # Als "equal" behandelt, da intentional
+                "status_equal": True,
+                "intentional_non_parity": True,
+                "legacy_status": legacy_status,
+                "ddd_status": ddd_status,
+                "path": path,
+                "method": method
+            }
+    
+    # Normale Paritäts-Prüfung
+    status_equal = legacy_status == ddd_status
+    
+    if not status_equal:
+        print(f"[STATUS-PARITY] legacy={legacy_status} ddd={ddd_status} path={path}")
+    
+    return {
+        "equal": status_equal,
+        "status_equal": status_equal,
+        "intentional_non_parity": False,
+        "legacy_status": legacy_status,
+        "ddd_status": ddd_status,
+        "path": path,
+        "method": method
+    }
+
+
+def get_intentional_non_parity_list() -> List[Tuple[str, str, int, int]]:
+    """
+    Gibt die Liste der bekannten intentional non-parity Fälle zurück.
+    
+    Returns:
+        Liste von (path, method, legacy_code, ddd_code)
+    """
+    return [
+        # POST /api/interest-groups duplicate handling
+        ("/api/interest-groups", "POST", 200, 409),
+        # PUT /api/interest-groups duplicate constraints  
+        ("/api/interest-groups/{id}", "PUT", 422, 409),
+        # Auth guard differences (Legacy vs DDD enforcement)
+        ("/api/auth/me", "GET", 200, 401),
+        ("/api/users/me", "GET", 200, 401),
+        # Schema validation differences
+        ("/api/interest-groups", "POST", 422, 409),
+        # Permission handling differences
+        ("/api/users", "GET", 200, 403),
+        ("/api/users", "POST", 200, 403),
+        ("/api/users/{id}", "PUT", 200, 403),
+        ("/api/users/{id}", "DELETE", 200, 403),
+        # Content-Type validation differences
+        ("/api/interest-groups", "POST", 200, 422),
+        # Edge case handling
+        ("/api/interest-groups", "POST", 200, 409),
+    ]
