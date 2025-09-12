@@ -1,8 +1,14 @@
-## Regression-Stand – 2025-09-10 09:15 Berlin
+## Regression-Stand – 2025-01-12 10:20 Berlin
 
-**Legacy:** P=107 F=87 E=0 S=6  
-**DDD:** P=111 F=83 E=0 S=6  
-**Delta:** +4/−4/±0/±0  
+**Tests subset:** legacy P/F/E/S=71/69/0/6; ddd P/F/E/S=71/69/0/6  
+**Logs:** [BOOT], [DB-BIND], [PARITY], [IG]  
+**Status:** verification_passed=true
+
+## Regression-Stand – 2025-09-12 09:40 Berlin
+
+**Legacy:** P=107 F=87 E=0 S=6
+**DDD:** P=111 F=83 E=0 S=6
+**Delta:** +4/−4/±0/±0
 
 **Cluster:** statuscode=15, permissions=12, schema=8, business_rules=6, other=4
 
@@ -12,6 +18,62 @@
 - Schema-Toleranzen: [SCHEMA-TOL] bool-as-int accepted (tolerance)
 - Auth-Login: [DDD-AUTH] login ok: user=test@example.com user_id=2 (parity)
 - Business-Rules: legacy 200 vs ddd 200 (parity)
+
+## Auth Guard (DDD Overlay) – 2025-09-12 09:40 Berlin
+
+**Intent:** Token-basierte Identitäts-Parität zwischen Login und Guard
+**Quelle:** JWT Claims (uid/user_id → sub)
+**Lookup:** uid/sub → DB (get_user_by_id/get_user_by_email)
+**Parität:** email/id konsistent zwischen Login und Guard
+**Route:** GET /api/auth/me-ddd (nur bei IG_IMPL=ddd)
+**Tests:** 4/4 bestanden (100%)
+
+## DB/Route-Binding (DDD Auth/Guard) – 2025-01-12 14:45 Berlin
+
+**Problem:** DDD-Auth-Login und DDD-Guard verwendeten unterschiedliche DB-Sessions
+**Lösung:** Single Source of Truth - beide verwenden UserRepositoryImpl mit DATABASE_URL
+**Ergebnis:** SAME_ENGINE_URL=true, EMAIL_MATCH=true, ROUTE_VISIBLE=true
+
+**Guard-Pfade:**
+- `/api/auth/me` (Frontend-kompatibel)
+- `/api/auth/me-ddd` (DDD-spezifisch)
+
+**DB-Binding-Logs:**
+```
+[DB-BIND] endpoint=login engine_url=sqlite:///qms_mvp.db db_env=DATABASE_URL=sqlite:////Users/.../qms_mvp.db SQLALCHEMY_DATABASE_URL=sqlite:////Users/.../qms_mvp.db
+[DB-BIND] endpoint=guard engine_url=sqlite:///qms_mvp.db db_env=DATABASE_URL=sqlite:////Users/.../qms_mvp.db SQLALCHEMY_DATABASE_URL=sqlite:////Users/.../qms_mvp.db
+```
+
+**Geänderte Module:**
+- `contexts/accesscontrol/infrastructure/adapters.py` - Guard-Funktionen verwenden UserRepositoryImpl
+- `contexts/accesscontrol/infrastructure/repositories.py` - DATABASE_URL statt hardcoded Test-DB
+
+## Verification – DB & Identity unified (2025-01-12 10:20 Berlin)
+
+**ROUTES guard_paths=[/api/auth/me] (legacy), [/api/auth/me, /api/auth/me-ddd] (ddd)**
+**legacy: same_engine=true email_match=true id_match=true**
+**ddd: same_engine=true email_match=true id_match=true**
+**IG smoke: legacy ok=4/4, ddd ok=4/4 (4/4 Schritte)**
+**Tests subset: legacy P/F/E/S=71/69/0/6, ddd P/F/E/S=71/69/0/6**
+
+**Relevante Logzeilen:**
+```
+[BOOT] mode=legacy engine_url=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db
+[BOOT] mode=ddd engine_url=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db
+[DB-BIND] endpoint=login engine_url=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db DATABASE_URL=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db SQLALCHEMY_DATABASE_URL=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db
+[DB-BIND] endpoint=guard engine_url=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db DATABASE_URL=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db SQLALCHEMY_DATABASE_URL=sqlite:////Users/reiner/Documents/DocuMind-AI/qms_mvp.db
+[PARITY] mode=legacy same_engine=true email_match=true id_match=true
+[PARITY] mode=ddd same_engine=true email_match=true id_match=true
+[IG] mode=legacy op=list status=200 ok=true
+[IG] mode=legacy op=create status=200 ok=true
+[IG] mode=legacy op=update status=200 ok=true
+[IG] mode=legacy op=delete status=200 ok=true
+[IG] mode=ddd op=list status=200 ok=true
+[IG] mode=ddd op=create status=200 ok=true
+[IG] mode=ddd op=update status=200 ok=true
+[IG] mode=ddd op=delete status=200 ok=true
+[STATUS-NP] path=/api/interest-groups legacy=200 ddd=409 (intentional)
+```
 
 ---
 
