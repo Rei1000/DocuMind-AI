@@ -1,0 +1,82 @@
+# OpenAPI Delta - Benutzerverwaltung DDD-Modus
+# Session: 2025-09-18T11:53:52Z - qms.admin@company.com
+
+## Erkannte Endpoints
+
+### GET /api/users
+- **Status**: 200 OK
+- **Usage**: 21 calls
+- **Purpose**: Benutzerliste abrufen
+- **Parameters**: limit=100
+- **Response**: List[User]
+- **Auth**: Bearer Token erforderlich
+
+### GET /api/users/{user_id}
+- **Status**: 200 OK  
+- **Usage**: 2 calls
+- **Purpose**: Einzelnen Benutzer abrufen
+- **Response**: User
+- **Auth**: Bearer Token erforderlich
+
+### POST /api/users
+- **Status**: 200 OK
+- **Usage**: 1 call
+- **Purpose**: Neuen Benutzer erstellen
+- **Response**: User
+- **Auth**: Bearer Token erforderlich
+
+### PUT /api/users/{user_id}
+- **Status**: 200 OK
+- **Usage**: 2 calls
+- **Purpose**: Benutzer aktualisieren
+- **Response**: User
+- **Auth**: Bearer Token erforderlich
+
+### GET /api/users/{user_id}/memberships
+- **Status**: 200 OK
+- **Usage**: 252 calls (alle User IDs 1-14)
+- **Purpose**: Benutzer-Mitgliedschaften abrufen
+- **Response**: List[Membership]
+- **Auth**: Bearer Token erforderlich
+
+### GET /api/rbac/users
+- **Status**: 404 Not Found
+- **Usage**: 1 call
+- **Purpose**: DDD-RBAC Endpoint (nicht implementiert)
+- **Note**: Legacy-Endpoint /api/users wird verwendet
+
+## Schema-Erkenntnisse
+
+### User Schema (erwartet)
+```json
+{
+  "id": "integer",
+  "email": "string",
+  "full_name": "string", 
+  "employee_id": "string",
+  "organizational_unit": "string",
+  "individual_permissions": "array[string]",
+  "is_department_head": "boolean",
+  "approval_level": "integer",
+  "is_active": "boolean",
+  "created_at": "datetime"
+}
+```
+
+### Membership Schema (erwartet)
+```json
+{
+  "user_id": "integer",
+  "interest_group_id": "integer",
+  "role": "string",
+  "assigned_at": "datetime"
+}
+```
+
+## DDD-Integration
+- **AUTH_IMPL**: ddd (JWT-basierte Authentifizierung)
+- **IG_IMPL**: ddd (Interest Groups über DDD)
+- **RBAC_IMPL**: ddd (Legacy-Integration über individual_permissions)
+- **DB**: qms_mvp.db (SQLite)
+- **Permission-Check**: individual_permissions JSON-Feld
+

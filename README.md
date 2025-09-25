@@ -17,7 +17,7 @@
 
 **Version 3.8.0** | **Multi-Visio Pipeline** | **ISO 13485 & MDR konforme Dokumentenlenkung** | **KI-gestütztes QMS**
 
-[🚀 Quick Start](#-quick-start) • [📋 Features](#-features) • [🧠 Multi-Visio](#-multi-visio-pipeline-5-stufen-ki-analyse) • [🏗️ Architektur](#️-architektur) • [📊 API Docs](#-api-dokumentation)
+[🚀 Quick Start](#-quick-start) • [📋 Features](#-features) • [🧠 Multi-Visio](#-multi-visio-pipeline-5-stufen-ki-analyse) • [🏗️ Architektur](#️-architektur) • [🔄 Architektur-Switch](#-architektur-switch-legacy--ddd) • [📊 API Docs](#-api-dokumentation)
 
 </div>
 
@@ -44,7 +44,7 @@
 - **✅ ISO 13485 & MDR-konforme** Workflows und Freigabeprozesse
 - **🔍 KI-powered Text-Extraktion** für RAG-ready Dokumentenindexierung
 - **⚙️ Equipment-Management** mit automatischer Kalibrierungsüberwachung
-- **👥 Erweiterte Benutzerverwaltung** mit dynamischen Abteilungszuordnungen
+- **👥 Erweiterte Benutzerverwaltung** mit Multi-Abteilungszuordnungen und DDD-Architektur
 - **🌐 RESTful API** mit vollständiger OpenAPI 3.0-Dokumentation
 
 ---
@@ -59,8 +59,14 @@ cd DocuMind-AI
 
 ### 2. System starten
 ```bash
-# Automatisches Setup und Start
+# Automatisches Setup und Start (Legacy-Modus)
 ./start-all.sh
+
+# DDD-Modus für Interest Groups
+IG_IMPL=ddd ./start-all.sh
+
+# Vollständiger DDD-Modus (alle Module)
+IG_IMPL=ddd AUTH_IMPL=ddd RBAC_IMPL=ddd ./start-all.sh
 
 # Oder manuell mit Routing-Auswahl:
 # Legacy-Modus (Standard):
@@ -81,32 +87,86 @@ IG_IMPL=ddd uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 🔄 Routing-Switch (Legacy ↔ DDD)
+## 🔄 Architektur-Switch (Legacy ↔ DDD)
 
-**DocuMind-AI** unterstützt zwei Implementierungsmodi für die `/api/interest-groups` Endpoints:
+**DocuMind-AI** unterstützt flexible Architektur-Modi für verschiedene Systemkomponenten:
 
-### 🚀 **Legacy-Modus (Standard)**
-- **Umgebungsvariable:** `IG_IMPL` nicht gesetzt oder leer
+### 🏗️ **Architektur-Modi**
+
+#### 🚀 **Legacy-Modus (Standard)**
+- **Umgebungsvariablen:** Alle nicht gesetzt oder `legacy`
+- **Architektur:** Monolithische Implementierung
 - **Router:** Legacy-Implementierung in `backend/app/main.py`
 - **Verhalten:** Bewährte Funktionalität, unveränderte Pfade
 
-### 🏗️ **DDD-Modus**
-- **Umgebungsvariable:** `IG_IMPL=ddd`
-- **Router:** DDD+Hexagonal Architecture Router
-- **Verhalten:** Neue Implementierung, gleiche API-Pfade
+#### 🔥 **DDD+Hex-Modus**
+- **Umgebungsvariablen:** `IG_IMPL=ddd`, `AUTH_IMPL=ddd`, `RBAC_IMPL=ddd`
+- **Architektur:** Domain-Driven Design + Hexagonal Architecture
+- **Router:** DDD+Hexagonal Architecture Router + Legacy-Adapter
+- **Verhalten:** Modulare Implementierung, Multi-Abteilungszuordnungen, erweiterte Benutzerverwaltung
+
+### 🎛️ **Verfügbare Schalter**
+
+| Schalter | Komponente | Legacy | DDD+Hex | Beschreibung |
+|----------|------------|--------|---------|--------------|
+| `IG_IMPL` | Interest Groups | ✅ | 🔥 | Stakeholder-Management |
+| `AUTH_IMPL` | Authentication | ✅ | 🔥 | Benutzer-Authentifizierung |
+| `RBAC_IMPL` | Role-Based Access Control | ✅ | 🔥 | Berechtigungsmanagement |
+
+### 🚀 **Start-Optionen**
+
+```bash
+# Legacy-Modus (Standard)
+./start-all.sh
+
+# DDD-Modus für Interest Groups
+IG_IMPL=ddd ./start-all.sh
+
+# DDD-Modus für Authentication
+AUTH_IMPL=ddd ./start-all.sh
+
+# Vollständiger DDD-Modus
+IG_IMPL=ddd AUTH_IMPL=ddd RBAC_IMPL=ddd ./start-all.sh
+
+# Gemischte Modi
+IG_IMPL=ddd AUTH_IMPL=legacy RBAC_IMPL=ddd ./start-all.sh
+```
+
+### 📊 **Architektur-Modus-Anzeige**
+
+Das System zeigt beim Start den aktiven Modus an:
+
+```
+🏗️  ARCHITEKTUR-MODUS:
+   🔥 Interest Groups: DDD+Hex (Domain-Driven Design)
+   🔐 Authentication:  Legacy (Monolithisch)
+   👥 RBAC:            DDD+Hex (Domain-Driven Design)
+```
 
 ### ⚠️ **Wichtige Hinweise**
-- **Exklusive Auswahl:** Nur ein Router ist gleichzeitig aktiv
-- **Gleiche Pfade:** Beide Modi verwenden `/api/interest-groups`
-- **ENV-Weiche entscheidet:** `IG_IMPL=ddd` aktiviert DDD, sonst Legacy
+- **Exklusive Auswahl:** Nur ein Router pro Komponente ist aktiv
+- **Gleiche Pfade:** Beide Modi verwenden identische API-Pfade
+- **ENV-Weichen entscheiden:** `=ddd` aktiviert DDD, `=legacy` oder leer = Legacy
+- **Farbkodierung:** 🔥 Grün = DDD+Hex, 📦 Gelb = Legacy
+
+### 📚 **Detaillierte Dokumentation**
+- **Script-Dokumentation:** [docs/start-all-script.md](docs/start-all-script.md)
+- **ADR-008:** [docs/ADR/ADR-008-regression-ddd-vs-legacy.md](docs/ADR/ADR-008-regression-ddd-vs-legacy.md)
+- **Regeln-Report:** [REPORT_rules.md](REPORT_rules.md)
 
 ### 🧪 **Testing**
 ```bash
-# Legacy-Tests
+# Legacy-Tests (Standard)
 pytest -q tests
 
-# DDD-Tests  
+# DDD-Tests für Interest Groups
 IG_IMPL=ddd pytest -q tests
+
+# DDD-Tests für Authentication
+AUTH_IMPL=ddd pytest -q tests
+
+# Vollständiger DDD-Test
+IG_IMPL=ddd AUTH_IMPL=ddd RBAC_IMPL=ddd pytest -q tests
 
 # Paritätstests (Vergleich Legacy vs DDD)
 pytest -q tests/characterization/interestgroups/
@@ -118,8 +178,31 @@ pytest -q tests/characterization/interestgroups/
 - **Robustheit:** Unterstützt Dict- und List-Responses
 - **Datenbank:** Separate DB-Instanzen für jeden Modus
 
+### ⚡️ API-Hinweis (DDD): Bulk-Mitgliedschaften
+- Zur Vermeidung von N+1-Requests steht im DDD-Pfad ein Bulk-Endpoint bereit (Legacy-kompatible DTOs, korrelierte Header):
+  - GET: `/api/memberships:bulk?user_ids=1,2,3` (Kompatibilität)
+  - POST (empfohlen): `/api/users/bulk-memberships` mit Body `{ "user_ids": [1,2,3] }`
+- Response-Shape (Beispiel):
+  ```json
+  {
+    "memberships": {
+      "1": [ { "id": 10, "user_id": 1, "approval_level": 2, "interest_group": { "id": 2, "name": "Qualitätsmanagement", "code": "quality_management" } } ],
+      "2": [ ... ]
+    },
+    "errors": {}
+  }
+  ```
+- Korrelation-Header auf allen Antworten: `X-Req-Id`, `X-Body-SHA256`, `X-Body-Len`, `X-DTO-Sanitized` (immer `false` bei Bulk)
+- RBAC entspricht den Einzelendpoints; DTO-Form entspricht dem Legacy-UI.
+
 ### 📊 **Aktueller Stand DDD vs. Legacy**
-DDD hat im aktuellen Regression-Lauf mehr grüne Tests als Legacy (83/13 vs. 73/21). Die ENV-Weiche ermöglicht nahtlosen Wechsel zwischen den Modi: Legacy als Standard, `IG_IMPL=ddd` für DDD-Modus. Details siehe [ADR-008](docs/ADR/ADR-008-regression-ddd-vs-legacy.md) und [REPORT_rules.md](REPORT_rules.md).
+DDD hat im aktuellen Regression-Lauf mehr grüne Tests als Legacy (83/13 vs. 73/21). Die erweiterten ENV-Weichen ermöglichen flexiblen Wechsel zwischen den Modi: Legacy als Standard, `IG_IMPL=ddd` für Interest Groups, `AUTH_IMPL=ddd` für Authentication, `RBAC_IMPL=ddd` für RBAC. Details siehe [ADR-008](docs/ADR/ADR-008-regression-ddd-vs-legacy.md) und [REPORT_rules.md](REPORT_rules.md).
+
+### 🎯 **Migration-Strategie**
+1. **Phase 1:** Interest Groups auf DDD migrieren (`IG_IMPL=ddd`)
+2. **Phase 2:** Authentication auf DDD migrieren (`AUTH_IMPL=ddd`)
+3. **Phase 3:** RBAC auf DDD migrieren (`RBAC_IMPL=ddd`)
+4. **Phase 4:** Vollständiger DDD-Modus (alle Schalter auf `ddd`)
 
 ---
 
@@ -511,13 +594,15 @@ graph TD
 
 #### 👥 **User Management**
 ```http
-GET    /api/users                    # Benutzer-Liste
+GET    /api/users                    # Benutzer-Liste (Multi-Abteilungen)
 POST   /api/users                    # Neuen Benutzer erstellen
 GET    /api/users/{user_id}          # Benutzer-Details
 PUT    /api/users/{user_id}          # Benutzer aktualisieren
 DELETE /api/users/{user_id}          # Benutzer löschen
 POST   /api/users/login              # Benutzer-Login
 POST   /api/users/logout             # Benutzer-Logout
+GET    /api/users/bulk-memberships   # Bulk-Memberships (DDD-Modus)
+POST   /api/users/bulk-memberships   # Bulk-Memberships Update (DDD-Modus)
 ```
 
 #### 📄 **Document Management**

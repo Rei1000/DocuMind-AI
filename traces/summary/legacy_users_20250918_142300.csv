@@ -1,0 +1,10 @@
+timestamp,actor,method,path,status,duration_ms
+2025-09-18T14:23:00Z,qms.admin@company.com,GET,/api/users?limit=100,200,45
+2025-09-18T14:23:01Z,qms.admin@company.com,GET,/api/users/2/memberships,200,12
+2025-09-18T14:23:02Z,qms.admin@company.com,GET,/api/users/3/memberships,200,8
+2025-09-18T14:23:03Z,qms.admin@company.com,PUT,/api/users/14,500,125
+2025-09-18T14:23:04Z,qms.admin@company.com,POST,/api/user-group-memberships,200,35
+2025-09-18T14:23:05Z,qms.admin@company.com,DELETE,/api/user-group-memberships/12,200,28
+2025-09-18T14:23:06Z,qms.admin@company.com,POST,/api/users/14/temp-password,200,42
+2025-09-18T14:23:07Z,qms.admin@company.com,DELETE,/api/users/14/permanent,200,67
+

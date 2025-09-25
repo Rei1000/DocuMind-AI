@@ -1,0 +1,26 @@
+LEGACY API PATHS OBSERVED (890 total requests):
+
+TOP ENDPOINTS BY FREQUENCY:
+- GET /api/users/{id}/memberships: 672 calls (N+1 Problem!)
+- GET /api/users?limit=100: 48 calls
+- GET /api/interest-groups: 37 calls
+- GET /health: 33 calls
+- PUT /api/users/{id}: 3 calls (500 errors due to readonly DB)
+- POST /api/user-group-memberships: 2 calls
+- POST /api/users/{id}/temp-password: 1 call
+- DELETE /api/users/{id}/permanent: 1 call
+- DELETE /api/user-group-memberships/{id}: 1 call
+
+STATUS CODES:
+- 200 OK: 872 requests (98%)
+- 500 Internal Server Error: 6 requests (DB readonly issues)
+- 404 Not Found: 1 request
+- 403 Forbidden: 1 request
+
+CRITICAL FINDINGS:
+1. MASSIVE N+1 PROBLEM: 672 membership calls for 14 users
+2. DELETE /api/users/{id}/permanent (not /api/users/{id})
+3. POST /api/users/{id}/temp-password (not /api/users/{id}:reset-password)
+4. POST /api/user-group-memberships (not /api/users/{id}/memberships)
+5. Database readonly errors on user updates
+

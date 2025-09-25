@@ -1,0 +1,22 @@
+timestamp,actor,method,path,status,duration_ms,impl_source,request_headers_min,response_body_schema,side_effect
+2025-09-18T11:53:52Z,qms.admin@company.com,GET,/api/users?limit=100,200,150,ddd,Authorization: Bearer ***,List[User],user_list_loaded
+2025-09-18T11:53:53Z,qms.admin@company.com,GET,/api/users/1/memberships,200,120,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:54Z,qms.admin@company.com,GET,/api/users/2/memberships,200,110,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:55Z,qms.admin@company.com,GET,/api/users/3/memberships,200,105,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:56Z,qms.admin@company.com,GET,/api/users/4/memberships,200,108,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:57Z,qms.admin@company.com,GET,/api/users/5/memberships,200,112,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:58Z,qms.admin@company.com,GET,/api/users/6/memberships,200,115,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:53:59Z,qms.admin@company.com,GET,/api/users/7/memberships,200,118,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:00Z,qms.admin@company.com,GET,/api/users/8/memberships,200,122,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:01Z,qms.admin@company.com,GET,/api/users/9/memberships,200,125,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:02Z,qms.admin@company.com,GET,/api/users/10/memberships,200,128,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:03Z,qms.admin@company.com,GET,/api/users/11/memberships,200,130,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:04Z,qms.admin@company.com,GET,/api/users/12/memberships,200,135,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:05Z,qms.admin@company.com,GET,/api/users/13/memberships,200,140,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:06Z,qms.admin@company.com,GET,/api/users/14/memberships,200,145,ddd,Authorization: Bearer ***,List[Membership],memberships_loaded
+2025-09-18T11:54:07Z,qms.admin@company.com,POST,/api/users,200,250,ddd,Authorization: Bearer ***,User,user_created
+2025-09-18T11:54:08Z,qms.admin@company.com,PUT,/api/users/2,200,200,ddd,Authorization: Bearer ***,User,user_updated
+2025-09-18T11:54:09Z,qms.admin@company.com,PUT,/api/users/13,200,195,ddd,Authorization: Bearer ***,User,user_updated
+2025-09-18T11:54:10Z,qms.admin@company.com,GET,/api/users/1,200,100,ddd,Authorization: Bearer ***,User,user_details_loaded
+2025-09-18T11:54:11Z,qms.admin@company.com,GET,/api/users,200,120,ddd,Authorization: Bearer ***,List[User],user_list_refreshed
+

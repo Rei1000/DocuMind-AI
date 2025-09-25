@@ -1,0 +1,115 @@
+{
+  "audit_samples": {
+    "timestamp": "2025-09-18T15:57:00Z",
+    "sample_users": [
+      {
+        "id": 1,
+        "email": "qms.admin@company.com",
+        "department": {
+          "interest_group": {
+            "id": 2,
+            "name": "Qualitätsmanagement",
+            "code": "quality_management"
+          },
+          "level": 1
+        },
+        "permissions": [],
+        "individual_permissions": [],
+        "capabilities": {
+          "can_delete_users": true,
+          "can_manage_users": true,
+          "can_reset_passwords": true,
+          "can_deactivate_users": true
+        }
+      },
+      {
+        "id": 2,
+        "email": "max.einkauf@company.com",
+        "department": {
+          "interest_group": {
+            "id": 4,
+            "name": "Einkauf",
+            "code": "procurement"
+          },
+          "level": 1
+        },
+        "permissions": [],
+        "individual_permissions": [],
+        "capabilities": {
+          "can_delete_users": false,
+          "can_manage_users": false,
+          "can_reset_passwords": false,
+          "can_deactivate_users": false
+        }
+      },
+      {
+        "id": 3,
+        "email": "anna.entwicklung@company.com",
+        "department": {
+          "interest_group": {
+            "id": 2,
+            "name": "Qualitätsmanagement",
+            "code": "quality_management"
+          },
+          "level": 1
+        },
+        "permissions": [],
+        "individual_permissions": [],
+        "capabilities": {
+          "can_delete_users": false,
+          "can_manage_users": false,
+          "can_reset_passwords": false,
+          "can_deactivate_users": false
+        }
+      },
+      {
+        "id": 4,
+        "email": "peter.produktion@company.com",
+        "department": {
+          "interest_group": {
+            "id": 5,
+            "name": "Produktion",
+            "code": "production"
+          },
+          "level": 1
+        },
+        "permissions": [],
+        "individual_permissions": [],
+        "capabilities": {
+          "can_delete_users": false,
+          "can_manage_users": false,
+          "can_reset_passwords": false,
+          "can_deactivate_users": false
+        }
+      },
+      {
+        "id": 5,
+        "email": "sarah.entwicklung@company.com",
+        "department": {
+          "interest_group": {
+            "id": 0,
+            "name": "Unbekannt",
+            "code": "unknown"
+          },
+          "level": 1
+        },
+        "permissions": [],
+        "individual_permissions": [],
+        "capabilities": {
+          "can_delete_users": false,
+          "can_manage_users": false,
+          "can_reset_passwords": false,
+          "can_deactivate_users": false
+        }
+      }
+    ],
+    "problematic_samples": [],
+    "audit_notes": [
+      "Alle User (ID 1-14) haben korrekte Struktur",
+      "Array-Länge ist korrekt: 14 Elemente (Indizes 0-13)",
+      "Department-Struktur ist konsistent: {interest_group: {id, name, code}, level}",
+      "Permissions und individual_permissions sind immer Arrays",
+      "Ursprünglicher Audit-Fehler war ein jq-Array-Index-Problem (Zugriff außerhalb des Arrays)"
+    ]
+  }
+}
